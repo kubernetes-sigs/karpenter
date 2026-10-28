@@ -84,6 +84,11 @@ type NodeClaim interface {
 	NodePoolID() NodePoolID
 	// Requirements returns the current scheduling requirements.
 	Requirements() scheduling.Requirements
+	// StrictRequirements reports whether a well-known label that Requirements doesn't define has an unknown value, rather
+	// than being open to any value. Existing nodes are strict: their labels describe what was launched, so a device or
+	// slice that requires a value for a label the node lacks isn't accessible from it, matching kube-scheduler's node
+	// affinity semantics. In-flight NodeClaims aren't strict, since the cloud provider can still launch any value.
+	StrictRequirements() bool
 	// InstanceTypes returns the candidate instance types. For existing nodes, this is a single entry.
 	InstanceTypes() []InstanceTypeID
 	// ResourceSlices returns per-instance-type in-flight ResourceSlice templates.

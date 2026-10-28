@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -61,6 +62,15 @@ func withZoneSelector(values ...string) func(*resourcev1.ResourceSlice) {
 			},
 		}
 	}
+}
+
+// withLabelSelector sets a single-expression NodeSelector on the slice.
+func withLabelSelector(key string, op corev1.NodeSelectorOperator, values ...string) func(*resourcev1.ResourceSlice) {
+	return withRawNodeSelector(&corev1.NodeSelector{
+		NodeSelectorTerms: []corev1.NodeSelectorTerm{
+			{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: key, Operator: op, Values: values}}},
+		},
+	})
 }
 
 func withRawNodeSelector(ns *corev1.NodeSelector) func(*resourcev1.ResourceSlice) {
@@ -213,6 +223,26 @@ var _ = Describe("Pool Gathering", func() {
 			}
 			pools := dynamicresources.GatherPools(slices, reqs, "")
 			Expect(pools).To(BeEmpty())
+		})
+
+		// The requirements don't define the well-known windows-build label. In-flight NodeClaims are open to any value
+		// for it (lenient), while existing nodes don't have it (strict).
+		Context("well-known labels the requirements don't define", func() {
+			DescribeTable("should match nodeSelector slices",
+				func(op corev1.NodeSelectorOperator, values []string, lenient, strict bool) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "gpu.example.com", "pool-a",
+							withLabelSelector(corev1.LabelWindowsBuild, op, values...),
+							withAPIDevices("gpu-0"),
+						),
+					}
+					Expect(dynamicresources.GatherPools(slices, reqs, "", scheduling.AllowUndefinedWellKnownLabels)).To(HaveLen(lo.Ternary(lenient, 1, 0)))
+					Expect(dynamicresources.GatherPools(slices, reqs, "")).To(HaveLen(lo.Ternary(strict, 1, 0)))
+				},
+				Entry("In matches only when lenient", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, true, false),
+				Entry("NotIn matches when lenient and strict", corev1.NodeSelectorOpNotIn, []string{"10.0.20348"}, true, true),
+				Entry("DoesNotExist matches when lenient and strict", corev1.NodeSelectorOpDoesNotExist, nil, true, true),
+			)
 		})
 
 		Context("node-name-pinned slices", func() {
@@ -1287,6 +1317,19 @@ var _ = Describe("Pool Gathering", func() {
 	})
 
 	Describe("FilterPools", func() {
+		It("should drop a nodeSelector slice on a well-known label the requirements don't define only when strict", func() {
+			slices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a",
+					withLabelSelector(corev1.LabelWindowsBuild, corev1.NodeSelectorOpIn, "10.0.20348"),
+					withAPIDevices("gpu-0"),
+				),
+			}
+			pools := dynamicresources.GatherPools(slices, reqs, "", scheduling.AllowUndefinedWellKnownLabels)
+			Expect(pools).To(HaveLen(1))
+			Expect(dynamicresources.FilterPools(pools, reqs, "", scheduling.AllowUndefinedWellKnownLabels)).To(HaveLen(1))
+			Expect(dynamicresources.FilterPools(pools, reqs, "")).To(BeEmpty())
+		})
+
 		It("should return an empty list when no pools are provided", func() {
 			filtered := dynamicresources.FilterPools(nil, reqs, "")
 			Expect(filtered).To(BeEmpty())

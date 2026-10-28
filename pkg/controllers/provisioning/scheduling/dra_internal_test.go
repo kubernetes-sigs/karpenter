@@ -96,6 +96,9 @@ var _ = Describe("DRA Scheduling Internals", func() {
 			Expect(slices[unique.Make("it-1")]).To(HaveLen(1))
 			Expect(slices[unique.Make("it-2")]).To(BeEmpty())
 		})
+		It("should not require strict requirements", func() {
+			Expect((&draNodeClaim{nc: nc}).StrictRequirements()).To(BeFalse())
+		})
 	})
 
 	Describe("draExistingNode adapter", func() {
@@ -121,6 +124,10 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		It("should return no template slices for a pre-initialized node with an unresolved instance type", func() {
 			adapter := draExistingNodeForTest(false, nil)
 			Expect(adapter.ResourceSlices()).To(BeEmpty())
+		})
+		It("should require strict requirements", func() {
+			Expect(draExistingNodeForTest(true, it).StrictRequirements()).To(BeTrue())
+			Expect(draExistingNodeForTest(false, it).StrictRequirements()).To(BeTrue())
 		})
 	})
 })

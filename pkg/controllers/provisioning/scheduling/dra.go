@@ -60,6 +60,11 @@ func (d *draNodeClaim) Requirements() scheduling.Requirements {
 	return d.nc.Requirements
 }
 
+func (d *draNodeClaim) StrictRequirements() bool {
+	// A label the in-flight NodeClaim doesn't define is still open: the cloud provider can launch any value for it.
+	return false
+}
+
 func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
 	return lo.Map(d.nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) dynamicresources.InstanceTypeID {
 		return unique.Make(it.Name)
@@ -103,6 +108,11 @@ func (d *draExistingNode) NodePoolID() dynamicresources.NodePoolID {
 
 func (d *draExistingNode) Requirements() scheduling.Requirements {
 	return d.en.requirements
+}
+
+func (d *draExistingNode) StrictRequirements() bool {
+	// The node's labels describe what was launched, so a label the node doesn't define has an unknown value.
+	return true
 }
 
 func (d *draExistingNode) InstanceTypes() []dynamicresources.InstanceTypeID {

@@ -672,6 +672,48 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(scheduled.Name).To(Equal(node.Name))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		})
+		It("should not allocate a device that requires a well-known label the existing node lacks (C3)", func() {
+			// plain-it provides no templates, so the claim can only be satisfied by the in-cluster device.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+
+			// The existing node doesn't have the windows-build label, so whether it matches the slice's NodeSelector is
+			// unknown, and kube-scheduler wouldn't allocate the device to it.
+			node := existingNode("plain-it", true, corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("10"),
+			})
+			ExpectApplied(ctx, env.Client, test.ResourceSlice(resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "windows-gpu-pool"},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver: gpuDriver,
+					Pool:   resourcev1.ResourcePool{Name: "windows-gpu-pool", Generation: 1, ResourceSliceCount: 1},
+					NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      corev1.LabelWindowsBuild,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"10.0.20348"},
+						}},
+					}}},
+					Devices: []resourcev1.Device{{Name: "windows-gpu-0"}},
+				},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			// The pod isn't placed on the existing node. A new NodeClaim is still open to any windows-build value, so the
+			// device is allocated to it and its requirements are narrowed to the slice's NodeSelector.
+			scheduled := ExpectScheduled(ctx, env.Client, pod)
+			Expect(scheduled.Name).ToNot(Equal(node.Name))
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			req, found := lo.Find(nodeClaims[0].Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool {
+				return r.Key == corev1.LabelWindowsBuild
+			})
+			Expect(found).To(BeTrue())
+			Expect(req.Values).To(ConsistOf("10.0.20348"))
+		})
 	})
 
 	Context("Topology propagation from node-local devices (D)", func() {

@@ -47,6 +47,7 @@ func (t *templateNodeClaim) NodePoolID() dynamicresources.NodePoolID { return un
 func (t *templateNodeClaim) Requirements() scheduling.Requirements {
 	return scheduling.NewRequirements()
 }
+func (t *templateNodeClaim) StrictRequirements() bool                         { return false }
 func (t *templateNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID { return t.instanceTypes }
 func (t *templateNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	t.calls++
