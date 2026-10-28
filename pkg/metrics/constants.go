@@ -72,6 +72,6 @@ func SummaryObjectives() map[float64]float64 {
 // Measure returns a deferrable function that observes the duration between the
 // defer statement and the end of the function.
 func Measure(observer opmetrics.ObservationMetric, labels map[string]string) func() {
-	start := time.Now()
-	return func() { observer.Observe(time.Since(start).Seconds(), labels) }
+	start := time.Now()                                                     //nolint:forbidigo // wall-clock latency for duration histograms
+	return func() { observer.Observe(time.Since(start).Seconds(), labels) } //nolint:forbidigo // wall-clock latency for duration histograms
 }

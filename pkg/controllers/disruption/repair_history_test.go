@@ -43,7 +43,7 @@ var _ = Describe("RebootHistory", func() {
 	}
 
 	It("escalates after two committed reboots", func() {
-		history := NewRebootHistory()
+		history := newRebootHistory(clocktesting.NewFakeClock(time.Now()))
 		candidate := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
 		Expect(history.Resolve(candidate)).To(BeTrue())
 		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.RebootNode))
@@ -63,7 +63,7 @@ var _ = Describe("RebootHistory", func() {
 	})
 
 	It("does not record reboots while resolving", func() {
-		history := NewRebootHistory()
+		history := newRebootHistory(clocktesting.NewFakeClock(time.Now()))
 		for range 3 {
 			candidate := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
 			Expect(history.Resolve(candidate)).To(BeTrue())
@@ -72,7 +72,7 @@ var _ = Describe("RebootHistory", func() {
 	})
 
 	It("keys history by NodeClaim UID", func() {
-		history := NewRebootHistory()
+		history := newRebootHistory(clocktesting.NewFakeClock(time.Now()))
 		history.RecordCommittedReboot("original-uid")
 		history.RecordCommittedReboot("original-uid")
 
@@ -82,7 +82,7 @@ var _ = Describe("RebootHistory", func() {
 	})
 
 	It("preserves replacement action and requires a current decision", func() {
-		history := NewRebootHistory()
+		history := newRebootHistory(clocktesting.NewFakeClock(time.Now()))
 		history.RecordCommittedReboot("nodeclaim-uid")
 		history.RecordCommittedReboot("nodeclaim-uid")
 
@@ -117,7 +117,7 @@ var _ = Describe("RebootHistory", func() {
 	})
 
 	It("bounds concurrent commits at the escalation threshold", func() {
-		history := NewRebootHistory()
+		history := newRebootHistory(clocktesting.NewFakeClock(time.Now()))
 		const commits = 32
 
 		var wg sync.WaitGroup
@@ -135,7 +135,7 @@ var _ = Describe("RebootHistory", func() {
 	})
 
 	It("logs reboot escalation with the command", func() {
-		history := NewRebootHistory()
+		history := newRebootHistory(clocktesting.NewFakeClock(time.Now()))
 		history.RecordCommittedReboot("nodeclaim-uid")
 		history.RecordCommittedReboot("nodeclaim-uid")
 

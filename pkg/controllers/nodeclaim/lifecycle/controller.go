@@ -255,7 +255,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		if !cloudprovider.IsNodeClaimNotFoundError(deleteErr) {
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		InstanceTerminationDurationSeconds.Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds(), map[string]string{
+		InstanceTerminationDurationSeconds.Observe(c.clock.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		})
 	}
@@ -273,7 +273,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		log.FromContext(ctx).Info("deleted nodeclaim")
-		NodeClaimTerminationDurationSeconds.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds(), map[string]string{
+		NodeClaimTerminationDurationSeconds.Observe(c.clock.Since(stored.DeletionTimestamp.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		})
 		metrics.NodeClaimsTerminatedTotal.Inc(map[string]string{
