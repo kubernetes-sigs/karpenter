@@ -45,7 +45,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
-	resourcehelper "k8s.io/component-helpers/resource"
 	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
 	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 	"k8s.io/klog/v2"
@@ -64,6 +63,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 const (
@@ -750,11 +750,7 @@ func checkNode(t *caseT, s scenario, it *cloudprovider.InstanceType, launched *v
 		}, false); untolerated {
 			t.Fatalf("pod %s placed on %s doesn't tolerate taint %v\n%s\n%s", pod.Name, it.Name, taint, s.describe(pod), s)
 		}
-		for name, quantity := range resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{}) {
-			total := requests[name]
-			total.Add(quantity)
-			requests[name] = total
-		}
+		resources.MergeInto(requests, resources.RequestsForSpec(&pod.Spec))
 	}
 	for name, quantity := range requests {
 		if allocatable := launched.Status.Allocatable[name]; quantity.Cmp(allocatable) > 0 {
