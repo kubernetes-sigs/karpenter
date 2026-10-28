@@ -131,19 +131,21 @@ type State struct {
 	sync.Mutex
 	clock clock.Clock
 	rand  *rand.Rand // injectable so jitter is deterministic in tests
-	state map[types.UID]*backoffEntry // keyed by immutable NodePool UID
+	state map[string]*backoffEntry // keyed by NodePool name
 }
 
 type backoffEntry struct {
+	uid         types.UID // immutable NodePool UID
 	level       int       // number of failed back-off windows (0 == healthy)
 	until       time.Time // pool is skipped during selection before this time
 	lastFailure time.Time // completion time of the last failure that escalated back-off
 }
 ```
 
-- State is keyed by the NodePool's immutable UID rather than its name. Deleting and
-  recreating a NodePool with the same name therefore creates a healthy pool instead of
-  inheriting stale back-off from the deleted object.
+- State is keyed by the NodePool's name and records its immutable UID on each entry.
+  Deleting a NodePool prunes its entry via `Reset`, and even before the delete event is
+  reconciled, recreating a NodePool with the same name creates a healthy pool (new UID)
+  instead of inheriting stale back-off from the deleted object.
 - `level == 0` means the NodePool is healthy: normal drift selection applies.
 - `until` is the earliest time the pool may be selected again.
 - While `level > 0` and `now < until`, the pool is **backed off** and all its
@@ -188,7 +190,7 @@ place where a drift command's fate is known. We hook there, gated on the command
 reason so only drift is affected:
 
 - **Replacement success** (`cmd.Succeeded == true` and `len(cmd.Replacements) > 0`):
-  `backoff.Reset(nodePool)` — returns the pool to healthy because newly created capacity
+  `backoff.Reset(nodePool.Name)` — returns the pool to healthy because newly created capacity
   initialized successfully.
 - **Delete-only success** (`cmd.Succeeded == true` and `len(cmd.Replacements) == 0`):
   leave back-off unchanged. The command may have placed pods on existing nodes, so it
@@ -261,8 +263,9 @@ defined in [Back-off state](#back-off-state).
   changed so the queue can increment the back-off counter only for effective failures.
   `level` stops growing once the window saturates at `maxDelay`, so the exponent cannot
   overflow.
-- **`Reset(nodePool)`** — on a successful drift command that created replacement
-  capacity: delete the entry, returning the pool to healthy (`level == 0`, no window).
+- **`Reset(nodePoolName)`** — on a successful drift command that created replacement
+  capacity or when the NodePool is deleted: delete the entry, returning the pool to
+  healthy (`level == 0`, no window).
 - **`GetBackoff(nodePool) → (level, until, backedOff)`** — read-only, called during
   selection: `backedOff` is `true` iff `level > 0` and `now < until`.
 - **`IsBackedOff(nodePool) → bool`** — read-only convenience over `GetBackoff`.
@@ -332,10 +335,10 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
   loop briefly re-attempts a failing pool once before backing off again — a
   transient blip, identical to how `PreviouslyUnseenNodePools` resets on
   restart.
-- **NodePool deletion / rename.** Stale entries are pruned on `Reset`, and can be
-  lazily garbage-collected (drop entries whose NodePool no longer appears in the
-  candidate set for some interval). Stale entries are otherwise inert because state is
-  keyed by UID; a recreated NodePool with the same name does not inherit them.
+- **NodePool deletion / rename.** Entries are pruned on `Reset` when a NodePool is
+  deleted (via the `state.nodepool` controller). Even before the delete event is
+  reconciled, stale entries are inert because each entry records the NodePool's UID; a
+  recreated NodePool with the same name does not inherit them.
 - **Stale failure after a reset.** Outcomes are recorded when each command completes,
   not in the order the commands started. Suppose replacements for drifted nodes A and B
   are launched, and later a replacement for node C is launched. A fails (pool backs
