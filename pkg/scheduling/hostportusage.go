@@ -92,8 +92,8 @@ func (u *HostPortUsage) DeletePod(key types.NamespacedName) {
 
 func GetHostPorts(pod *v1.Pod) []HostPort {
 	var usage []HostPort
-	for _, c := range pod.Spec.Containers {
-		for _, p := range c.Ports {
+	for i := range pod.Spec.Containers {
+		for _, p := range pod.Spec.Containers[i].Ports {
 			if p.HostPort == 0 {
 				continue
 			}

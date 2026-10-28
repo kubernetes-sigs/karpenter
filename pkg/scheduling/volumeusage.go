@@ -89,7 +89,8 @@ func (u Volumes) Insert(volumes Volumes) {
 //nolint:gocyclo
 func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
 	podPVCs := Volumes{}
-	for _, volume := range pod.Spec.Volumes {
+	for i := range pod.Spec.Volumes {
+		volume := &pod.Spec.Volumes[i]
 		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, pod, volume)
 		// If the PVC is not found it was manually deleted and its finalizer removed. We should ignore this volume when
 		// computing limits, otherwise Karpenter may never be able to update its cluster state.
