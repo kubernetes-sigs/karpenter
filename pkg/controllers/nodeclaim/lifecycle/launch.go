@@ -123,8 +123,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 			})
 			return nil, nil
 		default:
-			var createError *cloudprovider.CreateError
-			if errors.As(err, &createError) {
+			if createError, ok := errors.AsType[*cloudprovider.CreateError](err); ok {
 				nodeClaim.StatusConditions(status.WithClock(l.clock)).SetUnknownWithReason(v1.ConditionTypeLaunched, createError.ConditionReason, createError.ConditionMessage)
 			} else {
 				nodeClaim.StatusConditions(status.WithClock(l.clock)).SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
