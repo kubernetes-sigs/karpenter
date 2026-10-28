@@ -205,7 +205,7 @@ func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded
 		// A delete-only drift command can succeed by placing pods on existing capacity, which
 		// doesn't demonstrate that replacement capacity has recovered.
 		if len(cmd.Replacements) > 0 {
-			q.backoff.Reset(nodePool)
+			q.backoff.Reset(nodePool.Name)
 		}
 		return
 	}

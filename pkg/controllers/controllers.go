@@ -136,7 +136,7 @@ func NewControllers(
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
-		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost),
+		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost, driftBackoff),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
 		statenodeclaimgc.NewController(kubeClient, cluster),

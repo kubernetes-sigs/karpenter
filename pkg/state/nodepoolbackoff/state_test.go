@@ -144,7 +144,7 @@ var _ = Describe("State", func() {
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		Expect(backoff.IsBackedOff(spark)).To(BeTrue())
 
-		backoff.Reset(spark)
+		backoff.Reset(spark.Name)
 		Expect(backoff.IsBackedOff(spark)).To(BeFalse())
 		Expect(backoff.Remaining(spark)).To(BeZero())
 		level, _, _ := backoff.GetBackoff(spark)

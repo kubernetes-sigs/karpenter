@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -65,7 +66,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
+	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost, nodepoolbackoff.NewState(env.Clock))
 	nodePoolController = counter.NewController(env.Client, cloudProvider, cluster)
 })
 

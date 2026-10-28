@@ -50,10 +50,11 @@ type State struct {
 	base     time.Duration
 	max      time.Duration
 	maxLevel int
-	state    map[types.UID]*backoffEntry
+	state    map[string]*backoffEntry
 }
 
 type backoffEntry struct {
+	uid         types.UID
 	level       int
 	until       time.Time
 	lastFailure time.Time
@@ -84,7 +85,7 @@ func NewState(clk clock.Clock, opts ...Option) *State {
 		rand:  rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // jitter does not need a cryptographic source
 		base:  driftBackoffBaseDelay,
 		max:   driftBackoffMaxDelay,
-		state: map[types.UID]*backoffEntry{},
+		state: map[string]*backoffEntry{},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -101,10 +102,10 @@ func (s *State) Fail(nodePool *v1.NodePool, attemptStartedAt time.Time) bool {
 	defer s.Unlock()
 
 	now := s.clock.Now()
-	e, ok := s.state[nodePool.UID]
-	if !ok {
-		e = &backoffEntry{}
-		s.state[nodePool.UID] = e
+	e, ok := s.state[nodePool.Name]
+	if !ok || e.uid != nodePool.UID {
+		e = &backoffEntry{uid: nodePool.UID}
+		s.state[nodePool.Name] = e
 	}
 	if !e.lastFailure.IsZero() && !attemptStartedAt.After(e.lastFailure) {
 		return false
@@ -118,11 +119,11 @@ func (s *State) Fail(nodePool *v1.NodePool, attemptStartedAt time.Time) bool {
 	return true
 }
 
-// Reset returns a NodePool to healthy after a successful drift replacement.
-func (s *State) Reset(nodePool *v1.NodePool) {
+// Reset returns a NodePool to healthy after a successful drift replacement or NodePool deletion.
+func (s *State) Reset(nodePoolName string) {
 	s.Lock()
 	defer s.Unlock()
-	delete(s.state, nodePool.UID)
+	delete(s.state, nodePoolName)
 }
 
 // IsBackedOff reports whether a NodePool is currently backed off and should be skipped during
@@ -137,8 +138,8 @@ func (s *State) IsBackedOff(nodePool *v1.NodePool) bool {
 func (s *State) GetBackoff(nodePool *v1.NodePool) (level int, until time.Time, backedOff bool) {
 	s.Lock()
 	defer s.Unlock()
-	e, ok := s.state[nodePool.UID]
-	if !ok {
+	e, ok := s.state[nodePool.Name]
+	if !ok || e.uid != nodePool.UID {
 		return 0, time.Time{}, false
 	}
 	return e.level, e.until, e.level > 0 && s.clock.Now().Before(e.until)
@@ -149,8 +150,8 @@ func (s *State) GetBackoff(nodePool *v1.NodePool) (level int, until time.Time, b
 func (s *State) Remaining(nodePool *v1.NodePool) time.Duration {
 	s.Lock()
 	defer s.Unlock()
-	e, ok := s.state[nodePool.UID]
-	if !ok {
+	e, ok := s.state[nodePool.Name]
+	if !ok || e.uid != nodePool.UID {
 		return 0
 	}
 	return max(e.until.Sub(s.clock.Now()), 0)
