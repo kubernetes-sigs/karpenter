@@ -2055,7 +2055,7 @@ var _ = Describe("Candidate Filtering", func() {
 
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
 		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
-		Expect(queue.StartCommand(ctx, cmd))
+		Expect(queue.StartCommand(ctx, cmd)).To(Succeed())
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())

@@ -547,9 +547,10 @@ var _ = Describe("Static Provisioning Controller", func() {
 			}
 
 			// we should never observe > limit NodeClaims.
-			Eventually(func() {
-				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-			}, 5*time.Second)
+			Eventually(func(g Gomega) {
+				running, deleting, pendingDisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				g.Expect([]int{running, deleting, pendingDisruption}).To(Equal([]int{10, 0, 0}))
+			}, 5*time.Second).Should(Succeed())
 		})
 		It("should wait for cluster to be synced and not over provision", func() {
 			nodePool := test.StaticNodePool()
@@ -577,11 +578,12 @@ var _ = Describe("Static Provisioning Controller", func() {
 			// Ensure cluster is synced before final reconcile to allow it to create remaining NodeClaims
 			cluster.SetSynced(true)
 
-			Eventually(func() {
+			Eventually(func(g Gomega) {
 				ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 				// at the end we should have right counts in StateNodePool
-				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-			}, 10*time.Second)
+				running, deleting, pendingDisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				g.Expect([]int{running, deleting, pendingDisruption}).To(Equal([]int{5, 0, 0}))
+			}, 10*time.Second).Should(Succeed())
 		})
 
 	})
