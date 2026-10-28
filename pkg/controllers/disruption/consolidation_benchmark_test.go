@@ -164,7 +164,7 @@ func createBenchClusterState(b *testing.B, n int, nps []*v1.NodePool, inst *clou
 	ncs := make([]*v1.NodeClaim, 0, n)
 	nds := make([]*corev1.Node, 0, n)
 	antiSel := metav1.LabelSelector{MatchLabels: map[string]string{"bench": "stress"}}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		np := nps[i%len(nps)]
 		nc, nd := buildBenchNodeClaimAndNode(np.Name, inst.Name, capType, zone)
 		if err := benchClient.Create(benchCtx, nc); err != nil {
@@ -244,8 +244,8 @@ func buildBenchPod(idx int, nodeName string, rs client.Object, antiSel metav1.La
 				Kind:               "ReplicaSet",
 				Name:               rs.GetName(),
 				UID:                rs.GetUID(),
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}},
 		},
 		PodAntiRequirements: []corev1.PodAffinityTerm{{
