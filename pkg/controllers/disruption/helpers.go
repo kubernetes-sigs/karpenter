@@ -343,8 +343,8 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 // The disrupting count is reason-dependent, so pass the same reason on to
 // MustGetAllowedDisruptions or NodePoolBudgetMap.
-func NodePoolStats(cluster *state.Cluster, clk clock.Clock, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
-	return NodePoolStatsFromNodes(cluster.DeepCopyNodes(), clk, reason)
+func NodePoolStats(clk clock.Clock, cluster *state.Cluster, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
+	return NodePoolStatsFromNodes(clk, cluster.DeepCopyNodes(), reason)
 }
 
 func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[string]*v1.NodePool, numNodes, disrupting map[string]int, reason v1.DisruptionReason) map[string]int {
@@ -367,7 +367,7 @@ func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[strin
 }
 
 // NodePoolStats against a snapshot the caller already holds.
-func NodePoolStatsFromNodes(nodes []*state.StateNode, clk clock.Clock, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
+func NodePoolStatsFromNodes(clk clock.Clock, nodes []*state.StateNode, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
 	numNodes = map[string]int{}
 	disrupting = map[string]int{}
 	for _, node := range nodes {
@@ -418,7 +418,7 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, clk clock.Clock, reason v1
 // We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
 func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, reason v1.DisruptionReason) (map[string]int, error) {
 	disruptionBudgetMapping := map[string]int{}
-	numNodes, disrupting := NodePoolStats(cluster, clk, reason)
+	numNodes, disrupting := NodePoolStats(clk, cluster, reason)
 	nodePools, err := nodepoolutils.ListManaged(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return disruptionBudgetMapping, fmt.Errorf("listing node pools, %w", err)

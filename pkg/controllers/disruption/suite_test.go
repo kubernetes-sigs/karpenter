@@ -958,7 +958,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		expectStats := func(total, disrupting int) {
 			GinkgoHelper()
 			for _, reason := range allKnownDisruptionReasons {
-				numNodes, numDisrupting := disruption.NodePoolStats(cluster, env.Clock, reason)
+				numNodes, numDisrupting := disruption.NodePoolStats(env.Clock, cluster, reason)
 				Expect(numNodes[nodePool.Name]).To(Equal(total), "reason %s", reason)
 				Expect(numDisrupting[nodePool.Name]).To(Equal(disrupting), "reason %s", reason)
 			}
