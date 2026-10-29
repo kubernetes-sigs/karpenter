@@ -110,6 +110,7 @@ func SkipDaemonSets() DrainOption {
 
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
+//
 //nolint:gocyclo
 func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time, opts ...DrainOption) error {
 	o := &drainOptions{}
@@ -122,7 +123,7 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
 	waiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) && !(o.skipDaemonSets && podutil.IsOwnedByDaemonSet(p))
+		return podutil.IsWaitingEviction(p, t.clock) && (!o.skipDaemonSets || !podutil.IsOwnedByDaemonSet(p))
 	})
 
 	// Split waiting pods into two disjoint sets:

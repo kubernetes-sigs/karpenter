@@ -308,8 +308,8 @@ var _ = Describe("Reboot Lifecycle", func() {
 				Kind:               "DaemonSet",
 				Name:               ds.Name,
 				UID:                ds.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}}})
 			pod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, dsPod, pod)
