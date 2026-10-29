@@ -379,7 +379,7 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, clk clock.Clock, reason v1
 		// to active nodes than desired, where Karpenter should wait for these nodes to be
 		// healthy before continuing. Reboot resets Initialized at issuance, but the node
 		// still counts against the budget until it re-initializes after the reboot
-		// succeeds, bounded by state.RebootObservationWindow.
+		// succeeds, bounded by state.RebootReinitializationWindow.
 		rebootDisrupting := node.RebootInProgress() || node.RebootReinitializing(clk)
 		if !node.Managed() || (!node.Initialized() && !rebootDisrupting) {
 			continue

@@ -967,9 +967,9 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			markRebootSucceeded()
 			expectStats(10, 1)
 		})
-		It("should stop counting a rebooted node that hasn't re-initialized within the reboot observation window", func() {
+		It("should stop counting a rebooted node that hasn't re-initialized within the reboot re-initialization window", func() {
 			markRebootSucceeded()
-			env.Clock.Step(state.RebootObservationWindow)
+			env.Clock.Step(state.RebootReinitializationWindow)
 			expectStats(9, 0)
 		})
 		It("should count a rebooted node normally once it re-initializes", func() {

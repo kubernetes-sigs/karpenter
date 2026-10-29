@@ -86,9 +86,9 @@ var _ = Describe("StateNode Reboot", func() {
 		It("is true right after a successful reboot while the node is uninitialized", func() {
 			Expect(rebooted(v1.RebootReasonSucceeded, false).RebootReinitializing(clk)).To(BeTrue())
 		})
-		It("is true until the reboot observation window elapses", func() {
+		It("is true until the reboot re-initialization window elapses", func() {
 			n := rebooted(v1.RebootReasonSucceeded, false)
-			clk.Step(state.RebootObservationWindow - time.Second)
+			clk.Step(state.RebootReinitializationWindow - time.Second)
 			Expect(n.RebootReinitializing(clk)).To(BeTrue())
 			clk.Step(time.Second)
 			Expect(n.RebootReinitializing(clk)).To(BeFalse())

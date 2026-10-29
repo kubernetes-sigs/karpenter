@@ -403,12 +403,12 @@ func (in *StateNode) RebootInProgress() bool {
 	return cond != nil && cond.IsTrue()
 }
 
-// RebootObservationWindow bounds each post-issuance phase of a reboot: the reboot controller fails a reboot whose
-// node doesn't come back Ready within it, and RebootReinitializing stops holding a successfully rebooted node
-// against disruption budgets once it has had this long to re-initialize.
-const RebootObservationWindow = 20 * time.Minute
+// RebootReinitializationWindow bounds how long RebootReinitializing holds a successfully rebooted node against
+// disruption budgets while it waits to re-initialize. Past it, the node is treated like any other uninitialized node
+// and drops out of budget counts, so a node that never re-initializes can't hold its NodePool's budget indefinitely.
+const RebootReinitializationWindow = 20 * time.Minute
 
-// RebootReinitializing returns true if the node's reboot succeeded within the last RebootObservationWindow and the
+// RebootReinitializing returns true if the node's reboot succeeded within the last RebootReinitializationWindow and the
 // node hasn't re-initialized since. Reboot resets initialization at issuance and initialization only re-runs after the
 // reboot succeeds, so in between the node is neither rebooting nor serving; disruption budgets keep counting it as
 // disrupting, as they did while RebootInProgress.
@@ -418,7 +418,7 @@ func (in *StateNode) RebootReinitializing(clk clock.Clock) bool {
 	}
 	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
 	return cond != nil && cond.IsFalse() && cond.Reason == v1.RebootReasonSucceeded &&
-		clk.Since(cond.LastTransitionTime.Time) < RebootObservationWindow
+		clk.Since(cond.LastTransitionTime.Time) < RebootReinitializationWindow
 }
 
 func (in *StateNode) Taints() []corev1.Taint {
