@@ -233,6 +233,8 @@ func (c *Controller) reconcileIssued(ctx context.Context, nodeClaim *v1.NodeClai
 }
 
 // drain evicts pods before reboot, with residual pods allowed to ride the reboot post deadline.
+// DaemonSet pods stay on the node: their replacements could only schedule back to it, where they'd compete with
+// other pods for its capacity once it returns.
 // A drained reboot observes at least minDrainTime to catch late pod bindings.
 func (c *Controller) drain(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node, tgp *time.Duration) (done bool, res reconcile.Result, err error) {
 	// A forceful reboot skips the drain, so every pod rides the reboot.
@@ -246,7 +248,7 @@ func (c *Controller) drain(ctx context.Context, nodeClaim *v1.NodeClaim, node *c
 		deadline = new(rebootRequestedAt(nodeClaim).Add(max(*tgp, minDrainTime)))
 	}
 	// A timeout, not a force-delete deadline: residual pods are never deleted.
-	if err := c.terminator.Drain(ctx, node, deadline, terminator.Timeout); err != nil {
+	if err := c.terminator.Drain(ctx, node, deadline, terminator.Timeout, terminator.SkipDaemonSets()); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return false, reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}

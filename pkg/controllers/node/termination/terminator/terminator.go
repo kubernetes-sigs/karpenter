@@ -101,13 +101,31 @@ const (
 	Timeout
 )
 
-func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time, mode DrainMode) error {
+// DrainOption customizes which pods a drain evicts.
+type DrainOption func(*drainOptions)
+
+type drainOptions struct {
+	skipDaemonSets bool
+}
+
+// SkipDaemonSets leaves DaemonSet pods on the node.
+func SkipDaemonSets() DrainOption {
+	return func(o *drainOptions) { o.skipDaemonSets = true }
+}
+
+func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time, mode DrainMode, opts ...DrainOption) error {
+	o := &drainOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
 	timeout := mode == Timeout && nodeGracePeriodExpirationTime != nil
 	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node.Name)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	waiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) })
+	waiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+		return podutil.IsWaitingEviction(p, t.clock) && !(o.skipDaemonSets && podutil.IsOwnedByDaemonSet(p))
+	})
 
 	// Split waiting pods into two disjoint sets:
 	//   - deleteEligible: past the force-delete threshold. Enqueue across ALL tiers
