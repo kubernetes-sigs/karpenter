@@ -71,6 +71,7 @@ type FeatureGates struct {
 	TerminateFirstRepair      bool
 	PodDeletionCostManagement bool
 	PredictionEnabled         bool
+	PriceTieBreak             bool
 }
 
 // FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
@@ -157,6 +158,13 @@ var (
 			"predicted by a registered prediction source, and waits for that source to hydrate before scheduling. " +
 			"Requires a registered prediction source.",
 	}
+	PriceTieBreakFeatureGate = FeatureGate{
+		Name:    "PriceTieBreak",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Karpenter orders NodePools of equal weight by the launch price of the NodeClaim each would create, " +
+			"including NodeOverlay price adjustments, instead of by name.",
+	}
 )
 
 // KarpenterFeatureGates are the feature gates Karpenter supports, in the order --feature-gates lists them.
@@ -171,6 +179,7 @@ var KarpenterFeatureGates = []FeatureGate{
 	TerminateFirstRepairFeatureGate,
 	PodDeletionCostManagementFeatureGate,
 	PredictionEnabledFeatureGate,
+	PriceTieBreakFeatureGate,
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -298,6 +307,7 @@ func DefaultFeatureGates() FeatureGates {
 		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
 		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
 		PredictionEnabled:         PredictionEnabledFeatureGate.Default,
+		PriceTieBreak:             PriceTieBreakFeatureGate.Default,
 	}
 }
 
@@ -340,6 +350,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap[PredictionEnabledFeatureGate.Name]; ok {
 		gates.PredictionEnabled = val
+	}
+	if val, ok := gateMap[PriceTieBreakFeatureGate.Name]; ok {
+		gates.PriceTieBreak = val
 	}
 
 	return gates, nil

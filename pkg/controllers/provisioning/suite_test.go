@@ -2873,6 +2873,87 @@ var _ = Describe("Provisioning", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 			})
+			Context("PriceTieBreak", func() {
+				// capacityTypeNodePool returns a NodePool of the given weight constrained to one capacity type.
+				capacityTypeNodePool := func(name, capacityType string, weight int32) *v1.NodePool {
+					return test.NodePool(v1.NodePool{
+						ObjectMeta: metav1.ObjectMeta{Name: name},
+						Spec: v1.NodePoolSpec{
+							Weight: new(weight),
+							Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+								Requirements: []v1.NodeSelectorRequirementWithMinValues{
+									{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{capacityType}},
+								},
+							}},
+						},
+					})
+				}
+				// setOnDemandPrice replaces the instance types with one offering spot at 0.3 and on-demand at the given price.
+				setOnDemandPrice := func(onDemandPrice float64) {
+					cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("priced-instance-type",
+						fake.WithResources(corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						}),
+						fake.WithOfferings(
+							cloudprovider.Offering{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+								Price:        0.3,
+							},
+							cloudprovider.Offering{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
+								Price:        onDemandPrice,
+							},
+						),
+					)}
+				}
+				It("should order equal weight NodePools by name when disabled", func() {
+					setOnDemandPrice(1.0)
+					spot := capacityTypeNodePool("a-spot", v1.CapacityTypeSpot, 50)
+					onDemand := capacityTypeNodePool("z-on-demand", v1.CapacityTypeOnDemand, 50)
+					ExpectApplied(ctx, env.Client, spot, onDemand)
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(onDemand.Name))
+				})
+				It("should prefer the cheaper of equal weight NodePools when enabled", func() {
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PriceTieBreak: new(true)}}))
+					setOnDemandPrice(1.0)
+					spot := capacityTypeNodePool("a-spot", v1.CapacityTypeSpot, 50)
+					onDemand := capacityTypeNodePool("z-on-demand", v1.CapacityTypeOnDemand, 50)
+					ExpectApplied(ctx, env.Client, spot, onDemand)
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(spot.Name))
+				})
+				It("should prefer an on-demand NodePool discounted below spot when enabled", func() {
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PriceTieBreak: new(true)}}))
+					// As with a NodeOverlay discounting on-demand, e.g. for Savings Plans commitment
+					setOnDemandPrice(0.1)
+					spot := capacityTypeNodePool("z-spot", v1.CapacityTypeSpot, 50)
+					onDemand := capacityTypeNodePool("a-on-demand", v1.CapacityTypeOnDemand, 50)
+					ExpectApplied(ctx, env.Client, spot, onDemand)
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(onDemand.Name))
+				})
+				It("should still prefer a higher weight NodePool over a cheaper one when enabled", func() {
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PriceTieBreak: new(true)}}))
+					setOnDemandPrice(1.0)
+					spot := capacityTypeNodePool("spot", v1.CapacityTypeSpot, 50)
+					onDemand := capacityTypeNodePool("on-demand", v1.CapacityTypeOnDemand, 100)
+					ExpectApplied(ctx, env.Client, spot, onDemand)
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(onDemand.Name))
+				})
+			})
 		})
 	})
 

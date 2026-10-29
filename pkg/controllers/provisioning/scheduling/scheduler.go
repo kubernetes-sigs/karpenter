@@ -740,6 +740,11 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod, volu
 func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
+	// With PriceTieBreak, NodePools of equal weight are ordered by the price of the NodeClaim they would
+	// launch for this pod instead of by name, so every template is evaluated rather than stopping at the
+	// first success.
+	priceTieBreak := karpopts.FromContext(ctx).FeatureGates.PriceTieBreak
+	bestPrice := math.MaxFloat64
 
 	var newNodeClaim *NodeClaim
 	var updatedRequirements scheduling.Requirements
@@ -792,6 +797,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 				offeringsToReserve = nil
 				allocationResult = nil
 				idx = i
+				bestPrice = math.MaxFloat64
 				return false
 			}
 			return true
@@ -799,9 +805,19 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		mu.Lock()
 		defer mu.Unlock()
 
-		// Ensure that we always take an earlier successful schedule to keep consistent ordering
-		// We care about this particularly with NewNodeClaims because NodeClaims should be evaluated by weight
-		if i >= idx {
+		if priceTieBreak {
+			// A reserved offering error at idx invalidates every template at or after it
+			if newNodeClaim == nil && i >= idx {
+				return true
+			}
+			price := launchPrice(its, r)
+			if newNodeClaim != nil && !s.preferTemplate(i, idx, price, bestPrice) {
+				return true
+			}
+			bestPrice = price
+		} else if i >= idx {
+			// Ensure that we always take an earlier successful schedule to keep consistent ordering
+			// We care about this particularly with NewNodeClaims because NodeClaims should be evaluated by weight
 			return false
 		}
 
@@ -822,7 +838,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		offeringsToReserve = ofs
 		allocationResult = result
 		idx = i
-		return false
+		return priceTieBreak
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
@@ -981,6 +997,44 @@ func volumeZoneReq(volumeReqs []scheduling.Requirements) *scheduling.Requirement
 // doWorkPiece so that a worker always finishes its work when it pulls a piece off of pieces
 // The function returns a bool that represents whether the worker should continue doing work
 // or whether the worker should finish
+// preferTemplate reports whether the NodeClaim template at candidate should replace the one at best. Templates
+// are ordered by NodePool weight; for equal weights the cheaper launch price wins, and the existing ordering
+// (by name) breaks exact ties.
+func (s *Scheduler) preferTemplate(candidate, best int, candidatePrice, bestPrice float64) bool {
+	candidateWeight := s.nodeClaimTemplates[candidate].NodePoolWeight
+	bestWeight := s.nodeClaimTemplates[best].NodePoolWeight
+	if candidateWeight != bestWeight {
+		return candidateWeight > bestWeight
+	}
+	if candidatePrice != bestPrice {
+		return candidatePrice < bestPrice
+	}
+	return candidate < best
+}
+
+// launchPrice returns the price of the cheapest offering a NodeClaim with these instance types and requirements
+// would launch with. It follows the launch priority of capacity types (reserved, spot, on-demand), so a NodePool
+// allowing both spot and on-demand is priced at spot when spot is available. Offering prices include NodeOverlay
+// adjustments.
+func launchPrice(its []*cloudprovider.InstanceType, reqs scheduling.Requirements) float64 {
+	for _, capacityTypeReqs := range []scheduling.Requirements{
+		cloudprovider.ReservedRequirement,
+		cloudprovider.SpotRequirement,
+		cloudprovider.OnDemandRequirement,
+	} {
+		price := math.MaxFloat64
+		for _, it := range its {
+			if of := it.Offerings.Available().Compatible(reqs).Compatible(capacityTypeReqs).Cheapest(); of != nil && of.Price < price {
+				price = of.Price
+			}
+		}
+		if price != math.MaxFloat64 {
+			return price
+		}
+	}
+	return math.MaxFloat64
+}
+
 func parallelizeUntil(workers, pieces int, doWorkPiece func(int) bool) {
 	toProcess := make(chan int, pieces)
 	for i := range pieces {
