@@ -4,6 +4,9 @@ inputs:
   k8sVersion:
     description: Kubernetes version to use when installing envtest binaries
     default: "1.36.x"
+  cache:
+    description: Whether this action may write the Actions cache
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -13,10 +16,13 @@ runs:
         go-version-file: go.mod
         check-latest: true
         cache-dependency-path: "**/go.sum"
+        cache: ${{ inputs.cache }}
     # Root path permission workaround for caching https://github.com/actions/cache/issues/845#issuecomment-1252594999
-    - run: sudo chown "$USER" /usr/local
+    - if: ${{ inputs.cache == 'true' }}
+      run: sudo chown "$USER" /usr/local
       shell: bash
-    - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+    - if: ${{ inputs.cache == 'true' }}
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       id: cache-envtest
       with:
         path: /usr/local/kubebuilder/bin
