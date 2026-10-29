@@ -40,9 +40,6 @@ import (
 // for every candidate instance type. An adapter is constructed for each Allocate call.
 type draNodeClaim struct {
 	nc *NodeClaim
-	// slices memoizes ResourceSlices() for the lifetime of the adapter (one Allocate call), since the NodeClaim's
-	// requirements don't change within a call.
-	slices map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice
 }
 
 func (d *draNodeClaim) ID() dynamicresources.NodeClaimID {
@@ -79,19 +76,17 @@ func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
 // source of devices for this NodeClaim: the set has an available offering, and its requirements are compatible with
 // the NodeClaim's. The two conditions are checked independently, so a set may be included even though no single
 // available offering satisfies both. That's safe: an allocation from such a set narrows the NodeClaim to requirements
-// that no available offering satisfies, and the instance type is rejected by the offering checks that follow.
+// that no available offering satisfies, and the instance type is rejected by the offering checks that follow. The
+// allocator calls ResourceSlices at most once per Allocate (see dynamicresources.NodeClaim), so the result isn't cached.
 func (d *draNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
-	if d.slices != nil {
-		return d.slices
-	}
-	d.slices = make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice, len(d.nc.InstanceTypeOptions))
+	slices := make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice, len(d.nc.InstanceTypeOptions))
 	for _, it := range d.nc.InstanceTypeOptions {
 		sets := lo.Filter(it.AvailableDynamicResources(), func(dr *cloudprovider.DynamicResources, _ int) bool {
 			return d.nc.Requirements.IsCompatible(dr.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 		})
-		d.slices[unique.Make(it.Name)] = templateSlices(sets)
+		slices[unique.Make(it.Name)] = templateSlices(sets)
 	}
-	return d.slices
+	return slices
 }
 
 // draExistingNode adapts a scheduling *ExistingNode to the allocator's NodeClaim interface. An existing node has a

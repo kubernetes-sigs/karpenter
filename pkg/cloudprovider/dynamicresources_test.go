@@ -25,9 +25,64 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+const (
+	gpuModeKey = "example.com/driver-mode-gpu"
+	nicModeKey = "example.com/driver-mode-nic"
+	modeDP     = "device-plugin"
+	modeDRA    = "dynamic-resource-allocation"
+)
+
+// modeInstanceType builds an instance type with one offering per combination of GPU and NIC driver modes, a GPU set
+// published in GPU DRA mode, and a NIC set published in NIC DRA mode.
+func modeInstanceType() *cloudprovider.InstanceType {
+	var offerings cloudprovider.Offerings
+	for _, gpu := range []string{modeDP, modeDRA} {
+		for _, nic := range []string{modeDP, modeDRA} {
+			offerings = append(offerings, &cloudprovider.Offering{
+				Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"),
+					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+					scheduling.NewRequirement(gpuModeKey, corev1.NodeSelectorOpIn, gpu),
+					scheduling.NewRequirement(nicModeKey, corev1.NodeSelectorOpIn, nic),
+				),
+				Price:     1.0,
+				Available: true,
+			})
+		}
+	}
+	return &cloudprovider.InstanceType{
+		Name: "it",
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(gpuModeKey, corev1.NodeSelectorOpIn, modeDP, modeDRA),
+			scheduling.NewRequirement(nicModeKey, corev1.NodeSelectorOpIn, modeDP, modeDRA),
+		),
+		Offerings: offerings,
+		DynamicResources: []*cloudprovider.DynamicResources{
+			modeSet(gpuModeKey, modeDRA, template("gpu.example.com", "gpus", "gpu-0")),
+			modeSet(nicModeKey, modeDRA, template("nic.example.com", "nics", "nic-0")),
+		},
+	}
+}
+
+func modeSet(key, value string, templates ...*cloudprovider.ResourceSliceTemplate) *cloudprovider.DynamicResources {
+	return &cloudprovider.DynamicResources{
+		Requirements:           scheduling.NewRequirements(scheduling.NewRequirement(key, corev1.NodeSelectorOpIn, value)),
+		ResourceSliceTemplates: templates,
+	}
+}
+
+func template(driver, pool string, devices ...string) *cloudprovider.ResourceSliceTemplate {
+	t := &cloudprovider.ResourceSliceTemplate{Driver: unique.Make(driver), Pool: cloudprovider.ResourcePool{Name: unique.Make(pool)}}
+	for _, d := range devices {
+		t.Devices = append(t.Devices, cloudprovider.Device{Name: unique.Make(d)})
+	}
+	return t
+}
 
 var _ = Describe("DynamicResources", func() {
 	Describe("DeepCopy", func() {
@@ -177,6 +232,46 @@ var _ = Describe("DynamicResources", func() {
 			// Mutating ConsumesCounters on the copy should not affect the original
 			tmpl.Devices[0].ConsumesCounters[0].Counters["memory"] = resourcev1.Counter{Value: resource.MustParse("5Gi")}
 			Expect(original.ResourceSliceTemplates[0].Devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+		})
+	})
+
+	Describe("AvailableDynamicResources", func() {
+		BeforeEach(func() {
+			// Set keys must be well-known (see the DynamicResources conventions).
+			v1.WellKnownLabels.Insert(gpuModeKey, nicModeKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(gpuModeKey, nicModeKey) })
+		})
+		It("should include sets with an available compatible offering", func() {
+			it := modeInstanceType()
+			Expect(it.AvailableDynamicResources()).To(HaveLen(2))
+		})
+		It("should exclude a scoped set whose compatible offerings are all unavailable", func() {
+			it := modeInstanceType()
+			for _, o := range it.Offerings {
+				if o.Requirements.Get(gpuModeKey).Has(modeDRA) {
+					o.Available = false
+				}
+			}
+			Expect(it.AvailableDynamicResources()).To(ConsistOf(it.DynamicResources[1]))
+		})
+		It("should always include an unscoped set", func() {
+			it := modeInstanceType()
+			it.DynamicResources = append(it.DynamicResources, &cloudprovider.DynamicResources{
+				ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{template("tpu.example.com", "tpus", "tpu-0")},
+			})
+			for _, o := range it.Offerings {
+				o.Available = false
+			}
+			Expect(it.AvailableDynamicResources()).To(ConsistOf(it.DynamicResources[2]))
+		})
+		It("should compute the result once per instance type", func() {
+			it := modeInstanceType()
+			Expect(it.AvailableDynamicResources()).To(HaveLen(2))
+			for _, o := range it.Offerings {
+				o.Available = false
+			}
+			Expect(it.AvailableDynamicResources()).To(HaveLen(2))
+			Expect(it.DeepCopy().AvailableDynamicResources()).To(BeEmpty())
 		})
 	})
 })

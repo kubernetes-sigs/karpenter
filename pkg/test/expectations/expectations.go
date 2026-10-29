@@ -1099,12 +1099,3 @@ func ExpectStateNodePoolCount(cluster *state.Cluster, npName string, r, d, pd in
 	Expect(deleting).To(Equal(d))
 	Expect(pendingdisruption).To(Equal(pd))
 }
-
-// ExpectDynamicResourcesConventions asserts that every instance type follows the DynamicResources conventions that
-// can be checked statically (see cloudprovider.ValidateDynamicResources).
-func ExpectDynamicResourcesConventions(instanceTypes ...*cloudprovider.InstanceType) {
-	GinkgoHelper()
-	for _, it := range instanceTypes {
-		Expect(cloudprovider.ValidateDynamicResources(it)).To(BeEmpty(), "instance type %q violates DynamicResources conventions", it.Name)
-	}
-}

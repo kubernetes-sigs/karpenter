@@ -409,7 +409,8 @@ func (i *InstanceType) AllocatableOfferingsList() []AllocatableOfferings {
 
 // AvailableDynamicResources returns the instance type's DynamicResources sets that can be a source of devices: sets
 // with empty requirements, and sets compatible with at least one available offering. The result is computed once,
-// since availability doesn't change for the lifetime of an InstanceType.
+// since offering availability is fixed for the lifetime of an InstanceType (see AllocatableOfferingsList, which
+// already caches available offerings under i.once).
 func (i *InstanceType) AvailableDynamicResources() []*DynamicResources {
 	i.dynamicResourcesOnce.Do(func() {
 		i.availableDynamicResources = lo.Filter(i.DynamicResources, func(dr *DynamicResources, _ int) bool {

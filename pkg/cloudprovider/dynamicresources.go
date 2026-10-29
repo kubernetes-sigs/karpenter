@@ -28,13 +28,20 @@ import (
 // DRA-aware scheduling simulation. A set is published by the instance type's offerings that are compatible with its
 // Requirements, so mutually exclusive launch configurations (e.g. DRA vs. device plugin) can expose different devices.
 //
-// Cloud providers are expected to uphold the following conventions. Behavior is undefined if they're violated, and
-// ValidateDynamicResources reports violations that can be detected statically.
+// Cloud providers are expected to uphold the following conventions. Behavior is undefined if they're violated.
 //  1. Every template in a set has the same driver.
 //  2. For each driver, every offering is compatible with the requirements of at most one of that driver's sets.
 //  3. Every set is compatible with at least one of the instance type's offerings.
 //  4. A device (driver, pool, device name) appears in at most one of an instance type's sets.
 //  5. Attribute bindings hold in every launch configuration in which the bound devices coexist.
+//  6. Every key a set's requirements reference is an offering-level, well-known label. The instance type's
+//     requirements define it as In the union of its offerings' values, or as DoesNotExist if no offering carries it.
+//  7. Each offering either omits a set key or carries it as a single In value, and within an instance type, offerings
+//     either all carry a given set key or all omit it. An offering carrying several values (e.g. both modes) would stay
+//     compatible with a set after the NodeClaim narrows to it, and its single CapacityOverride couldn't describe both
+//     modes. An offering that omits a key is compatible with every set on that key.
+//  8. Offerings that differ only in set keys have the same price, since consolidation prices a candidate without
+//     knowing which set it launched with.
 type DynamicResources struct {
 	// Requirements selects the offerings that publish this set. It may only reference offering-level, well-known keys,
 	// which the instance type's requirements must define. If empty, every offering publishes this set.

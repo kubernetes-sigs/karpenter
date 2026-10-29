@@ -168,13 +168,6 @@ var _ = Describe("DRA Scheduling Internals", func() {
 			Expect(slices[0].TemplateRequirements()).To(BeEmpty())
 			Expect(slices[1].TemplateRequirements().Get(modeKey).Values()).To(ConsistOf("dra"))
 		})
-		It("should memoize the slices for the adapter's lifetime", func() {
-			adapter := &draNodeClaim{nc: nc}
-			Expect(slicesFor(adapter)).To(Equal([]string{"unscoped", "dra"}))
-			nc.Requirements = modeReqs("device-plugin")
-			Expect(slicesFor(adapter)).To(Equal([]string{"unscoped", "dra"}))
-			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped"}))
-		})
 		It("should expose every set on a pre-initialized existing node, regardless of availability", func() {
 			Expect(slicesFor(draExistingNodeForTest(false, it))).To(Equal([]string{"unscoped", "dra", "other"}))
 		})

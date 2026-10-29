@@ -18,6 +18,7 @@ package provisioning_test
 
 import (
 	"fmt"
+	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1345,9 +1346,6 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			ExpectApplied(ctx, env.Client, test.DeviceClassWithSelector("gpu", gpuDriver), test.DeviceClassWithSelector("nic", nicDriver))
 		})
 
-		It("should follow the DynamicResources conventions (M0)", func() {
-			ExpectDynamicResourcesConventions(cloudProvider.InstanceTypes...)
-		})
 		It("should narrow the NodeClaim to the allocated driver's DRA mode (M1)", func() {
 			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
 			pod := draPod("gpu", "gpu-claim")
@@ -1362,6 +1360,20 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// The annotation is still the scheduler's record of allocated drivers.
 			ExpectNodeClaimDRADrivers(nodeClaims[0], gpuDriver)
 			ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
+		})
+		It("should launch a device-plugin pod into device-plugin mode regardless of offering order (M1b)", func() {
+			// List the DRA offerings first, so launching into the first compatible offering would pick DRA mode. Only the
+			// DRA offerings' CapacityOverride (zero device-plugin GPUs) keeps the pod out of them.
+			instanceType := fake.DriverModeInstanceType("mode-it", 2, nil)
+			slices.Reverse(instanceType.Offerings)
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := devicePluginGPUPod()
+			provisionDRA(pod)
+
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDevicePlugin))
 		})
 		It("should split a DRA pod and a device-plugin pod for the same driver onto separate NodeClaims (M2)", func() {
 			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
@@ -1436,6 +1448,32 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 
 			ExpectNotScheduled(ctx, env.Client, draGPUPod)
 			ExpectScheduled(ctx, env.Client, dpGPUPod)
+		})
+		It("should not provision for a DRA pod when every offering publishing its devices is unavailable (M7b)", func() {
+			for _, o := range cloudProvider.InstanceTypes[0].Offerings {
+				if o.Requirements.Get(fake.DriverModeGPULabelKey).Has(fake.DriverModeDRA) {
+					o.Available = false
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+		It("should not provision for a device-plugin pod when every device-plugin offering is unavailable (M7c)", func() {
+			for _, o := range cloudProvider.InstanceTypes[0].Offerings {
+				if o.Requirements.Get(fake.DriverModeGPULabelKey).Has(fake.DriverModeDevicePlugin) {
+					o.Available = false
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := devicePluginGPUPod()
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
 		})
 		It("should reject an instance type that has no offering for the allocated combination of devices (M8)", func() {
 			partial := fake.DriverModeInstanceType("partial-it", 2, func(gpuMode, nicMode string) bool {
