@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -45,8 +44,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			h, err := common.StartLatencyHarness(env)
 			Expect(err).ToNot(HaveOccurred())
 
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
-			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			smallDeployment.Spec.Replicas = new(int32(350))
+			largeDeployment.Spec.Replicas = new(int32(350))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			consolidationReport, err := ReportConsolidation(env, "Balanced Basic Consolidation", 1000, 700, scaleOutReport.TotalNodes, 20*time.Minute)

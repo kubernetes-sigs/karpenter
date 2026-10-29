@@ -25,7 +25,6 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -48,7 +47,7 @@ func makeAPISlice(name, driver, pool string, opts ...func(*resourcev1.ResourceSl
 
 func withAllNodes() func(*resourcev1.ResourceSlice) {
 	return func(s *resourcev1.ResourceSlice) {
-		s.Spec.AllNodes = ptr.To(true)
+		s.Spec.AllNodes = new(true)
 	}
 }
 

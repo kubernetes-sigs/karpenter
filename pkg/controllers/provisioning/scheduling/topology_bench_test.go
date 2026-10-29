@@ -86,9 +86,9 @@ func BenchmarkForEachDomain(b *testing.B) {
 
 func benchmarkForEachDomain(b *testing.B, domains, taintGroupsPerDomain int, tolerates bool) {
 	dg := scheduling.NewTopologyDomainGroup()
-	for d := 0; d < domains; d++ {
+	for d := range domains {
 		domain := fmt.Sprintf("test-zone-%d", d)
-		for t := 0; t < taintGroupsPerDomain; t++ {
+		for t := range taintGroupsPerDomain {
 			dg.Insert(domain, corev1.Taint{
 				Key:    fmt.Sprintf("bench.example.com/taint-%d", t),
 				Value:  "true",
@@ -98,7 +98,7 @@ func benchmarkForEachDomain(b *testing.B, domains, taintGroupsPerDomain int, tol
 	}
 	pod := test.Pod()
 	if tolerates {
-		for t := 0; t < taintGroupsPerDomain; t++ {
+		for t := range taintGroupsPerDomain {
 			pod.Spec.Tolerations = append(pod.Spec.Tolerations, corev1.Toleration{
 				Key:      fmt.Sprintf("bench.example.com/taint-%d", t),
 				Operator: corev1.TolerationOpExists,

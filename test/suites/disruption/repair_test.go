@@ -40,7 +40,7 @@ import (
 var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 	BeforeAll(func() {
 		if _, ok := env.RepairCondition(); !ok {
-			Skip("node repair regression specs require --repair-condition for this provider")
+			Skip("[unsupported:repair-condition] node repair regression specs require --repair-condition for this provider")
 		}
 	})
 
@@ -77,7 +77,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 			PodOptions: test.PodOptions{
 				ObjectMeta:                    metav1.ObjectMeta{Labels: appLabels},
 				PodAntiRequirements:           hostnameAntiAffinity(appLabels),
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(30)),
+				TerminationGracePeriodSeconds: new(int64(30)),
 			},
 		})
 		selector := labels.SelectorFromSet(appLabels)
@@ -169,7 +169,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 					Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
 				},
 				PodAntiRequirements:           hostnameAntiAffinity(appLabels),
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(10)),
+				TerminationGracePeriodSeconds: new(int64(10)),
 			},
 		})
 		selector := labels.SelectorFromSet(appLabels)
@@ -264,7 +264,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		BeforeEach(func() {
 			// A real kubelet owns Ready and resets an injected value; only KWOK can pin it (see expectUnhealthy).
 			if !env.IsDefaultNodeClassKWOK() {
-				Skip("injecting kubelet Ready conditions requires the KWOK provider")
+				Skip("[unsupported:kwok] injecting kubelet Ready conditions requires the KWOK provider")
 			}
 			numPods = 1
 			// Add pods with a do-not-disrupt annotation so that we can check node metadata before we disrupt

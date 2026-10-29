@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -1186,6 +1187,55 @@ var _ = Describe("Topology", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1))
+		})
+
+		It("should not mutate the pod's label selector when applying matchLabelKeys", func() {
+			matchedLabel := "test-label"
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: lo.Assign(labels, map[string]string{matchedLabel: "value-a"}),
+				},
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
+					TopologyKey:       corev1.LabelHostname,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+					MatchLabelKeys:    []string{matchedLabel},
+					MaxSkew:           1,
+				}},
+			})
+			topology, err := scheduling.NewTopology(ctx, env.Client, cluster, nil, []*v1.NodePool{nodePool},
+				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes}, []*corev1.Pod{pod})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pod.Spec.TopologySpreadConstraints[0].LabelSelector.MatchExpressions).To(BeEmpty())
+
+			// Update is re-run on the same pod object after every preference relaxation, and disruption reuses
+			// candidate pods across simulations, so the selector must not accumulate injected requirements.
+			for range 5 {
+				Expect(topology.Update(ctx, pod)).To(Succeed())
+			}
+			Expect(pod.Spec.TopologySpreadConstraints[0].LabelSelector.MatchExpressions).To(BeEmpty())
+		})
+
+		It("should not mutate a label selector shared between pods when applying matchLabelKeys", func() {
+			matchedLabel := "test-label"
+			// Pods built from one shared spec (e.g. CapacityBuffer virtual pods) alias the same LabelSelector.
+			selector := &metav1.LabelSelector{MatchLabels: labels}
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: lo.Assign(labels, map[string]string{matchedLabel: "value-a"}),
+				},
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
+					TopologyKey:       corev1.LabelHostname,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector:     selector,
+					MatchLabelKeys:    []string{matchedLabel},
+					MaxSkew:           1,
+				}},
+			}, 3)
+			_, err := scheduling.NewTopology(ctx, env.Client, cluster, nil, []*v1.NodePool{nodePool},
+				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes}, pods)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(selector.MatchExpressions).To(BeEmpty())
 		})
 	})
 

@@ -22,7 +22,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -84,8 +83,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Scaling both deployments down to trigger cross-pool consolidation")
-			denseDep.Spec.Replicas = lo.ToPtr(int32(180))
-			sparseDep.Spec.Replicas = lo.ToPtr(int32(60))
+			denseDep.Spec.Replicas = new(int32(180))
+			sparseDep.Spec.Replicas = new(int32(60))
 			env.ExpectUpdated(denseDep, sparseDep)
 
 			By("Recording the consolidation phase")

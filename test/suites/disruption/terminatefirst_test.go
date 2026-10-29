@@ -78,7 +78,7 @@ var _ = Describe("TerminateFirst", Ordered, func() {
 	})
 
 	configureStaticNodePool := func() {
-		nodePool.Spec.Replicas = lo.ToPtr(int64(terminateFirstNodeCount))
+		nodePool.Spec.Replicas = new(int64(terminateFirstNodeCount))
 		nodePool.Spec.Limits = v1.Limits{
 			corev1.ResourceName("nodes"): resource.MustParse("1"),
 		}
@@ -157,7 +157,7 @@ var _ = Describe("TerminateFirst", Ordered, func() {
 
 	It("terminates first when repairing an at-limit static NodePool", func() {
 		if _, ok := env.RepairCondition(); !ok {
-			Skip("terminate-first repair requires --repair-condition for this provider")
+			Skip("[unsupported:repair-condition] terminate-first repair requires --repair-condition for this provider")
 		}
 		configureStaticNodePool()
 		env.ExpectCreated(nodeClass, nodePool)

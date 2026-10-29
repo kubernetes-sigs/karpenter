@@ -464,9 +464,15 @@ func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 		if t.preferencePolicy == PreferencePolicyIgnore && tsc.WhenUnsatisfiable != corev1.DoNotSchedule {
 			continue
 		}
+		// tsc.LabelSelector points into the pod spec, which may be shared (e.g. across virtual pods) and is re-read on
+		// every Update, so the matchLabelKeys requirements are added to a copy rather than appended in place.
+		selector := tsc.LabelSelector
 		for _, key := range tsc.MatchLabelKeys {
 			if value, ok := p.Labels[key]; ok {
-				tsc.LabelSelector.MatchExpressions = append(tsc.LabelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+				if selector == tsc.LabelSelector {
+					selector = tsc.LabelSelector.DeepCopy()
+				}
+				selector.MatchExpressions = append(selector.MatchExpressions, metav1.LabelSelectorRequirement{
 					Key:      key,
 					Operator: metav1.LabelSelectorOpIn,
 					Values:   []string{value},
@@ -478,7 +484,7 @@ func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 			tsc.TopologyKey,
 			p,
 			sets.New(p.Namespace),
-			tsc.LabelSelector,
+			selector,
 			tsc.MaxSkew,
 			tsc.MinDomains,
 			tsc.NodeTaintsPolicy,

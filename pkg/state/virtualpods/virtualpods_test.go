@@ -92,7 +92,7 @@ var _ = Describe("VirtualPodCache", func() {
 			results := make([]int, callers)
 			var wg sync.WaitGroup
 			wg.Add(callers)
-			for i := 0; i < callers; i++ {
+			for i := range callers {
 				go func(idx int) {
 					defer wg.Done()
 					results[idx] = len(cache.GetAll(ctx))
@@ -131,7 +131,7 @@ var _ = Describe("VirtualPodCache", func() {
 			Expect(cache.GetAll(ctx)).To(HaveLen(3))
 
 			// Reduce replicas and update again; the entry should be replaced, not appended.
-			cb.Status.Replicas = ptr(int32(1))
+			cb.Status.Replicas = new(int32(1))
 			resolveAndUpdate(ctx, cache, cb)
 			Expect(cache.GetAll(ctx)).To(HaveLen(1))
 		})
@@ -255,7 +255,7 @@ var _ = Describe("VirtualPodCache", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			var wg sync.WaitGroup
-			for i := 0; i < 20; i++ {
+			for range 20 {
 				wg.Add(2)
 				go func() {
 					defer wg.Done()
@@ -311,7 +311,7 @@ func deploymentFor(cb *autoscalingv1beta1.CapacityBuffer) *appsv1.Deployment {
 			Namespace: cb.Namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr(int32(10)),
+			Replicas: new(int32(10)),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}},
@@ -319,8 +319,4 @@ func deploymentFor(cb *autoscalingv1beta1.CapacityBuffer) *appsv1.Deployment {
 			},
 		},
 	}
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

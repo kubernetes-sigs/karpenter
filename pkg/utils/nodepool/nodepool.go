@@ -127,6 +127,7 @@ func NodeClaimEventHandler(opts ...option.Function[NodeClaimHandlerOption]) hand
 	})
 }
 
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func NodeEventHandler() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 		name, ok := o.GetLabels()[v1.NodePoolLabelKey]

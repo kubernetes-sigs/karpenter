@@ -39,8 +39,7 @@ func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
-		_, err := loadOverrides()
-		Expect(err).ToNot(HaveOccurred())
+		env.CleanupBeforeSuite()
 	})
 	AfterSuite(func() {
 		env.Stop()
@@ -67,6 +66,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
+	// Cleanup fails the spec on Karpenter restarts, so defer AfterEach to still dump the controller logs.
+	DeferCleanup(env.AfterEach)
 	env.Cleanup()
-	env.AfterEach()
 })

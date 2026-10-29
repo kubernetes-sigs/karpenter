@@ -40,6 +40,7 @@ var _ = Describe("CapacityBuffer", func() {
 	var bufferTemplate *corev1.PodTemplate
 
 	BeforeEach(func() {
+		env.RequireCRD(&autoscalingv1beta1.CapacityBuffer{})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 
@@ -91,7 +92,7 @@ var _ = Describe("CapacityBuffer", func() {
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					ProvisioningStrategy: lo.ToPtr(autoscalingv1beta1.ActiveProvisioningStrategy),
 					PodTemplateRef:       &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:             lo.ToPtr(int32(3)),
+					Replicas:             new(int32(3)),
 				},
 			})
 
@@ -110,7 +111,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
@@ -171,7 +172,7 @@ var _ = Describe("CapacityBuffer", func() {
 						Kind:     "Deployment",
 						Name:     "scalable-app",
 					},
-					Percentage: lo.ToPtr(int32(20)),
+					Percentage: new(int32(20)),
 				},
 			})
 			env.ExpectCreated(buffer)
@@ -197,7 +198,7 @@ var _ = Describe("CapacityBuffer", func() {
 						Kind:     "Deployment",
 						Name:     "scalable-app",
 					},
-					Replicas: lo.ToPtr(int32(3)),
+					Replicas: new(int32(3)),
 				},
 			})
 			env.ExpectCreated(buffer)
@@ -217,7 +218,7 @@ var _ = Describe("CapacityBuffer", func() {
 						Kind:     "Deployment",
 						Name:     "scalable-app",
 					},
-					Replicas: lo.ToPtr(int32(2)),
+					Replicas: new(int32(2)),
 				},
 			})
 
@@ -240,7 +241,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
@@ -286,7 +287,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
@@ -328,7 +329,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
@@ -346,7 +347,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
@@ -365,7 +366,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
@@ -400,7 +401,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(3)),
+					Replicas:       new(int32(3)),
 				},
 			})
 
@@ -412,7 +413,7 @@ var _ = Describe("CapacityBuffer", func() {
 			// Scale buffer down to 1
 			cb := &autoscalingv1beta1.CapacityBuffer{}
 			Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-			cb.Spec.Replicas = lo.ToPtr(int32(1))
+			cb.Spec.Replicas = new(int32(1))
 			env.ExpectUpdated(cb)
 
 			// Status should reflect new replica count
@@ -444,7 +445,7 @@ var _ = Describe("CapacityBuffer", func() {
 						Kind:     "Deployment",
 						Name:     "growing-app",
 					},
-					Percentage: lo.ToPtr(int32(20)),
+					Percentage: new(int32(20)),
 				},
 			})
 
@@ -456,7 +457,7 @@ var _ = Describe("CapacityBuffer", func() {
 			// Scale the deployment up to 20
 			deploy := &appsv1.Deployment{}
 			Expect(env.Client.Get(env, client.ObjectKeyFromObject(scalableDeployment), deploy)).To(Succeed())
-			deploy.Spec.Replicas = lo.ToPtr(int32(20))
+			deploy.Spec.Replicas = new(int32(20))
 			env.ExpectUpdated(deploy)
 
 			// Buffer should eventually recalculate: 20% of 20 = 4
@@ -480,7 +481,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(10)),
+					Replicas:       new(int32(10)),
 				},
 			})
 
@@ -526,14 +527,14 @@ var _ = Describe("CapacityBuffer", func() {
 			bufferA := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			})
 
 			bufferB := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "small-buffer-template"},
-					Replicas:       lo.ToPtr(int32(3)),
+					Replicas:       new(int32(3)),
 				},
 			})
 
@@ -562,7 +563,7 @@ var _ = Describe("CapacityBuffer", func() {
 			seedBuffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			})
 			env.ExpectCreated(seedBuffer)
@@ -570,12 +571,12 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectDeleted(seedBuffer)
 
 			// Now do rapid create/delete cycles
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rapid-buffer-%d", i)},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-						Replicas:       lo.ToPtr(int32(2)),
+						Replicas:       new(int32(2)),
 					},
 				})
 				env.ExpectCreated(buffer)
@@ -623,7 +624,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			})
 			env.ExpectCreated(bufferTemplate, buffer)
@@ -671,7 +672,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "selector-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			})
 
@@ -696,7 +697,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			})
 
@@ -803,7 +804,7 @@ var _ = Describe("CapacityBuffer", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "anti-affinity-template"},
-					Replicas:       lo.ToPtr(int32(3)),
+					Replicas:       new(int32(3)),
 				},
 			})
 
@@ -851,7 +852,7 @@ var _ = Describe("CapacityBuffer", func() {
 						Kind:     "Deployment",
 						Name:     "spread-deploy",
 					},
-					Replicas: lo.ToPtr(int32(3)),
+					Replicas: new(int32(3)),
 				},
 			})
 

@@ -57,4 +57,5 @@ const (
 
 	// state/informer/vpa
 	PredictionTargetUnsupported = "PredictionTargetUnsupported"
+	PredictionStored            = "PredictionStored"
 )

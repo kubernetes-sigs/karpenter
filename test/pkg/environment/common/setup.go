@@ -26,11 +26,13 @@ import (
 	"github.com/samber/lo"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/workqueue"
@@ -64,6 +66,8 @@ var (
 		&appsv1.Deployment{},
 		// autoscaling.x-k8s.io
 		&autoscalingv1beta1.CapacityBuffer{},
+		// batch
+		&batchv1.Job{},
 		// core
 		&corev1.LimitRange{},
 		&corev1.Node{},
@@ -87,6 +91,7 @@ var (
 
 // nolint:gocyclo
 func (env *Environment) BeforeEach() {
+	env.SkipKnownFlaky()
 	debug.BeforeEach(env.Context, env.Config, env.Client)
 	// Expect this cluster to be clean for test runs to execute successfully
 	env.ExpectCleanCluster()
@@ -94,6 +99,14 @@ func (env *Environment) BeforeEach() {
 
 	env.Monitor.Reset()
 	env.StartingNodeCount = env.Monitor.NodeCountAtReset()
+}
+
+// CleanupBeforeSuite removes test objects left behind by a previous run, so that clusters reused across runs don't fail
+// ExpectCleanCluster when an earlier run was interrupted before its AfterEach cleanup ran. It only deletes objects
+// carrying the test discovery label, the same as the per-spec cleanup, so it's a no-op on a clean cluster.
+func (env *Environment) CleanupBeforeSuite() {
+	By("cleaning up test objects left over from previous runs")
+	env.CleanupObjects(CleanableObjects...)
 }
 
 func (env *Environment) ExpectCleanCluster() {
@@ -175,7 +188,11 @@ func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 				// This only gets the metadata for the objects since we don't need all the details of the objects
 				metaList := &metav1.PartialObjectMetadataList{}
 				metaList.SetGroupVersionKind(lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme())))
-				g.Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
+				if err := env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel})); meta.IsNoMatchError(err) {
+					return
+				} else {
+					g.Expect(err).ToNot(HaveOccurred())
+				}
 				// Limit the concurrency of these calls to 50 workers per object so that we try to limit how aggressively we
 				// are deleting so that we avoid getting client-side throttled
 				workqueue.ParallelizeUntil(env, 50, len(metaList.Items), func(i int) {

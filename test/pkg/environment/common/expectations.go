@@ -64,10 +64,14 @@ import (
 func (env *Environment) ExpectCreated(objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
+		if nodeClaim, ok := object.(*v1.NodeClaim); ok {
+			env.waitForNodeClassReconciled(nodeClaim.Spec.NodeClassRef)
+		}
 		Eventually(func(g Gomega) {
 			object.SetLabels(lo.Assign(object.GetLabels(), map[string]string{
 				test.DiscoveryLabel: "unspecified",
 			}))
+			env.capExpireAfter(object)
 			g.Expect(env.Client.Create(env, object)).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
@@ -98,6 +102,7 @@ func (env *Environment) ExpectUpdated(objects ...client.Object) {
 				log.FromContext(env).Info(fmt.Sprintf("detected an update to an object (%s) with an outdated resource version, did you get the latest version of the object before patching?", lo.Must(apiutil.GVKForObject(o, env.Client.Scheme()))))
 			}
 			o.SetResourceVersion(current.GetResourceVersion())
+			env.capExpireAfter(o)
 			g.Expect(env.Client.Update(env.Context, o)).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
@@ -389,6 +394,9 @@ func (env *Environment) ConsistentlyExpectActivePods(duration time.Duration, pod
 
 func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
 	GinkgoHelper()
+	if env.ExternalController != nil {
+		return env.ExternalController.envVars()
+	}
 
 	d := &appsv1.Deployment{}
 	Expect(env.Client.Get(env.Context, types.NamespacedName{Namespace: "kube-system", Name: "karpenter"}, d)).To(Succeed())
@@ -400,6 +408,10 @@ func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
 
 func (env *Environment) ExpectSettingsReplaced(vars ...corev1.EnvVar) {
 	GinkgoHelper()
+	if env.ExternalController != nil {
+		env.skipUnlessControllerSettings(vars, false)
+		return
+	}
 
 	d := &appsv1.Deployment{}
 	Expect(env.Client.Get(env.Context, types.NamespacedName{Namespace: "kube-system", Name: "karpenter"}, d)).To(Succeed())
@@ -417,6 +429,10 @@ func (env *Environment) ExpectSettingsReplaced(vars ...corev1.EnvVar) {
 
 func (env *Environment) ExpectSettingsOverridden(vars ...corev1.EnvVar) {
 	GinkgoHelper()
+	if env.ExternalController != nil {
+		env.skipUnlessControllerSettings(vars, false)
+		return
+	}
 
 	d := &appsv1.Deployment{}
 	Expect(env.Client.Get(env.Context, types.NamespacedName{Namespace: "kube-system", Name: "karpenter"}, d)).To(Succeed())
@@ -441,6 +457,10 @@ func (env *Environment) ExpectSettingsOverridden(vars ...corev1.EnvVar) {
 
 func (env *Environment) ExpectSettingsRemoved(vars ...corev1.EnvVar) {
 	GinkgoHelper()
+	if env.ExternalController != nil {
+		env.skipUnlessControllerSettings(vars, true)
+		return
+	}
 
 	varNames := sets.New[string](lo.Map(vars, func(v corev1.EnvVar, _ int) string { return v.Name })...)
 
@@ -551,6 +571,7 @@ func (env *Environment) EventuallyExpectHealthyWithTimeout(timeout time.Duration
 
 func (env *Environment) EventuallyExpectKarpenterRestarted() {
 	GinkgoHelper()
+	env.RequireInClusterController("restarting karpenter")
 	By("rolling out the new karpenter deployment")
 	env.EventuallyExpectRollout("karpenter", "kube-system")
 	env.ExpectKarpenterLeaseOwnerChanged()
@@ -602,6 +623,7 @@ func (env *Environment) EventuallyExpectRollout(name, namespace string) {
 
 func (env *Environment) ExpectKarpenterPods() []*corev1.Pod {
 	GinkgoHelper()
+	env.RequireInClusterController("listing karpenter pods")
 	podList := &corev1.PodList{}
 	Expect(env.Client.List(env.Context, podList, client.MatchingLabels{
 		"app.kubernetes.io/instance": "karpenter",
@@ -611,6 +633,7 @@ func (env *Environment) ExpectKarpenterPods() []*corev1.Pod {
 
 func (env *Environment) ExpectActiveKarpenterPodName() string {
 	GinkgoHelper()
+	env.RequireInClusterController("finding the karpenter leader")
 	lease := &coordinationv1.Lease{}
 	Expect(env.Client.Get(env.Context, types.NamespacedName{Name: "karpenter-leader-election", Namespace: "kube-system"}, lease)).To(Succeed())
 
@@ -1150,11 +1173,31 @@ func (env *Environment) GetNode(nodeName string) corev1.Node {
 
 func (env *Environment) ExpectNoCrashes() {
 	GinkgoHelper()
+	if env.ExternalController != nil {
+		return
+	}
 	for k, v := range env.Monitor.RestartCount("kube-system") {
 		if strings.Contains(k, "karpenter") && v > 0 {
-			Fail(fmt.Sprintf("expected karpenter containers to not crash, but %q restarted %d time(s)", k, v))
+			Fail(fmt.Sprintf("expected karpenter containers to not crash, but %q restarted %d time(s), %s", k, v, env.describeRestart(k)))
 		}
 	}
+}
+
+// describeRestart reports the last termination state of the "<pod>/<container>" container. Its previous logs are
+// printed separately by printControllerLogs.
+func (env *Environment) describeRestart(key string) string {
+	podName, containerName, _ := strings.Cut(key, "/")
+	pod := &corev1.Pod{}
+	if err := env.Client.Get(env.Context, types.NamespacedName{Namespace: "kube-system", Name: podName}, pod); err != nil {
+		return fmt.Sprintf("failed getting pod, %s", err)
+	}
+	status, ok := lo.Find(pod.Status.ContainerStatuses, func(s corev1.ContainerStatus) bool { return s.Name == containerName })
+	if !ok || status.LastTerminationState.Terminated == nil {
+		return "last termination state unknown"
+	}
+	t := status.LastTerminationState.Terminated
+	return fmt.Sprintf("last terminated: reason=%s exitCode=%d signal=%d finishedAt=%s message=%q",
+		t.Reason, t.ExitCode, t.Signal, t.FinishedAt.UTC().Format(time.RFC3339), t.Message)
 }
 
 var (
@@ -1162,6 +1205,9 @@ var (
 )
 
 func (env *Environment) printControllerLogs(options *corev1.PodLogOptions) {
+	if env.ExternalController != nil {
+		return
+	}
 	fmt.Println("------- START CONTROLLER LOGS -------")
 	defer fmt.Println("------- END CONTROLLER LOGS -------")
 
@@ -1355,6 +1401,7 @@ type PrometheusMetric struct {
 
 func (env *Environment) ExpectPodMetrics() (res []PrometheusMetric) {
 	GinkgoHelper()
+	env.RequireInClusterController("scraping karpenter metrics")
 
 	ctx, cancel := context.WithCancel(env.Context)
 	defer cancel()

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -240,9 +241,7 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 	if in.VolumeAttachmentLimits != nil {
 		in, out := &in.VolumeAttachmentLimits, &out.VolumeAttachmentLimits
 		*out = make(map[string]int, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
+		maps.Copy(*out, *in)
 	}
 	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
 	if in.Overhead != nil {
@@ -395,23 +394,26 @@ func (i *InstanceType) Allocatable() corev1.ResourceList {
 }
 
 func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(its, func(i, j int) bool {
-		iPrice := math.MaxFloat64
-		jPrice := math.MaxFloat64
-
-		for _, of := range its[i].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
-				iPrice = of.Price
+	// Order instance types so that we get the cheapest instance types of the available offerings. Each instance type's
+	// cheapest compatible price is computed once up front rather than inside the comparator, which would otherwise
+	// re-evaluate offering compatibility O(n log n) times.
+	type priced struct {
+		it    *InstanceType
+		price float64
+	}
+	sorted := lo.Map(its, func(it *InstanceType, _ int) priced {
+		price := math.MaxFloat64
+		for _, of := range it.Offerings {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < price {
+				price = of.Price
 			}
 		}
-		for _, of := range its[j].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
-				jPrice = of.Price
-			}
-		}
-		return iPrice < jPrice
+		return priced{it: it, price: price}
 	})
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].price < sorted[j].price })
+	for i := range sorted {
+		its[i] = sorted[i].it
+	}
 	return its
 }
 

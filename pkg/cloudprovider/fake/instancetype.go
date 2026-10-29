@@ -87,12 +87,6 @@ func WithResourceSliceTemplates(templates ...cloudprovider.ResourceSliceTemplate
 	}
 }
 
-func WithAttributeBindings(bindings ...cloudprovider.AttributeBinding) InstanceTypeOptions {
-	return func(c *InstanceTypeConfig) {
-		c.AttributeBindings = lo.ToSlicePtr(bindings)
-	}
-}
-
 func WithRequirements(reqs ...*scheduling.Requirement) InstanceTypeOptions {
 	return func(c *InstanceTypeConfig) { c.Requirements = reqs }
 }
@@ -246,11 +240,6 @@ func DeviceWith(name string, opts ...DeviceOption) cloudprovider.Device {
 		opt(&d)
 	}
 	return d
-}
-
-// WithDeviceAttributes sets the device's selector/constraint attributes.
-func WithDeviceAttributes(attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) DeviceOption {
-	return func(d *cloudprovider.Device) { d.Attributes = attributes }
 }
 
 // WithMultipleAllocations marks the device as multi-allocatable, allowing it to be allocated to multiple requests
