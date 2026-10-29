@@ -403,16 +403,19 @@ func (n *NodeClaim) offeringsToReserve(
 	return reservedOfferings, nil
 }
 
-// Add min daemon resource requests (min across instance types)
-func (n *NodeClaim) addDaemonRequests() {
+// Add min daemon resource requests (min across instance types), and return the largest daemon pod count over the
+// same groups
+func (n *NodeClaim) addDaemonRequests() int {
 	remaining := sets.New(n.InstanceTypeOptions...)
 	var minDaemonOverhead corev1.ResourceList
+	var maxDaemonPods int
 	for _, g := range n.daemonOverheadGroups {
 		// Only consider groups that have at least one instance type still remaining
 		hasRemaining := slices.ContainsFunc(g.InstanceTypes, remaining.Has)
 		if !hasRemaining {
 			continue
 		}
+		maxDaemonPods = max(maxDaemonPods, g.DaemonPodCount)
 		if len(minDaemonOverhead) == 0 {
 			minDaemonOverhead = g.DaemonOverhead
 		} else {
@@ -422,18 +425,7 @@ func (n *NodeClaim) addDaemonRequests() {
 	if len(minDaemonOverhead) > 0 {
 		n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, minDaemonOverhead)
 	}
-}
-
-func (n *NodeClaim) expectedPodCount() int {
-	remaining := sets.New(n.InstanceTypeOptions...)
-	var daemonPods int
-	for _, g := range n.daemonOverheadGroups {
-		if !slices.ContainsFunc(g.InstanceTypes, remaining.Has) {
-			continue
-		}
-		daemonPods = max(daemonPods, g.DaemonPodCount)
-	}
-	return len(n.Pods) + daemonPods
+	return maxDaemonPods
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
@@ -450,9 +442,6 @@ func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 			v1.DRADriversAnnotationKey: strings.Join(drivers, ","),
 		})
 	}
-	n.Annotations = lo.Assign(n.Annotations, map[string]string{
-		v1.ExpectedPodCountAnnotationKey: strconv.Itoa(n.expectedPodCount()),
-	})
 	// If there are any reserved offerings tracked, inject those requirements onto the NodeClaim. This ensures that if
 	// there are multiple reserved offerings for an instance type, we don't attempt to overlaunch into a single offering.
 	if len(n.reservedOfferings) != 0 {
@@ -468,7 +457,10 @@ func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 	// Add min Daemon resource requests
 	// Daemon resource requests are excluded during bin packing to avoid double-counting
 	// Adding during bin-packing would add it every time a pod is added
-	n.addDaemonRequests()
+	daemonPods := n.addDaemonRequests()
+	n.Annotations = lo.Assign(n.Annotations, map[string]string{
+		v1.ExpectedPodCountAnnotationKey: strconv.Itoa(len(n.Pods) + daemonPods),
+	})
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {

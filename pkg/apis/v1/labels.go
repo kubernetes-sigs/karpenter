@@ -184,7 +184,8 @@ var (
 			"updates it. It is not clamped to the pod capacity of the instance type that launches, since the " +
 			"NodeClaim is created with several acceptable instance types. A consumer clamps it itself, and " +
 			"behaves the same way when the annotation is absent.",
-		Stage: docs.Alpha,
+		Stage:        docs.Alpha,
+		InternalOnly: true,
 	}
 )
 
