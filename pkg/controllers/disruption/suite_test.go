@@ -958,7 +958,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		expectStats := func(total, disrupting int) {
 			GinkgoHelper()
 			for _, reason := range allKnownDisruptionReasons {
-				numNodes, numDisrupting := disruption.NodePoolStats(env.Clock, cluster, reason)
+				numNodes, numDisrupting := disruption.NodePoolStats(cluster, reason)
 				Expect(numNodes[nodePool.Name]).To(Equal(total), "reason %s", reason)
 				Expect(numDisrupting[nodePool.Name]).To(Equal(disrupting), "reason %s", reason)
 			}
@@ -967,10 +967,10 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			markRebootSucceeded()
 			expectStats(10, 1)
 		})
-		It("should stop counting a rebooted node that hasn't re-initialized within the reboot re-initialization window", func() {
+		It("should keep counting a rebooted node as disrupting for as long as it stays uninitialized", func() {
 			markRebootSucceeded()
-			env.Clock.Step(state.RebootReinitializationWindow)
-			expectStats(9, 0)
+			env.Clock.Step(24 * time.Hour)
+			expectStats(10, 1)
 		})
 		It("should count a rebooted node normally once it re-initializes", func() {
 			markRebootSucceeded()
