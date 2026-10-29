@@ -247,8 +247,8 @@ func (c *Controller) drain(ctx context.Context, nodeClaim *v1.NodeClaim, node *c
 	if tgp != nil {
 		deadline = new(rebootRequestedAt(nodeClaim).Add(max(*tgp, minDrainTime)))
 	}
-	// A timeout, not a force-delete deadline: residual pods are never deleted.
-	if err := c.terminator.Drain(ctx, node, deadline, terminator.Timeout, terminator.SkipDaemonSets()); err != nil {
+	// Residual pods are never deleted; they ride the reboot once the deadline passes.
+	if err := c.terminator.Drain(ctx, node, deadline, terminator.LeaveResidualPods(), terminator.SkipDaemonSets()); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return false, reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
