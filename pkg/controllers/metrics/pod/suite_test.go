@@ -51,7 +51,8 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment()
+	// The field indexers give us a cached client, as in the operator, with the spec.nodeName index used by the node watch
+	env = test.NewEnvironment(test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	cloudProvider = fake.NewCloudProvider()
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	podController = pod.NewController(env.Client, cluster)
