@@ -38,6 +38,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -46,6 +47,7 @@ import (
 	static "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -121,6 +123,125 @@ var _ = AfterEach(func() {
 
 var _ = Describe("Static Provisioning Controller", func() {
 	Context("Reconcile", func() {
+		DescribeTable("should wait for compatible available offerings", func(key, value string, templateLabel bool, expectedClaims int) {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(1))
+			if templateLabel {
+				nodePool.Spec.Template.Labels = map[string]string{key: value}
+			} else {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{Key: key, Operator: corev1.NodeSelectorOpIn, Values: []string{value}},
+				}
+			}
+			instanceType := fake.NewInstanceType("available-type")
+			for _, offering := range instanceType.Offerings {
+				offering.Available = offering.Requirements.Get(corev1.LabelTopologyZone).Has("test-zone-1") &&
+					offering.Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)
+			}
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			for range 3 {
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(Equal(time.Minute))
+				nodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+				Expect(nodeClaims.Items).To(HaveLen(expectedClaims))
+			}
+		},
+			Entry("unavailable zone", corev1.LabelTopologyZone, "test-zone-2", false, 0),
+			Entry("unavailable capacity type", v1.CapacityTypeLabelKey, v1.CapacityTypeSpot, false, 0),
+			Entry("incompatible instance type", corev1.LabelInstanceTypeStable, "other-type", false, 0),
+			Entry("incompatible architecture", corev1.LabelArchStable, v1.ArchitectureArm64, false, 0),
+			Entry("unavailable zone from template labels", corev1.LabelTopologyZone, "test-zone-2", true, 0),
+			Entry("one compatible offering", corev1.LabelTopologyZone, "test-zone-1", false, 1),
+			Entry("custom template label", "custom-label", "custom-value", true, 1),
+		)
+		It("should wait for exhausted reservations to regain capacity", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(1))
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved}},
+			}
+			instanceType := fake.NewInstanceType("reserved-type", fake.WithOfferings(cloudprovider.Offering{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					corev1.LabelTopologyZone: "test-zone-1",
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeReserved,
+				}),
+			}))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(BeEmpty())
+
+			instanceType.Offerings[0].ReservationCapacity = 1
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(1))
+		})
+		It("should resume provisioning when offerings become available without leaking reservations", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(2))
+			nodePool.Spec.Limits = v1.Limits{corev1.ResourceName("nodes"): resource.MustParse("2")}
+			instanceType := fake.NewInstanceType("available-type")
+			for _, offering := range instanceType.Offerings {
+				offering.Available = false
+			}
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			for range 3 {
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(Equal(time.Minute))
+				nodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+				Expect(nodeClaims.Items).To(BeEmpty())
+			}
+
+			instanceType.Offerings[0].Available = true
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(2))
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 2, 0, 0)
+		})
+		It("should requeue when no instance types are returned", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(1))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(BeEmpty())
+		})
+		It("should propagate instance type lookup errors and recover", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(1))
+			nodePool.Spec.Limits = v1.Limits{corev1.ResourceName("nodes"): resource.MustParse("1")}
+			lookupError := fmt.Errorf("instance type lookup failed")
+			cloudProvider.ErrorsForNodePool[nodePool.Name] = lookupError
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result, err := controller.Reconcile(ctx, nodePool)
+			Expect(err).To(MatchError(lookupError))
+			Expect(result.RequeueAfter).To(BeZero())
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(BeEmpty())
+
+			delete(cloudProvider.ErrorsForNodePool, nodePool.Name)
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(1))
+		})
 		It("should handle CreateNodeClaims errors gracefully", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = new(int64(1))
@@ -491,6 +612,13 @@ var _ = Describe("Static Provisioning Controller", func() {
 				},
 			})
 			nodePool.Spec.Template.Spec.Requirements = inputRequirements
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("available-type", fake.WithOfferings(cloudprovider.Offering{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					corev1.LabelTopologyZone: "us-west-2a",
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				}),
+			}))}
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
