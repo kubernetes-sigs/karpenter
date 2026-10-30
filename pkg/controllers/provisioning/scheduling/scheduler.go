@@ -945,25 +945,31 @@ func (s *Scheduler) launchNewNodeClaim(ctx context.Context, pod *corev1.Pod, vol
 	s.remainingResources[result.nodeClaim.NodePoolName] = subtractMax(s.remainingResources[result.nodeClaim.NodePoolName], result.nodeClaim.InstanceTypeOptions)
 }
 
-// pricedInstanceType is an instance type's allocatable resources and the price of its cheapest available offering
-// compatible with a NodeClaimTemplate.
+// pricedInstanceType is the resources an instance type has left for pods once its daemonset overhead is reserved, and
+// the price of its cheapest available offering compatible with a NodeClaimTemplate.
 type pricedInstanceType struct {
-	price       float64
-	allocatable corev1.ResourceList
+	price     float64
+	available corev1.ResourceList
 }
 
 // templatesByPriceBound returns the template indices ordered by NodePool weight, then by a lower bound on the price
 // of a NodeClaim the template could launch for the pod, then by the existing NodePool order, along with the bounds.
-// The bound is the cheapest of the template's instance types whose allocatable resources fit the pod's requests:
-// daemonset overhead, the pod's other requirements and NodePool limits only remove instance types and offerings, so
-// they can only raise the price.
+// The bound is the cheapest of the template's instance types that fit the pod's requests next to the daemonset overhead
+// of that instance type, as CanAdd checks them for a new NodeClaim: the pod's other requirements and NodePool limits
+// only remove instance types and offerings, so they can only raise the price.
 func (s *Scheduler) templatesByPriceBound(pod *corev1.Pod) ([]int, []float64) {
 	if s.templatePrices == nil {
 		s.templatePrices = lo.Map(s.nodeClaimTemplates, func(t *NodeClaimTemplate, _ int) []pricedInstanceType {
+			daemonOverhead := map[string]corev1.ResourceList{}
+			for _, group := range s.daemonOverheadGroups[t] {
+				for _, it := range group.InstanceTypes {
+					daemonOverhead[it.Name] = group.DaemonOverhead
+				}
+			}
 			var priced []pricedInstanceType
 			for _, it := range t.InstanceTypeOptions {
 				if of := it.Offerings.Available().Compatible(t.Requirements).Cheapest(); of != nil {
-					priced = append(priced, pricedInstanceType{price: of.Price, allocatable: it.Allocatable()})
+					priced = append(priced, pricedInstanceType{price: of.Price, available: resources.Subtract(it.Allocatable(), daemonOverhead[it.Name])})
 				}
 			}
 			sort.SliceStable(priced, func(a, b int) bool { return priced[a].price < priced[b].price })
@@ -973,7 +979,7 @@ func (s *Scheduler) templatesByPriceBound(pod *corev1.Pod) ([]int, []float64) {
 	requests := s.cachedPodData[pod.UID].Requests
 	bounds := lo.Map(s.templatePrices, func(priced []pricedInstanceType, _ int) float64 {
 		for _, p := range priced {
-			if resources.Fits(requests, p.allocatable) {
+			if resources.Fits(requests, p.available) {
 				return p.price
 			}
 		}
