@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -260,23 +261,24 @@ type PodData struct {
 }
 
 type Scheduler struct {
-	uuid                 types.UID // Unique UUID attached to this scheduling loop
-	newNodeClaims        []*NodeClaim
-	existingNodes        []*ExistingNode
-	nodeClaimTemplates   []*NodeClaimTemplate
-	templatePrices       [][]pricedInstanceType         // template index -> instance types by price, for PriceTieBreak
-	remainingResources   map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
-	daemonOverheadGroups map[*NodeClaimTemplate][]DaemonOverheadGroup
-	cachedPodData        map[types.UID]*PodData                  // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
-	volumeReqsByPod      map[types.UID][]scheduling.Requirements // Volume topology requirement alternatives per pod
-	preferences          *Preferences
-	topology             *Topology
-	cluster              *state.Cluster
-	recorder             events.Recorder
-	kubeClient           client.Client
-	clock                clock.Clock
-	reservationManager   *ReservationManager
-	reservedOfferingMode ReservedOfferingMode
+	uuid                   types.UID // Unique UUID attached to this scheduling loop
+	newNodeClaims          []*NodeClaim
+	existingNodes          []*ExistingNode
+	nodeClaimTemplates     []*NodeClaimTemplate
+	templatePrices         [][]pricedInstanceType         // template index -> instance types by price, for PriceTieBreak
+	mixedCapacityTemplates []bool                         // template index -> offers both spot and on-demand, for PriceTieBreak
+	remainingResources     map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
+	daemonOverheadGroups   map[*NodeClaimTemplate][]DaemonOverheadGroup
+	cachedPodData          map[types.UID]*PodData                  // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	volumeReqsByPod        map[types.UID][]scheduling.Requirements // Volume topology requirement alternatives per pod
+	preferences            *Preferences
+	topology               *Topology
+	cluster                *state.Cluster
+	recorder               events.Recorder
+	kubeClient             client.Client
+	clock                  clock.Clock
+	reservationManager     *ReservationManager
+	reservedOfferingMode   ReservedOfferingMode
 	// creditReservationCapacity is the per-reservation slot credit applied for this scheduling loop (a disruption
 	// candidate's freed slots). Threaded to each NodeClaim so a credited full reservation is classified as reservable
 	// rather than full — the ReservationManager capacity alone can't distinguish a genuinely-full reservation from one
@@ -840,24 +842,91 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 
 // addToCheapestNewNodeClaim is addToNewNodeClaim with the PriceTieBreak feature gate: among the NodePools of the
 // highest weight that can schedule the pod, it chooses the one whose NodeClaim would launch cheapest, breaking exact
-// ties by the existing NodePool order. Templates are evaluated in order of a lower bound on the price of a NodeClaim
-// they could launch for the pod, so templates that can't be cheaper than the best found so far are skipped.
+// ties by the existing NodePool order. A NodePool that allows both spot and on-demand for the pod has no price that
+// holds across cloud providers, which choose between the two differently, so the NodePools of its weight keep the
+// existing order.
 func (s *Scheduler) addToCheapestNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
 	errs := make([]error, len(s.nodeClaimTemplates))
-	best, bestPrice := -1, math.MaxFloat64
-	var bestResult templateResult
 	// As in addToNewNodeClaim, a reserved offering error invalidates the template it occurred for and every template after it
 	limit := len(s.nodeClaimTemplates)
 	order, bounds := s.templatesByPriceBound(pod)
-	for _, i := range order {
-		if i >= limit || s.canSkipTemplate(i, best, bounds[i], bestPrice) {
+	for len(order) > 0 {
+		// order is sorted by weight, so each weight is a contiguous run of templates
+		weight := s.nodeClaimTemplates[order[0]].NodePoolWeight
+		end := 1
+		for end < len(order) && s.nodeClaimTemplates[order[end]].NodePoolWeight == weight {
+			end++
+		}
+		tier := order[:end]
+		order = order[end:]
+
+		var result templateResult
+		var ok bool
+		if mixed := s.mixedCapacityTemplate(pod, tier, bounds); mixed >= 0 {
+			s.recorder.Publish(PriceTieBreakSkippedEvent(s.nodeClaimTemplates[mixed]))
+			result, ok = s.firstNodeClaimTemplate(ctx, pod, volumes, tier, &limit, errs)
+		} else {
+			result, ok = s.cheapestNodeClaimTemplate(ctx, pod, volumes, tier, bounds, &limit, errs)
+		}
+		if ok {
+			s.launchNewNodeClaim(ctx, pod, volumes, result)
+			return nil
+		}
+	}
+	return multierr.Combine(errs...)
+}
+
+// mixedCapacityTemplate returns the first template of the tier that could launch the pod as both spot and on-demand,
+// or -1 if there is none.
+func (s *Scheduler) mixedCapacityTemplate(pod *corev1.Pod, tier []int, bounds []float64) int {
+	requirements := s.cachedPodData[pod.UID].Requirements
+	if capacityType := requirements.Get(v1.CapacityTypeLabelKey); !capacityType.Has(v1.CapacityTypeSpot) || !capacityType.Has(v1.CapacityTypeOnDemand) {
+		return -1
+	}
+	for _, i := range tier {
+		if s.mixedCapacityTemplates[i] && bounds[i] != math.MaxFloat64 &&
+			s.nodeClaimTemplates[i].Requirements.Compatible(requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+			return i
+		}
+	}
+	return -1
+}
+
+// firstNodeClaimTemplate returns the result of the first template of the tier, in the existing NodePool order, that
+// the pod can be added to.
+func (s *Scheduler) firstNodeClaimTemplate(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes, tier []int, limit *int, errs []error) (templateResult, bool) {
+	for _, i := range slices.Sorted(slices.Values(tier)) {
+		if i >= *limit {
+			break
+		}
+		result, err := s.tryNodeClaimTemplate(ctx, pod, volumes, i)
+		if err != nil {
+			errs[i] = err
+			if IsReservedOfferingError(err) {
+				*limit = i
+			}
+			continue
+		}
+		return result, true
+	}
+	return templateResult{}, false
+}
+
+// cheapestNodeClaimTemplate returns the result of the template of the tier whose NodeClaim would launch cheapest.
+// Templates are evaluated in order of a lower bound on the price of a NodeClaim they could launch for the pod, so
+// templates that can't be cheaper than the best found so far are skipped.
+func (s *Scheduler) cheapestNodeClaimTemplate(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes, tier []int, bounds []float64, limit *int, errs []error) (templateResult, bool) {
+	best, bestPrice := -1, math.MaxFloat64
+	var bestResult templateResult
+	for _, i := range tier {
+		if i >= *limit || canSkipTemplate(i, best, bounds[i], bestPrice) {
 			continue
 		}
 		result, err := s.tryNodeClaimTemplate(ctx, pod, volumes, i)
 		if err != nil {
 			errs[i] = err
 			if IsReservedOfferingError(err) {
-				limit = i
+				*limit = i
 				if best > i {
 					best, bestPrice, bestResult = -1, math.MaxFloat64, templateResult{}
 				}
@@ -868,24 +937,25 @@ func (s *Scheduler) addToCheapestNewNodeClaim(ctx context.Context, pod *corev1.P
 			best, bestPrice, bestResult = i, price, result
 		}
 	}
-	if best < 0 {
-		return multierr.Combine(errs...)
-	}
-	s.launchNewNodeClaim(ctx, pod, volumes, bestResult)
-	return nil
+	return bestResult, best >= 0
 }
 
-// canSkipTemplate reports whether the template at index i can't be preferred over the best template found so far,
-// without evaluating it: it belongs to a NodePool of lower weight, or the lower bound on its price is above the best
-// price, or equal to it while the template comes later in the NodePool order and so loses the tie.
-func (s *Scheduler) canSkipTemplate(i, best int, bound, bestPrice float64) bool {
-	if best < 0 {
-		return false
+// canSkipTemplate reports whether the template at index i can't be preferred over the best template of the same weight
+// found so far, without evaluating it: the lower bound on its price is above the best price, or equal to it while the
+// template comes later in the NodePool order and so loses the tie.
+func canSkipTemplate(i, best int, bound, bestPrice float64) bool {
+	return best >= 0 && (bound > bestPrice || (bound == bestPrice && i > best))
+}
+
+// offersSpotAndOnDemand reports whether the template has available offerings of both spot and on-demand.
+func offersSpotAndOnDemand(t *NodeClaimTemplate) bool {
+	capacityTypes := sets.New[string]()
+	for _, it := range t.InstanceTypeOptions {
+		for _, of := range it.Offerings.Available().Compatible(t.Requirements) {
+			capacityTypes.Insert(of.CapacityType())
+		}
 	}
-	if s.nodeClaimTemplates[i].NodePoolWeight < s.nodeClaimTemplates[best].NodePoolWeight {
-		return true
-	}
-	return bound > bestPrice || (bound == bestPrice && i > best)
+	return capacityTypes.HasAll(v1.CapacityTypeSpot, v1.CapacityTypeOnDemand)
 }
 
 // templateResult is a NodeClaim from a template that the pod can be added to, with the results of adding it.
@@ -975,6 +1045,7 @@ func (s *Scheduler) templatesByPriceBound(pod *corev1.Pod) ([]int, []float64) {
 			sort.SliceStable(priced, func(a, b int) bool { return priced[a].price < priced[b].price })
 			return priced
 		})
+		s.mixedCapacityTemplates = lo.Map(s.nodeClaimTemplates, func(t *NodeClaimTemplate, _ int) bool { return offersSpotAndOnDemand(t) })
 	}
 	requests := s.cachedPodData[pod.UID].Requests
 	bounds := lo.Map(s.templatePrices, func(priced []pricedInstanceType, _ int) float64 {

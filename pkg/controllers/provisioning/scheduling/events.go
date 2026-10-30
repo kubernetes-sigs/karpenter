@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -58,6 +59,19 @@ func NoCompatibleInstanceTypes(np *v1.NodePool, minValuesIncompatibleError bool)
 		Message:        lo.Ternary(minValuesIncompatibleError, "NodePool requirements filtered out all compatible available instance types due to minValues incompatibility", "NodePool requirements filtered out all compatible available instance types"),
 		DedupeValues:   []string{string(np.UID)},
 		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
+// PriceTieBreakSkippedEvent is published on a NodePool that allows both spot and on-demand for a pod, when the
+// PriceTieBreak feature gate orders the NodePools of its weight by name instead of by price because of it.
+func PriceTieBreakSkippedEvent(nct *NodeClaimTemplate) events.Event {
+	return events.Event{
+		InvolvedObject: &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nct.NodePoolName, UID: nct.NodePoolUUID}},
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.PriceTieBreakSkipped,
+		Message:        fmt.Sprintf("NodePools of weight %d were ordered by name, not price: this NodePool allows both spot and on-demand, and the cloud provider chooses between them", nct.NodePoolWeight),
+		DedupeValues:   []string{string(nct.NodePoolUUID)},
+		DedupeTimeout:  5 * time.Minute,
 	}
 }
 

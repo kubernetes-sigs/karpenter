@@ -32,6 +32,7 @@ const (
 	FailedScheduling          = "FailedScheduling"
 	NoCompatibleInstanceTypes = "NoCompatibleInstanceTypes"
 	Nominated                 = "Nominated"
+	PriceTieBreakSkipped      = "PriceTieBreakSkipped"
 
 	// node repair
 	NodeRepairBlocked = "NodeRepairBlocked"

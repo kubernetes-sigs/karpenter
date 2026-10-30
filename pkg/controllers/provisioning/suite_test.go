@@ -2953,6 +2953,63 @@ var _ = Describe("Provisioning", func() {
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(onDemand.Name))
 				})
+				Context("with a NodePool allowing both spot and on-demand", func() {
+					var mixed, spot *v1.NodePool
+					BeforeEach(func() {
+						ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PriceTieBreak: new(true)}}))
+						// The mixed NodePool only has the instance type with the more expensive spot offering
+						instanceType := func(name string, spotPrice float64) *cloudprovider.InstanceType {
+							return fake.NewInstanceType(name,
+								fake.WithResources(corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("4"),
+									corev1.ResourceMemory: resource.MustParse("4Gi"),
+								}),
+								fake.WithOfferings(
+									cloudprovider.Offering{
+										Available:    true,
+										Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+										Price:        spotPrice,
+									},
+									cloudprovider.Offering{
+										Available:    true,
+										Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
+										Price:        1.0,
+									},
+								),
+							)
+						}
+						cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType("cheap-spot", 0.1), instanceType("expensive-spot", 0.3)}
+						mixed = test.NodePool(v1.NodePool{
+							ObjectMeta: metav1.ObjectMeta{Name: "z-mixed"},
+							Spec: v1.NodePoolSpec{
+								Weight: new(int32(50)),
+								Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+									Requirements: []v1.NodeSelectorRequirementWithMinValues{
+										{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand}},
+										{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"expensive-spot"}},
+									},
+								}},
+							},
+						})
+						spot = capacityTypeNodePool("a-spot", v1.CapacityTypeSpot, 50)
+						ExpectApplied(ctx, env.Client, mixed, spot)
+					})
+					It("should order the NodePools of its weight by name and publish an event", func() {
+						recorder := test.NewEventRecorder()
+						prov := provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client), predictionStore)
+						pod := test.UnschedulablePod()
+						ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+						node := ExpectScheduled(ctx, env.Client, pod)
+						Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(mixed.Name))
+						Expect(recorder.Calls(events.PriceTieBreakSkipped)).To(Equal(1))
+					})
+					It("should still order by price for a pod that allows only one capacity type", func() {
+						pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot}})
+						ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+						node := ExpectScheduled(ctx, env.Client, pod)
+						Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(spot.Name))
+					})
+				})
 			})
 		})
 	})
