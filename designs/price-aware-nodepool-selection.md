@@ -51,6 +51,7 @@ My savings plan is underutilized, and my already committed and paid money is was
 
 ### Non-Goals
 
+- Balancing between identical pools
 <!-- What does this RFC explicitly NOT address? Defining boundaries prevents scope creep
      during review and sets expectations for what is left for future work. -->
 
