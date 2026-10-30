@@ -89,6 +89,10 @@ sequenceDiagram
 
 - **Disruption budgets.** In-place nodes count against the `Drifted` budget until they are `Initialized` again. A `Drifted` budget of `0` stops in-place remediation and replacements alike.
 - **Blocking pods.** Drift admits nodes with PDB or `do-not-disrupt` blockers only when the NodeClaim has a `terminationGracePeriod`.
+- **Pod downtime.** In-place remediation keeps the instance at the cost of a longer pod outage.
+  Replacement pre-spins a node, so evicted pods schedule and start right away.
+  A reboot first drains the node or waits out its `terminationGracePeriod`, then reboots, and only after it is `Ready` again can pods schedule on it.
+  User-facing docs must lead with this tradeoff.
 - **Repair.** `ValidateNodeDisruptable` already blocks all other disruption while a node is rebooting. An `Unhealthy` node that is also drifted can be resolved by the same in-place operation when the provider supports it.
 - **Failure.** The reboot controller already escalates a failed reboot after disruption to NodeClaim replacement, with the drain bounded by the committed grace period. No new failure state is added.
 - **Consolidation.** Unchanged. A node that finishes in-place remediation is no longer drifted and is evaluated normally.
@@ -124,6 +128,12 @@ The provider can resolve the image from its NodeClass, so core never needs to kn
 Keep `IsDrifted`, add `DriftRemediation` to choose between in-place and replace, and add `RebootStatus` so core polls the provider for the operation's state.
 Rejected because `GetDriftStatus` answers both questions with one method: before the reboot it picks the action, and on the next drift pass it confirms the drift is gone.
 The cost is fail-fast: an operation that fails before the node reboots is detected when the observation window ends rather than immediately.
+
+### A dedicated `terminationGracePeriod` for reboots
+
+A separate grace period that bounds the drain before an in-place reboot.
+Not added for now: the NodeClaim's `terminationGracePeriod` already bounds the drain for every disruption, including reboots, and there is no evidence yet that in-place reboots need a different bound.
+It can be added later without breaking existing NodeClaims.
 
 ### Operator tooling outside Karpenter
 
