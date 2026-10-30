@@ -264,6 +264,7 @@ type Scheduler struct {
 	newNodeClaims        []*NodeClaim
 	existingNodes        []*ExistingNode
 	nodeClaimTemplates   []*NodeClaimTemplate
+	templatePrices       [][]pricedInstanceType         // template index -> instance types by price, for PriceTieBreak
 	remainingResources   map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverheadGroups map[*NodeClaimTemplate][]DaemonOverheadGroup
 	cachedPodData        map[types.UID]*PodData                  // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
@@ -738,13 +739,11 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod, volu
 
 //nolint:gocyclo
 func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
+	if karpopts.FromContext(ctx).FeatureGates.PriceTieBreak {
+		return s.addToCheapestNewNodeClaim(ctx, pod, volumes)
+	}
 	idx := math.MaxInt
 	var mu sync.Mutex
-	// With PriceTieBreak, NodePools of equal weight are ordered by the price of the NodeClaim they would
-	// launch for this pod instead of by name, so every template is evaluated rather than stopping at the
-	// first success.
-	priceTieBreak := karpopts.FromContext(ctx).FeatureGates.PriceTieBreak
-	bestPrice := math.MaxFloat64
 
 	var newNodeClaim *NodeClaim
 	var updatedRequirements scheduling.Requirements
@@ -797,7 +796,6 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 				offeringsToReserve = nil
 				allocationResult = nil
 				idx = i
-				bestPrice = math.MaxFloat64
 				return false
 			}
 			return true
@@ -805,19 +803,9 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		mu.Lock()
 		defer mu.Unlock()
 
-		if priceTieBreak {
-			// A reserved offering error at idx invalidates every template at or after it
-			if newNodeClaim == nil && i >= idx {
-				return true
-			}
-			price := launchPrice(its, r)
-			if newNodeClaim != nil && !s.preferTemplate(i, idx, price, bestPrice) {
-				return true
-			}
-			bestPrice = price
-		} else if i >= idx {
-			// Ensure that we always take an earlier successful schedule to keep consistent ordering
-			// We care about this particularly with NewNodeClaims because NodeClaims should be evaluated by weight
+		// Ensure that we always take an earlier successful schedule to keep consistent ordering
+		// We care about this particularly with NewNodeClaims because NodeClaims should be evaluated by weight
+		if i >= idx {
 			return false
 		}
 
@@ -838,7 +826,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		offeringsToReserve = ofs
 		allocationResult = result
 		idx = i
-		return priceTieBreak
+		return false
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
@@ -848,6 +836,153 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		return nil
 	}
 	return multierr.Combine(errs...)
+}
+
+// addToCheapestNewNodeClaim is addToNewNodeClaim with the PriceTieBreak feature gate: among the NodePools of the
+// highest weight that can schedule the pod, it chooses the one whose NodeClaim would launch cheapest, breaking exact
+// ties by the existing NodePool order. Templates are evaluated in order of a lower bound on the price of a NodeClaim
+// they could launch for the pod, so templates that can't be cheaper than the best found so far are skipped.
+func (s *Scheduler) addToCheapestNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
+	errs := make([]error, len(s.nodeClaimTemplates))
+	best, bestPrice := -1, math.MaxFloat64
+	var bestResult templateResult
+	// As in addToNewNodeClaim, a reserved offering error invalidates the template it occurred for and every template after it
+	limit := len(s.nodeClaimTemplates)
+	order, bounds := s.templatesByPriceBound(pod)
+	for _, i := range order {
+		if i >= limit {
+			continue
+		}
+		if best >= 0 {
+			if s.nodeClaimTemplates[i].NodePoolWeight < s.nodeClaimTemplates[best].NodePoolWeight {
+				break
+			}
+			if bounds[i] > bestPrice || (bounds[i] == bestPrice && i > best) {
+				continue
+			}
+		}
+		result, err := s.tryNodeClaimTemplate(ctx, pod, volumes, i)
+		if err != nil {
+			errs[i] = err
+			if IsReservedOfferingError(err) {
+				limit = i
+				if best > i {
+					best, bestPrice, bestResult = -1, math.MaxFloat64, templateResult{}
+				}
+			}
+			continue
+		}
+		if price := launchPrice(result.instanceTypes, result.requirements); best < 0 || s.preferTemplate(i, best, price, bestPrice) {
+			best, bestPrice, bestResult = i, price, result
+		}
+	}
+	if best < 0 {
+		return multierr.Combine(errs...)
+	}
+	s.launchNewNodeClaim(ctx, pod, volumes, bestResult)
+	return nil
+}
+
+// templateResult is a NodeClaim from a template that the pod can be added to, with the results of adding it.
+type templateResult struct {
+	nodeClaim     *NodeClaim
+	requirements  scheduling.Requirements
+	instanceTypes []*cloudprovider.InstanceType
+	offerings     []*cloudprovider.Offering
+	allocation    *dynamicresources.AllocationResult
+}
+
+// tryNodeClaimTemplate returns a new NodeClaim from the template at index i that the pod can be added to, within the
+// remaining resources of its NodePool.
+func (s *Scheduler) tryNodeClaimTemplate(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes, i int) (templateResult, error) {
+	its := s.nodeClaimTemplates[i].InstanceTypeOptions
+	// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
+	if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
+		// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
+		nodesRemaining, ok := remaining[resources.Node]
+		if ok && nodesRemaining.IsZero() {
+			return templateResult{}, serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+		}
+		its = filterByRemainingResources(its, remaining)
+		if len(its) == 0 {
+			return templateResult{}, serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+		} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
+			log.FromContext(ctx).V(1).WithValues(
+				"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
+			).Info("instance types were excluded because they would breach limits",
+				"excluded", len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
+				"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
+		}
+	}
+	nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode, s.creditReservationCapacity)
+	r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
+	if err != nil {
+		return templateResult{}, err
+	}
+	return templateResult{nodeClaim: nodeClaim, requirements: r, instanceTypes: its, offerings: ofs, allocation: result}, nil
+}
+
+// launchNewNodeClaim adds the pod to the chosen new NodeClaim and tracks it against its NodePool's remaining resources.
+func (s *Scheduler) launchNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes, result templateResult) {
+	_, minValuesRelaxed := lo.Find(result.nodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
+		updated := result.requirements.Get(k).MinValues()
+		original := result.nodeClaim.Requirements.Get(k).MinValues()
+		return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
+	})
+	if minValuesRelaxed {
+		result.nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "true"
+	} else {
+		result.nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "false"
+	}
+	// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
+	result.nodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], result.requirements, result.instanceTypes, volumes, result.offerings, result.allocation, s.allocator)
+	s.newNodeClaims = append(s.newNodeClaims, result.nodeClaim)
+	s.remainingResources[result.nodeClaim.NodePoolName] = subtractMax(s.remainingResources[result.nodeClaim.NodePoolName], result.nodeClaim.InstanceTypeOptions)
+}
+
+// pricedInstanceType is an instance type's allocatable resources and the price of its cheapest available offering
+// compatible with a NodeClaimTemplate.
+type pricedInstanceType struct {
+	price       float64
+	allocatable corev1.ResourceList
+}
+
+// templatesByPriceBound returns the template indices ordered by NodePool weight, then by a lower bound on the price
+// of a NodeClaim the template could launch for the pod, then by the existing NodePool order, along with the bounds.
+// The bound is the cheapest of the template's instance types whose allocatable resources fit the pod's requests:
+// daemonset overhead, the pod's other requirements and NodePool limits only remove instance types and offerings, so
+// they can only raise the price.
+func (s *Scheduler) templatesByPriceBound(pod *corev1.Pod) ([]int, []float64) {
+	if s.templatePrices == nil {
+		s.templatePrices = lo.Map(s.nodeClaimTemplates, func(t *NodeClaimTemplate, _ int) []pricedInstanceType {
+			var priced []pricedInstanceType
+			for _, it := range t.InstanceTypeOptions {
+				if of := it.Offerings.Available().Compatible(t.Requirements).Cheapest(); of != nil {
+					priced = append(priced, pricedInstanceType{price: of.Price, allocatable: it.Allocatable()})
+				}
+			}
+			sort.SliceStable(priced, func(a, b int) bool { return priced[a].price < priced[b].price })
+			return priced
+		})
+	}
+	requests := s.cachedPodData[pod.UID].Requests
+	bounds := lo.Map(s.templatePrices, func(priced []pricedInstanceType, _ int) float64 {
+		for _, p := range priced {
+			if resources.Fits(requests, p.allocatable) {
+				return p.price
+			}
+		}
+		return math.MaxFloat64
+	})
+	order := lo.Range(len(s.nodeClaimTemplates))
+	sort.SliceStable(order, func(a, b int) bool {
+		wa, wb := s.nodeClaimTemplates[order[a]].NodePoolWeight, s.nodeClaimTemplates[order[b]].NodePoolWeight
+		if wa != wb {
+			return wa > wb
+		}
+		return bounds[order[a]] < bounds[order[b]]
+	})
+	return order, bounds
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
