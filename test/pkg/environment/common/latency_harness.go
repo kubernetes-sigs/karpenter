@@ -50,6 +50,7 @@ var TargetHistograms = []string{
 	"karpenter_pods_provisioning_bound_duration_seconds",
 	"karpenter_pods_provisioning_startup_duration_seconds",
 	"karpenter_scheduler_scheduling_duration_seconds",
+	"karpenter_scheduler_topology_build_duration_seconds",
 	"karpenter_voluntary_disruption_decision_evaluation_duration_seconds",
 	"karpenter_nodeclaims_termination_duration_seconds",
 	"karpenter_consolidation_score",

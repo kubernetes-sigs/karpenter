@@ -345,7 +345,7 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
 	result := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
-	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
+	podKeys := sets.New[string](lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
 	for pod, binding := range result.Bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
