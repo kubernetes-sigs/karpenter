@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -97,6 +98,7 @@ func NewNodeClaim(
 ) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", nodeID.Add(1))
 	template := *nodeClaimTemplate
+	template.Annotations = maps.Clone(nodeClaimTemplate.Annotations)
 	template.Requirements = scheduling.NewRequirements()
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
 	template.Requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, hostname))
