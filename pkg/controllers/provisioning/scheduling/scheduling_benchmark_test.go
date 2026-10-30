@@ -130,6 +130,28 @@ func BenchmarkSchedulingEqualWeightNodePools10PriceTieBreak(b *testing.B) {
 	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, true)
 }
 
+// The OneWorker variants schedule with a single worker, as Karpenter does when its controller requests 1 CPU or less
+// (the worker count is ceil(CPU requests / 1000m)). Without parallel workers, the scheduler evaluates templates one at
+// a time with PriceTieBreak disabled as well.
+func BenchmarkSchedulingEqualWeightNodePools2OneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 2, false, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools5OneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 5, false, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools10OneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, false, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools2PriceTieBreakOneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 2, true, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools5PriceTieBreakOneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 5, true, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools10PriceTieBreakOneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, true, scheduling.NumConcurrentReconciles(1))
+}
+
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile
@@ -188,7 +210,8 @@ func benchmarkScheduler(b *testing.B, pods []*corev1.Pod, opts ...scheduling.Opt
 func benchmarkSchedulerWithNodePools(b *testing.B, pods []*corev1.Pod, nodePoolCount int, priceTieBreak bool, opts ...scheduling.Options) {
 	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"),
 		test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PriceTieBreak: lo.ToPtr(priceTieBreak)}}))
-	scheduler, err := setupScheduler(ctx, pods, nodePoolCount, append(opts, scheduling.NumConcurrentReconciles(5))...)
+	// Callers may override the worker count, so it goes first
+	scheduler, err := setupScheduler(ctx, pods, nodePoolCount, append([]scheduling.Options{scheduling.NumConcurrentReconciles(5)}, opts...)...)
 	if err != nil {
 		b.Fatalf("creating scheduler, %s", err)
 	}
