@@ -64,6 +64,41 @@ var _ = Describe("StateNode Reboot", func() {
 		})
 	})
 
+	Context("RebootReinitializing", func() {
+		// rebooted builds a StateNode whose reboot reached the given terminal reason.
+		// When uninitialized, the Node's initialized label is removed, as the reboot controller does at issuance.
+		rebooted := func(reason string, initialized bool) *state.StateNode {
+			n := stateNode("")
+			n.NodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRebooting, reason, "done")
+			if !initialized {
+				delete(n.Node.Labels, v1.NodeInitializedLabelKey)
+			}
+			return n
+		}
+		It("is true after a successful reboot while the node is uninitialized", func() {
+			Expect(rebooted(v1.RebootReasonSucceeded, false).RebootReinitializing()).To(BeTrue())
+		})
+		It("is false once the node re-initializes", func() {
+			Expect(rebooted(v1.RebootReasonSucceeded, true).RebootReinitializing()).To(BeFalse())
+		})
+		It("is false after a failed reboot", func() {
+			Expect(rebooted(v1.RebootReasonFailed, false).RebootReinitializing()).To(BeFalse())
+		})
+		It("is false while the reboot is still in progress", func() {
+			n := stateNode(metav1.ConditionTrue)
+			delete(n.Node.Labels, v1.NodeInitializedLabelKey)
+			Expect(n.RebootReinitializing()).To(BeFalse())
+		})
+		It("is false for an uninitialized node that never rebooted", func() {
+			n := stateNode("")
+			delete(n.Node.Labels, v1.NodeInitializedLabelKey)
+			Expect(n.RebootReinitializing()).To(BeFalse())
+		})
+		It("is false when the StateNode has no NodeClaim", func() {
+			Expect((&state.StateNode{Node: test.Node()}).RebootReinitializing()).To(BeFalse())
+		})
+	})
+
 	Context("ValidateNodeDisruptable", func() {
 		It("rejects a rebooting node so other disruption skips it", func() {
 			err := stateNode(metav1.ConditionTrue).ValidateNodeDisruptable(clock.RealClock{})

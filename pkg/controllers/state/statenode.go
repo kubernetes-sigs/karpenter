@@ -403,6 +403,19 @@ func (in *StateNode) RebootInProgress() bool {
 	return cond != nil && cond.IsTrue()
 }
 
+// RebootReinitializing returns true if the node's reboot succeeded and the node hasn't re-initialized since. Reboot
+// resets initialization at issuance and initialization only re-runs after the reboot succeeds, so in between the node
+// is neither rebooting nor serving; disruption budgets keep counting it as disrupting, as they did while
+// RebootInProgress. This is unbounded: a node whose initialization never completes after a reboot holds its NodePool's
+// budget until it initializes or is removed.
+func (in *StateNode) RebootReinitializing() bool {
+	if in.NodeClaim == nil || in.Initialized() {
+		return false
+	}
+	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+	return cond != nil && cond.IsFalse() && cond.Reason == v1.RebootReasonSucceeded
+}
+
 func (in *StateNode) Taints() []corev1.Taint {
 	// If we have a managed node that isn't registered, we should use its NodeClaim
 	// representation of taints. Likewise, if we don't have a Node representation for this
