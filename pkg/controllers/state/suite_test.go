@@ -1089,7 +1089,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node, _ bool) bool {
 			foundPodCount++
 			Expect(p.Name).To(Equal(pod.Name))
 			return true
@@ -1133,7 +1133,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node, _ bool) bool {
 			foundPodCount++
 			Fail("shouldn't track pods with preferred anti-affinity")
 			return true
@@ -1174,7 +1174,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node, _ bool) bool {
 			foundPodCount++
 			Expect(p.Name).To(Equal(pod.Name))
 			return true
@@ -1184,7 +1184,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectDeleted(ctx, env.Client, client.Object(pod))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount = 0
-		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node, _ bool) bool {
 			foundPodCount++
 			Fail("should not be called as the pod was deleted")
 			return true
@@ -1230,7 +1230,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node, _ bool) bool {
 			foundPodCount++
 			return true
 		})

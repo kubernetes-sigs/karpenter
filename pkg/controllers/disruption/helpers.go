@@ -149,7 +149,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
 		// even if they are still in the middle of their initialization loop. In the case of disruption, we don't want
 		// to proceed disrupting if our scheduling decision relies on nodes that haven't entered a terminal state.
-		if !n.Initialized() {
+		if !n.Initialized() || n.RebootInProgress() {
 			for _, p := range n.Pods {
 				// Only add a pod scheduling error if it isn't on an already deleting node.
 				// If the pod is on a deleting node, we assume one of two things has already happened:
@@ -158,7 +158,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				// 2. The node was chosen for a previous disruption command, we assume that the uninitialized node will come up
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.
-				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
+				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; ok {
+					continue
+				}
+				if n.RebootInProgress() {
+					results.PodErrors[p] = NewRebootingNodeError(n)
+				} else {
 					results.PodErrors[p] = NewUninitializedNodeError(n)
 				}
 			}
@@ -249,6 +254,26 @@ func (u *UninitializedNodeError) Error() string {
 		info = append(info, fmt.Sprintf("node/%s", u.Node.Name))
 	}
 	return fmt.Sprintf("would schedule against uninitialized %s", strings.Join(info, ", "))
+}
+
+// RebootingNodeError tracks a pod that would schedule to a rebooting node, whose capacity only exists once it returns
+type RebootingNodeError struct {
+	*scheduling.ExistingNode
+}
+
+func NewRebootingNodeError(node *scheduling.ExistingNode) *RebootingNodeError {
+	return &RebootingNodeError{ExistingNode: node}
+}
+
+func (r *RebootingNodeError) Error() string {
+	var info []string
+	if r.NodeClaim != nil {
+		info = append(info, fmt.Sprintf("nodeclaim/%s", r.NodeClaim.Name))
+	}
+	if r.Node != nil {
+		info = append(info, fmt.Sprintf("node/%s", r.Node.Name))
+	}
+	return fmt.Sprintf("would schedule against rebooting %s", strings.Join(info, ", "))
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.

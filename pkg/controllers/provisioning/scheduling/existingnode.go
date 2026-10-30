@@ -62,6 +62,11 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 			daemonResources[k] = v
 		}
 	}
+	// A rebooting node returns without its terminating pods, so their host ports and volumes don't conflict there
+	for _, podKey := range n.RebootDepartingPods() {
+		n.HostPortUsage().DeletePod(podKey)
+		n.VolumeUsage().DeletePod(podKey)
+	}
 	available := n.Available()
 	node := &ExistingNode{
 		StateNode:               n,
@@ -131,7 +136,9 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 			if podData.ResourceClaimErr != nil {
 				return nil, nil, podData.ResourceClaimErr
 			}
-			result, err := allocator.Allocate(ctx, &draExistingNode{en: n, instanceType: n.instanceType}, podData.ResourceClaims)
+			draNode := &draExistingNode{en: n, instanceType: n.instanceType}
+			draNode.hasPublishedSlices = n.RebootInProgress() && allocator.HasNodeSlices(draNode.NodeName())
+			result, err := allocator.Allocate(ctx, draNode, podData.ResourceClaims)
 			if err != nil {
 				lastErr = fmt.Errorf("allocating dynamic resources, %w", err)
 				continue

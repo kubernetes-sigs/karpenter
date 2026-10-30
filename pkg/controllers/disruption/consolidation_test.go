@@ -2533,6 +2533,73 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
+		// rebootNode marks nodeClaims[i] rebooting and fences its node.
+		rebootNode := func(i int) {
+			GinkgoHelper()
+			nodeClaims[i] = ExpectExists(ctx, env.Client, nodeClaims[i])
+			nodeClaims[i].StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "reboot requested")
+			nodes[i] = ExpectExists(ctx, env.Client, nodes[i])
+			nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.RebootingNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+		}
+		It("should not consolidate onto a rebooting node whose terminating pods free its capacity", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+			terminating := replicaSetPod()
+			terminating.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("31")}
+			moving := replicaSetPod()
+			moving.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}
+			ExpectApplied(ctx, env.Client, terminating, moving, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+			ExpectManualBinding(ctx, env.Client, terminating, nodes[0])
+			ExpectManualBinding(ctx, env.Client, moving, nodes[1])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			rebootNode(0)
+			ExpectDeletionTimestampSet(ctx, env.Client, terminating)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[0]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+		})
+		DescribeTable("should consolidate onto a healthy node while another node reboots",
+			func(rebootingSortsFirst bool) {
+				nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+				extraNodeClaims, extraNodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: nodeClaims[0].Labels},
+					Status:     v1.NodeClaimStatus{Allocatable: nodeClaims[0].Status.Allocatable},
+				})
+				extraNodeClaims[0].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+				nodeClaims, nodes = append(nodeClaims, extraNodeClaims...), append(nodes, extraNodes...)
+				// Of the two non-candidates, the rebooting node is whichever sorts first or last by name.
+				rebooting, healthy := 0, 1
+				if (nodes[0].Name < nodes[1].Name) != rebootingSortsFirst {
+					rebooting, healthy = 1, 0
+				}
+				moving := replicaSetPod()
+				moving.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}
+				pinned := lo.Map([]int{rebooting, healthy}, func(_ int, _ int) *corev1.Pod {
+					p := replicaSetPod()
+					p.Annotations = lo.Assign(p.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+					p.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}
+					return p
+				})
+				ExpectApplied(ctx, env.Client, moving, pinned[0], pinned[1], nodePool)
+				for i := range nodes {
+					ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				}
+				ExpectManualBinding(ctx, env.Client, moving, nodes[2])
+				ExpectManualBinding(ctx, env.Client, pinned[0], nodes[rebooting])
+				ExpectManualBinding(ctx, env.Client, pinned[1], nodes[healthy])
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+				rebootNode(rebooting)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[rebooting]))
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[rebooting]))
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				Expect(queue.GetCommands()).To(HaveLen(1))
+			},
+			Entry("when the rebooting node sorts first", true),
+			Entry("when the rebooting node sorts last", false),
+		)
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()

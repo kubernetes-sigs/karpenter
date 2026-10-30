@@ -249,7 +249,8 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
 // currently bound to a node. The pod returned may not be up-to-date with respect to status, however since the
 // anti-affinity terms can't be modified, they will be correct.
-func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node) bool) {
+// leavingRebootingNode reports a terminating pod on a rebooting node, which returns without it.
+func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node, leavingRebootingNode bool) bool) {
 	c.antiAffinityPods.Range(func(key, value any) bool {
 		pod := value.(*corev1.Pod)
 		c.mu.RLock()
@@ -263,7 +264,7 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node)
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
 		}
-		return fn(pod, node.Node)
+		return fn(pod, node.Node, node.RebootInProgress() && node.terminatingPods[client.ObjectKeyFromObject(pod)])
 	})
 }
 
@@ -751,6 +752,7 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 		daemonSetLimits:   oldNode.daemonSetLimits,
 		podRequests:       oldNode.podRequests,
 		podLimits:         oldNode.podLimits,
+		terminatingPods:   oldNode.terminatingPods,
 		hostPortUsage:     oldNode.hostPortUsage,
 		volumeUsage:       oldNode.volumeUsage,
 		markedForDeletion: oldNode.markedForDeletion,
