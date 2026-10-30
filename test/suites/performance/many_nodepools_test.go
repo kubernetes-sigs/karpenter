@@ -196,14 +196,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			// The core guard: controller memory must stay bounded even with a high cardinality of NodePools.
 			// This is the regression class that motivated the memory optimizations in cluster cost tracking.
-			Expect(scaleOutReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("manyNodePools/scaleOut", 60)),
-				"Karpenter controller P95 live heap should stay bounded with many NodePools")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("manyNodePools/scaleOut", 0.80)),
-				"Karpenter controller avg CPU should stay bounded with many NodePools")
-			Expect(scaleOutReport.KarpenterP95CPUCores).To(BeNumerically("<", CPUThreshold("manyNodePools/scaleOutP95", 0.80)),
-				"Karpenter controller P95 CPU should stay bounded with many NodePools")
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("manyNodePools/scaleOut", 5*time.Minute)),
-				"Scale-out should complete quickly given the small pod/node count")
+			ExpectGates(scaleOutReport, "manyNodePools/scaleOut")
 
 			// ========== PHASE 2: SCALE-IN / CONSOLIDATION ==========
 			// Scaling the deployment down exercises the disruption/consolidation controllers, which recompute
@@ -224,14 +217,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.TotalPods).To(Equal(manyNodePoolsScaleInPodCount), "Should have the scaled-in pod count")
 			Expect(consolidationReport.PodsNetChange).To(Equal(manyNodePoolsScaleInPodCount-manyNodePoolsPodCount), "Should reflect the net pod reduction")
 
-			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("manyNodePools/consolidation", 90)),
-				"Karpenter controller P95 live heap should stay bounded during consolidation with many NodePools")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("manyNodePools/consolidation", 0.40)),
-				"Karpenter controller avg CPU should stay bounded during consolidation with many NodePools")
-			Expect(consolidationReport.KarpenterP95CPUCores).To(BeNumerically("<", CPUThreshold("manyNodePools/consolidationP95", 1.20)),
-				"Karpenter controller P95 CPU should stay bounded during consolidation with many NodePools")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("manyNodePools/consolidation", 15*time.Minute)),
-				"Consolidation should complete within the timeout")
+			ExpectGates(consolidationReport, "manyNodePools/consolidation")
 		})
 
 		It("should stay within resource bounds when pods target many NodePools", func() {
@@ -273,12 +259,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically(">", manyNodePoolsTargetPools/2),
 				"Pinned pods should provision nodes across many distinct NodePools")
 
-			Expect(scaleOutReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("manyNodePoolsTargeted/scaleOut", 170)),
-				"Karpenter controller P95 live heap should stay bounded when targeting many NodePools")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("manyNodePoolsTargeted/scaleOut", 1.50)),
-				"Karpenter controller avg CPU should stay bounded when targeting many NodePools")
-			Expect(scaleOutReport.KarpenterP95CPUCores).To(BeNumerically("<", CPUThreshold("manyNodePoolsTargeted/scaleOutP95", 2.00)),
-				"Karpenter controller P95 CPU should stay bounded when targeting many NodePools")
+			ExpectGates(scaleOutReport, "manyNodePoolsTargeted/scaleOut")
 
 			// ========== PHASE 2: SCALE-IN / CONSOLIDATION ==========
 			// Zero out half the deployments so their NodePools empty and those nodes consolidate away.
@@ -298,14 +279,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.TotalPods).To(Equal(scaleInPools), "Should have the scaled-in pod count")
 			Expect(consolidationReport.PodsNetChange).To(Equal(scaleInPools-manyNodePoolsTargetPools), "Should reflect the net pod reduction")
 
-			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("manyNodePoolsTargeted/consolidation", 180)),
-				"Karpenter controller P95 live heap should stay bounded during targeted consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("manyNodePoolsTargeted/consolidation", 2.00)),
-				"Karpenter controller avg CPU should stay bounded during targeted consolidation")
-			Expect(consolidationReport.KarpenterP95CPUCores).To(BeNumerically("<", CPUThreshold("manyNodePoolsTargeted/consolidationP95", 2.50)),
-				"Karpenter controller P95 CPU should stay bounded during targeted consolidation")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("manyNodePoolsTargeted/consolidation", 20*time.Minute)),
-				"Consolidation should complete within the timeout")
+			ExpectGates(consolidationReport, "manyNodePoolsTargeted/consolidation")
 
 			// The suite cleanup deletes Deployments with background propagation, and with this many of them the
 			// garbage collector lags long enough for their ReplicaSets to recreate pods after cleanup finishes,

@@ -1,0 +1,604 @@
+{
+  "provider": "kwok",
+  "source": "EKS us-east-2, tier-xl provisioned control plane, controller 8 CPU / 24Gi",
+  "baseline_commit": "6eac93ba",
+  "generated": "2026-10-21T22:17:48Z",
+  "phases": {
+    "nodepools/scheduling": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 0.78,
+        "min": 0.739,
+        "max": 0.798,
+        "cv": 0.029,
+        "suggested_bound": 0.878,
+        "variants": {
+          "mconc1": 0.617,
+          "rv1973": 0.832,
+          "rv2013": 0.781,
+          "rv3211": 0.795
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.898,
+        "min": 0.898,
+        "max": 0.898,
+        "cv": 0,
+        "suggested_bound": 0.808,
+        "variants": {
+          "mconc1": 0.898,
+          "rv1973": 0.898,
+          "rv2013": 0.898,
+          "rv3211": 0.898
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 84.535,
+        "min": 66.28,
+        "max": 91.708,
+        "cv": 0.133,
+        "suggested_bound": 100.879,
+        "variants": {
+          "mconc1": 83.997,
+          "rv1973": 72.542,
+          "rv2013": 68.064,
+          "rv3211": 86.148
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.893,
+        "min": 0.893,
+        "max": 0.893,
+        "cv": 0,
+        "suggested_bound": 0.804,
+        "variants": {
+          "mconc1": 0.893,
+          "rv1973": 0.893,
+          "rv2013": 0.893,
+          "rv3211": 0.893
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 7,
+        "min": 7,
+        "max": 7,
+        "cv": 0,
+        "suggested_bound": 7.7,
+        "variants": {
+          "mconc1": 7,
+          "rv1973": 7,
+          "rv2013": 7,
+          "rv3211": 7
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 5,
+        "median": 4,
+        "min": 3,
+        "max": 4,
+        "cv": 0.136,
+        "suggested_bound": 4.4,
+        "variants": {
+          "mconc1": 16,
+          "rv1973": 4,
+          "rv2013": 4,
+          "rv3211": 4
+        }
+      },
+      "pod_ready_seconds_p50": {
+        "n": 5,
+        "median": 4,
+        "min": 3,
+        "max": 4,
+        "cv": 0.136,
+        "suggested_bound": 4.4,
+        "variants": {
+          "mconc1": 13,
+          "rv1973": 4,
+          "rv2013": 4,
+          "rv3211": 4
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 5,
+        "median": 4,
+        "min": 3,
+        "max": 4,
+        "cv": 0.136,
+        "suggested_bound": 4.4,
+        "variants": {
+          "mconc1": 16,
+          "rv1973": 4,
+          "rv2013": 4,
+          "rv3211": 4
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 5,
+        "median": 4,
+        "min": 3,
+        "max": 4,
+        "cv": 0.136,
+        "suggested_bound": 4.4,
+        "variants": {
+          "mconc1": 16,
+          "rv1973": 4,
+          "rv2013": 4,
+          "rv3211": 4
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 4.37,
+        "min": 4.353,
+        "max": 4.528,
+        "cv": 0.015,
+        "suggested_bound": 4.981,
+        "variants": {
+          "mconc1": 16.758,
+          "rv1973": 4.364,
+          "rv2013": 4.341,
+          "rv3211": 4.364
+        }
+      }
+    },
+    "nodepools/startup": {
+      "heap_mb": {
+        "n": 5,
+        "median": 60.812,
+        "min": 50.827,
+        "max": 68.639,
+        "cv": 0.096,
+        "suggested_bound": 75.503,
+        "variants": {
+          "mconc1": 50.49,
+          "rv1973": 69.152,
+          "rv2013": 69.744,
+          "rv3211": 71.287
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 7,
+        "min": 7,
+        "max": 7,
+        "cv": 0,
+        "suggested_bound": 7.7,
+        "variants": {
+          "mconc1": 7,
+          "rv1973": 7,
+          "rv2013": 7,
+          "rv3211": 7
+        }
+      },
+      "startup_seconds": {
+        "n": 5,
+        "median": 19.719,
+        "min": 18.393,
+        "max": 23.231,
+        "cv": 0.087,
+        "suggested_bound": 25.554,
+        "variants": {
+          "mconc1": 18.467,
+          "rv1973": 18.422,
+          "rv2013": 18.664,
+          "rv3211": 20.904
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 19.719,
+        "min": 18.393,
+        "max": 23.231,
+        "cv": 0.087,
+        "suggested_bound": 25.554,
+        "variants": {
+          "mconc1": 18.467,
+          "rv1973": 18.422,
+          "rv2013": 18.664,
+          "rv3211": 20.904
+        }
+      }
+    },
+    "pods/consolidation": {
+      "cpu_cores": {
+        "n": 4,
+        "median": 0.198,
+        "min": 0.185,
+        "max": 0.211,
+        "cv": 0.056,
+        "suggested_bound": 0.232,
+        "variants": {
+          "rv1973": 0.162,
+          "rv2013": 0.176
+        }
+      },
+      "cpu_util": {
+        "n": 4,
+        "median": 0.983,
+        "min": 0.977,
+        "max": 0.992,
+        "cv": 0.005,
+        "suggested_bound": 0.879,
+        "variants": {
+          "rv1973": 0.981,
+          "rv2013": 0.988
+        }
+      },
+      "heap_mb": {
+        "n": 4,
+        "median": 72.918,
+        "min": 72.078,
+        "max": 73.512,
+        "cv": 0.008,
+        "suggested_bound": 80.863,
+        "variants": {
+          "rv1973": 75.387,
+          "rv2013": 70.09
+        }
+      },
+      "memory_util": {
+        "n": 4,
+        "median": 0.878,
+        "min": 0.869,
+        "max": 0.9,
+        "cv": 0.014,
+        "suggested_bound": 0.782,
+        "variants": {
+          "rv1973": 0.891,
+          "rv2013": 0.91
+        }
+      },
+      "nodes": {
+        "n": 4,
+        "median": 121.5,
+        "min": 115,
+        "max": 127,
+        "cv": 0.036,
+        "suggested_bound": 139.7,
+        "variants": {
+          "rv1973": 121,
+          "rv2013": 109
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 4,
+        "median": 3,
+        "min": 3,
+        "max": 3,
+        "cv": 0,
+        "suggested_bound": 3.3,
+        "variants": {
+          "rv1973": 2,
+          "rv2013": 2
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 4,
+        "median": 2,
+        "min": 1,
+        "max": 2,
+        "cv": 0.247,
+        "suggested_bound": 2.2,
+        "variants": {
+          "rv1973": 1,
+          "rv2013": 0
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 4,
+        "median": 2,
+        "min": 2,
+        "max": 3,
+        "cv": 0.192,
+        "suggested_bound": 3.3,
+        "variants": {
+          "rv1973": 2,
+          "rv2013": 2
+        }
+      },
+      "pods_disrupted": {
+        "n": 4,
+        "median": 381,
+        "min": 331,
+        "max": 407,
+        "cv": 0.073,
+        "suggested_bound": 447.7,
+        "variants": {
+          "rv1973": 342,
+          "rv2013": 370
+        }
+      },
+      "total_time_seconds": {
+        "n": 4,
+        "median": 951.951,
+        "min": 907.308,
+        "max": 1001.749,
+        "cv": 0.036,
+        "suggested_bound": 1101.924,
+        "variants": {
+          "rv1973": 1204.945,
+          "rv2013": 839.656
+        }
+      }
+    },
+    "pods/scaleOut": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 0.722,
+        "min": 0.649,
+        "max": 0.788,
+        "cv": 0.063,
+        "suggested_bound": 0.867,
+        "variants": {
+          "mconc1": 0.143,
+          "rv1973": 0.681,
+          "rv2013": 0.758,
+          "rv3211": 0.747
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.878,
+        "min": 0.843,
+        "max": 0.898,
+        "cv": 0.023,
+        "suggested_bound": 0.759,
+        "variants": {
+          "mconc1": 0.864,
+          "rv1973": 0.881,
+          "rv2013": 0.864,
+          "rv3211": 0.833
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 65.375,
+        "min": 61.338,
+        "max": 68.617,
+        "cv": 0.038,
+        "suggested_bound": 75.479,
+        "variants": {
+          "mconc1": 59.314,
+          "rv1973": 64.788,
+          "rv2013": 60.304,
+          "rv3211": 81.32
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.827,
+        "min": 0.792,
+        "max": 0.847,
+        "cv": 0.025,
+        "suggested_bound": 0.713,
+        "variants": {
+          "mconc1": 0.819,
+          "rv1973": 0.83,
+          "rv2013": 0.813,
+          "rv3211": 0.782
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 159,
+        "min": 156,
+        "max": 165,
+        "cv": 0.022,
+        "suggested_bound": 181.5,
+        "variants": {
+          "mconc1": 161,
+          "rv1973": 158,
+          "rv2013": 161,
+          "rv3211": 167
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 5,
+        "median": 16,
+        "min": 14,
+        "max": 17,
+        "cv": 0.074,
+        "suggested_bound": 18.7,
+        "variants": {
+          "mconc1": 333,
+          "rv1973": 15,
+          "rv2013": 15,
+          "rv3211": 13
+        }
+      },
+      "pod_ready_seconds_p50": {
+        "n": 5,
+        "median": 9,
+        "min": 8,
+        "max": 9,
+        "cv": 0.057,
+        "suggested_bound": 9.9,
+        "variants": {
+          "mconc1": 208,
+          "rv1973": 8,
+          "rv2013": 8,
+          "rv3211": 8
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 5,
+        "median": 14,
+        "min": 10,
+        "max": 14,
+        "cv": 0.121,
+        "suggested_bound": 15.4,
+        "variants": {
+          "mconc1": 305,
+          "rv1973": 13,
+          "rv2013": 13,
+          "rv3211": 13
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 5,
+        "median": 14,
+        "min": 13,
+        "max": 16,
+        "cv": 0.069,
+        "suggested_bound": 17.6,
+        "variants": {
+          "mconc1": 331,
+          "rv1973": 13,
+          "rv2013": 13,
+          "rv3211": 13
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 17.501,
+        "min": 15.252,
+        "max": 17.871,
+        "cv": 0.07,
+        "suggested_bound": 19.658,
+        "variants": {
+          "mconc1": 338.188,
+          "rv1973": 17.687,
+          "rv2013": 15.488,
+          "rv3211": 15.43
+        }
+      }
+    },
+    "topology/scaleOut": {
+      "cpu_cores": {
+        "n": 4,
+        "median": 0.981,
+        "min": 0.965,
+        "max": 1.044,
+        "cv": 0.032,
+        "suggested_bound": 1.148,
+        "variants": {
+          "rv1973": 1.063,
+          "rv2013": 1.036,
+          "rv3211": 0.989
+        }
+      },
+      "cpu_util": {
+        "n": 4,
+        "median": 0.477,
+        "min": 0.461,
+        "max": 0.563,
+        "cv": 0.082,
+        "suggested_bound": 0.415,
+        "variants": {
+          "rv1973": 0.474,
+          "rv2013": 0.484,
+          "rv3211": 0.538
+        }
+      },
+      "heap_mb": {
+        "n": 4,
+        "median": 176.94,
+        "min": 138.217,
+        "max": 215.742,
+        "cv": 0.155,
+        "suggested_bound": 237.316,
+        "variants": {
+          "rv1973": 168.559,
+          "rv2013": 176.773,
+          "rv3211": 131.769
+        }
+      },
+      "memory_util": {
+        "n": 4,
+        "median": 0.568,
+        "min": 0.543,
+        "max": 0.624,
+        "cv": 0.052,
+        "suggested_bound": 0.489,
+        "variants": {
+          "rv1973": 0.549,
+          "rv2013": 0.568,
+          "rv3211": 0.605
+        }
+      },
+      "nodes": {
+        "n": 4,
+        "median": 677.5,
+        "min": 526,
+        "max": 706,
+        "cv": 0.112,
+        "suggested_bound": 776.6,
+        "variants": {
+          "rv1973": 678,
+          "rv2013": 648,
+          "rv3211": 561
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 4,
+        "median": 29.5,
+        "min": 28,
+        "max": 35,
+        "cv": 0.088,
+        "suggested_bound": 38.5,
+        "variants": {
+          "rv1973": 28,
+          "rv2013": 28,
+          "rv3211": 25
+        }
+      },
+      "pod_ready_seconds_p50": {
+        "n": 4,
+        "median": 18.5,
+        "min": 15,
+        "max": 20,
+        "cv": 0.104,
+        "suggested_bound": 22,
+        "variants": {
+          "rv1973": 16,
+          "rv2013": 15,
+          "rv3211": 18
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 4,
+        "median": 27.5,
+        "min": 27,
+        "max": 33,
+        "cv": 0.087,
+        "suggested_bound": 36.3,
+        "variants": {
+          "rv1973": 27,
+          "rv2013": 27,
+          "rv3211": 24
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 4,
+        "median": 29,
+        "min": 27,
+        "max": 34,
+        "cv": 0.087,
+        "suggested_bound": 37.4,
+        "variants": {
+          "rv1973": 28,
+          "rv2013": 28,
+          "rv3211": 25
+        }
+      },
+      "total_time_seconds": {
+        "n": 4,
+        "median": 33.936,
+        "min": 32.743,
+        "max": 39.102,
+        "cv": 0.073,
+        "suggested_bound": 43.012,
+        "variants": {
+          "rv1973": 32.941,
+          "rv2013": 32.751,
+          "rv3211": 30.665
+        }
+      }
+    }
+  }
+}
