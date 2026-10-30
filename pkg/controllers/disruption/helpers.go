@@ -59,8 +59,6 @@ type SimulationOptions struct {
 }
 
 // SimulateScheduling determines whether candidate workloads can be rescheduled after disruption.
-//
-//nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
 	schedulerOpts []scheduling.Options, simulationOpts SimulationOptions, candidates ...*Candidate,
 ) (scheduling.Results, error) {

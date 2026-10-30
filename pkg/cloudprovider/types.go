@@ -200,8 +200,6 @@ type InstanceTypes []*InstanceType
 
 // Since we have a no copy the sync.Once field, we need to maintain a custom
 // DeepCopyInto function.
-//
-//nolint:gocyclo
 func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 	out.Name = in.Name
 	if in.Requirements != nil {

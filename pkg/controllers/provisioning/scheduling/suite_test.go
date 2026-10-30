@@ -5875,7 +5875,6 @@ var _ = Context("Scheduling", func() {
 	})
 })
 
-// nolint:gocyclo
 func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, constraint *corev1.TopologySpreadConstraint) Assertion {
 	GinkgoHelper()
 	nodes := &corev1.NodeList{}

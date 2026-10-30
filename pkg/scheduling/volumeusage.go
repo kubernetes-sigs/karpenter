@@ -86,7 +86,6 @@ func (u Volumes) Insert(volumes Volumes) {
 	}
 }
 
-//nolint:gocyclo
 func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
 	podPVCs := Volumes{}
 	for _, volume := range pod.Spec.Volumes {

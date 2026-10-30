@@ -225,7 +225,6 @@ func hashSelector(selector *metav1.LabelSelector) uint64 {
 // along with the number of valid domains that satisfied the maxSkew constraint.
 // If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
 // If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
-// nolint:gocyclo
 func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, nodeDomains *scheduling.Requirement) (*scheduling.Requirement, sets.Set[string]) {
 	// min count is calculated across all domains
 	min := t.domainMinCount(podDomains)
@@ -320,7 +319,6 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 	return min
 }
 
-// nolint:gocyclo
 func (t *TopologyGroup) nextDomainAffinity(pod *corev1.Pod, podDomains *scheduling.Requirement, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	options := scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist)
 
@@ -400,7 +398,6 @@ func (t *TopologyGroup) anyCompatiblePodDomain(podDomains *scheduling.Requiremen
 	return false
 }
 
-// nolint:gocyclo
 func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	options := scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist)
 	// pods with anti-affinity must schedule to a domain where there are currently none of those pods (an empty

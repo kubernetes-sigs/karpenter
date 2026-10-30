@@ -154,8 +154,6 @@ func (c *consolidation) sortCandidates(_ context.Context, candidates []*Candidat
 }
 
 // computeConsolidation computes a consolidation action to take
-//
-// nolint:gocyclo
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	var err error
 	// Run scheduling simulation to compute consolidation option

@@ -84,7 +84,6 @@ var (
 
 // Pod creates a test pod with defaults that can be overridden by PodOptions.
 // Overrides are applied in order, with a last write wins semantic.
-// nolint:gocyclo
 func Pod(overrides ...PodOptions) *v1.Pod {
 	options := PodOptions{}
 	for _, opts := range overrides {

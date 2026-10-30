@@ -301,7 +301,6 @@ func DefaultFeatureGates() FeatureGates {
 	}
 }
 
-//nolint:gocyclo
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
 	gates := DefaultFeatureGates()

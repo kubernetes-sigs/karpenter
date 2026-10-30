@@ -62,7 +62,6 @@ func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
-// nolint:gocyclo
 func (l Limits) CanEvictPods(pods []*v1.Pod, clk clock.Clock, recorder events.Recorder) ([]client.ObjectKey, bool) {
 	for _, pod := range pods {
 		pdbs, evictable := l.isEvictable(pod, clk, recorder, zeroDisruptions)
@@ -84,7 +83,6 @@ func (l Limits) isFullyBlocked(pod *v1.Pod, clk clock.Clock, recorder events.Rec
 	return []client.ObjectKey{}, false
 }
 
-// nolint:gocyclo
 func (l Limits) isEvictable(pod *v1.Pod, clk clock.Clock, recorder events.Recorder, evictionBlocker evictionBlocker) ([]client.ObjectKey, bool) {
 	// If the pod isn't eligible for being evicted, then the predicate doesn't matter
 	// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
@@ -153,7 +151,6 @@ type pdbItem struct {
 	canAlwaysEvictUnhealthyPods bool
 }
 
-// nolint:gocyclo
 func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 	selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 	if err != nil {

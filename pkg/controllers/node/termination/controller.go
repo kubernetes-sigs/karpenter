@@ -89,7 +89,6 @@ func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.R
 	return reconcile.Result{}, nil
 }
 
-//nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile.Result, error) {
 	if !controllerutil.ContainsFinalizer(node, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
@@ -231,8 +230,6 @@ func (c *Controller) awaitDrain(
 // awaitVolumeDetachment will continue to requeue until all volume attachments associated with the node have been
 // deleted. The deletion is performed by the upstream attach-detach controller, Karpenter just needs to await deletion.
 // This will be skipped once the nodeClaim's terminationGracePeriod has elapsed at nodeTerminationTime.
-//
-//nolint:gocyclo
 func (c *Controller) awaitVolumeDetachment(
 	ctx context.Context,
 	nodeClaim *v1.NodeClaim,

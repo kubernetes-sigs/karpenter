@@ -406,8 +406,6 @@ type classificationResult struct {
 // ClassifyClaims evaluates the set of claims for the NodeClaims. It checks allocation status and ensures compatibility.
 // If any of claim is already allocated and incompatible with the NodeClaim, it returns an error. The result is the set
 // of unallocated claims and the cumalative requirements derived from the base NodeClaim and the allocated claims.
-//
-//nolint:gocyclo
 func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.ResourceClaim) (classificationResult, error) {
 	result := classificationResult{
 		requirements: copyRequirements(nodeClaim.Requirements()),
@@ -565,8 +563,6 @@ type deviceAllocationMetadata struct {
 // allocate runs a per-instance-type DFS over in-cluster and template devices.
 // In-cluster devices are iterated first so the DFS naturally prefers them, minimizing
 // variance across instance types. Each IT gets a full DFS; ITs whose DFS fails are pruned.
-//
-//nolint:gocyclo
 func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult, error) {
 	var survivingITs []InstanceTypeID
 	deviceIDsByIT := make(map[InstanceTypeID][]DeviceID)
@@ -712,7 +708,6 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 // or for parent requests), and device slots. Devices are iterated lazily from the current pools
 // and template devices rather than from a prebuilt candidate list, so pool re-filtering during
 // requirement tightening is automatically reflected in subsequent iterations.
-// nolint:gocyclo
 func (a *allocator) dfs(claimIdx, reqIdx, subReqIdx, slotIdx int) bool {
 	select {
 	case <-a.ctx.Done():
@@ -842,8 +837,6 @@ func (a *allocator) dfsAllMode(claimIdx, reqIdx, subReqIdx, slotIdx int, cd *Cla
 
 // tryDevice attempts to allocate a single device at the given position in the DFS tree.
 // Returns true if the subtree rooted at this device leads to a complete solution.
-//
-//nolint:gocyclo
 func (a *allocator) tryDevice(
 	claimIdx, reqIdx, subReqIdx, slotIdx int,
 	cd *ClaimData,

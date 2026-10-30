@@ -356,8 +356,6 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *corev1.Po
 
 // countDomains initializes the topology group by registereding any well known domains and performing pod counts
 // against the cluster for any existing pods.
-//
-//nolint:gocyclo
 func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 	podList := &corev1.PodList{}
 
