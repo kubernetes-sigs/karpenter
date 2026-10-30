@@ -1163,19 +1163,28 @@ func (s *Scheduler) preferTemplate(candidate, best int, candidatePrice, bestPric
 // allowing both spot and on-demand is priced at spot when spot is available. Offering prices include NodeOverlay
 // adjustments.
 func launchPrice(its []*cloudprovider.InstanceType, reqs scheduling.Requirements) float64 {
-	for _, capacityTypeReqs := range []scheduling.Requirements{
-		cloudprovider.ReservedRequirement,
-		cloudprovider.SpotRequirement,
-		cloudprovider.OnDemandRequirement,
-	} {
-		price := math.MaxFloat64
-		for _, it := range its {
-			if of := it.Offerings.Available().Compatible(reqs).Compatible(capacityTypeReqs).Cheapest(); of != nil && of.Price < price {
-				price = of.Price
+	// One pass over the offerings, tracking the cheapest per capacity type. Checking compatibility is the expensive
+	// part, so it is skipped for offerings that wouldn't be cheaper than the cheapest found so far for their type.
+	cheapest := map[string]float64{
+		v1.CapacityTypeReserved: math.MaxFloat64,
+		v1.CapacityTypeSpot:     math.MaxFloat64,
+		v1.CapacityTypeOnDemand: math.MaxFloat64,
+	}
+	for _, it := range its {
+		for _, of := range it.Offerings {
+			if !of.Available {
+				continue
 			}
+			current, ok := cheapest[of.CapacityType()]
+			if !ok || of.Price >= current || !reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				continue
+			}
+			cheapest[of.CapacityType()] = of.Price
 		}
-		if price != math.MaxFloat64 {
-			return price
+	}
+	for _, capacityType := range []string{v1.CapacityTypeReserved, v1.CapacityTypeSpot, v1.CapacityTypeOnDemand} {
+		if cheapest[capacityType] != math.MaxFloat64 {
+			return cheapest[capacityType]
 		}
 	}
 	return math.MaxFloat64
