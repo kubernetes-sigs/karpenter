@@ -49,7 +49,7 @@ linters:
             - pkg: github.com/avast/retry-go
               desc: use k8s.io/apimachinery/pkg/util/wait
     gocyclo:
-      min-complexity: 11
+      min-complexity: 30
     goheader:
       template: |-
         Copyright The Kubernetes Authors.

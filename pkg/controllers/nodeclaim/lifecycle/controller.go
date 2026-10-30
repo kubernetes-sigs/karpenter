@@ -129,7 +129,6 @@ func (c *Controller) Name() string {
 	return "nodeclaim.lifecycle"
 }
 
-// nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if nodeClaim.Status.ProviderID != "" {
@@ -194,7 +193,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	return result.Min(results...), nil
 }
 
-//nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil

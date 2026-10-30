@@ -36,7 +36,6 @@ type Consolidation struct {
 	clock      clock.Clock
 }
 
-//nolint:gocyclo
 func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	clockOpt := status.WithClock(c.clock)
 	hasConsolidatableCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable) != nil

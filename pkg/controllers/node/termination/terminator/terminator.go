@@ -110,8 +110,6 @@ func SkipDaemonSets() DrainOption {
 
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
-//
-//nolint:gocyclo
 func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time, opts ...DrainOption) error {
 	o := &drainOptions{}
 	for _, opt := range opts {

@@ -89,7 +89,6 @@ var (
 	}
 )
 
-// nolint:gocyclo
 func (env *Environment) BeforeEach() {
 	env.SkipKnownFlaky()
 	debug.BeforeEach(env.Context, env.Config, env.Client)

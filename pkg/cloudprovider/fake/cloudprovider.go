@@ -132,7 +132,6 @@ func (c *CloudProvider) Reboot(_ context.Context, nodeClaim *v1.NodeClaim, opera
 	return nil
 }
 
-//nolint:gocyclo
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -281,8 +281,6 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 // ValidateNodeDisruptable returns an error if the StateNode cannot be disrupted
 // This checks all associated StateNode internals, node labels, and do-not-disrupt annotations on the node.
 // ValidateNodeDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
-//
-//nolint:gocyclo
 func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 	if in.NodeClaim == nil {
 		return fmt.Errorf("node isn't managed by karpenter")
@@ -323,8 +321,6 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 // ValidatePodDisruptable returns an error if the StateNode contains a pod that cannot be disrupted
 // This checks associated PDBs and do-not-disrupt annotations for each pod on the node.
 // ValidatePodDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
-//
-//nolint:gocyclo
 func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits, clk clock.Clock, recorder events.Recorder) ([]*corev1.Pod, error) {
 	pods, err := in.Pods(ctx, kubeClient)
 	if err != nil {
@@ -607,7 +603,6 @@ func nominationWindow(ctx context.Context) time.Duration {
 // RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
 // This is used to enforce no taints at the beginning of disruption, and
 // to add/remove taints while executing a disruption action.
-// nolint:gocyclo
 func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTaint bool, nodes ...*StateNode) error {
 	errs := make([]error, len(nodes))
 	workqueue.ParallelizeUntil(ctx, len(nodes), len(nodes), func(i int) {

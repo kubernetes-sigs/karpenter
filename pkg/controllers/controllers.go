@@ -102,7 +102,6 @@ func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[
 	}
 }
 
-//nolint:gocyclo
 func NewControllers(
 	ctx context.Context,
 	mgr manager.Manager,

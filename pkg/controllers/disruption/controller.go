@@ -133,7 +133,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 

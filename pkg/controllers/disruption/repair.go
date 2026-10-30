@@ -122,7 +122,6 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 	return cmds, err
 }
 
-//nolint:gocyclo // Static and dynamic replacement flows are intentionally kept inline.
 func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	// We use a fixed value for now so all candidates get the same value
 	// This is important for repair since it scores candidates based on their current age (calculated as now - eligibleAt).

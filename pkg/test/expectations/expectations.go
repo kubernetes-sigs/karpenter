@@ -368,7 +368,6 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	return result
 }
 
-//nolint:gocyclo
 func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
 	// Persist objects

@@ -475,7 +475,6 @@ func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int
 	return r
 }
 
-//nolint:gocyclo
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -736,7 +735,6 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod, volu
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
 }
 
-//nolint:gocyclo
 func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
@@ -905,8 +903,6 @@ func (s *Scheduler) sortExistingNodes() {
 // computeEffectiveZoneFromPod calculates the effective zone constraint by intersecting
 // pod-level zone signals, PVC volume zones, and TSC valid domains. This can be the
 // specific zone name if exactly one zone, "flexible" if multiple zones, "none" if no intersection.
-//
-//nolint:gocyclo
 func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 	podData := s.cachedPodData[pod.UID]
 	tscZoneValidDomains, satisfiable := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements)
