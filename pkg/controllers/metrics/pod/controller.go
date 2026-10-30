@@ -31,9 +31,13 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -69,7 +73,7 @@ var (
 	podScheduledLabel        = opmetrics.Label{Name: podScheduled, Help: "Whether the pod has been scheduled to a node.", Values: metrics.BoolValues}
 	podReadyLabel            = opmetrics.Label{Name: podReady, Help: "Whether the pod is ready.", Values: metrics.BoolValues}
 	managedLabel             = opmetrics.Label{Name: managed, Help: "Whether the pod is bound to a Karpenter-managed node.", Values: metrics.BoolValues}
-	podDynamicResourcesLabel = opmetrics.Label{Name: podDynamicResources, Help: "Whether the pod has DRA (dynamic resource allocation) requirements.", Values: metrics.BoolValues}
+	podDynamicResourcesLabel = opmetrics.Label{Name: podDynamicResources, Help: "Whether the pod has DRA (dynamic resource allocation) requirements.", Values: metrics.BoolValues, Exhaustive: true}
 	podPhaseLabel            = opmetrics.Label{
 		Name: podPhase,
 		Help: "The pod's lifecycle phase.",
@@ -80,6 +84,13 @@ var (
 			{Name: string(corev1.PodFailed), Help: "All containers terminated and at least one failed."},
 			{Name: string(corev1.PodUnknown), Help: "The pod's state could not be obtained."},
 		},
+	}
+	nodeMetricLabels = map[string]string{
+		metrics.ZoneLabel:         corev1.LabelTopologyZone,
+		podHostArchitecture:       corev1.LabelArchStable,
+		metrics.CapacityTypeLabel: v1.CapacityTypeLabelKey,
+		podHostInstanceType:       corev1.LabelInstanceTypeStable,
+		metrics.NodePoolLabel:     v1.NodePoolLabelKey,
 	}
 )
 
@@ -248,8 +259,9 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
+	// The pod is only read, so we skip the deep copy of the cached object
 	pod := &corev1.Pod{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod, client.UnsafeDisableDeepCopy); err != nil {
 		if errors.IsNotFound(err) {
 			c.pendingPods.Delete(req.String())
 			// Delete the unstarted metric since the pod is deleted
@@ -295,8 +307,25 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	schedulableTime := c.cluster.PodSchedulingSuccessTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
 	c.recordPodStartupMetric(pod, schedulableTime)
 	c.recordPodBoundMetric(pod, schedulableTime)
-	// Requeue every 30s for pods that are stuck without a state change
-	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+	// Requeue every 30s for pods that are stuck without a state change and whose metrics depend on the current time.
+	// Every other series for the pod only changes on a pod event or a node event.
+	if c.hasTimeBasedMetrics(pod) {
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	return reconcile.Result{RequeueAfter: 10 * time.Minute}, nil
+}
+
+// hasTimeBasedMetrics returns true if reconciling the pod later could emit different values without a pod event. That is
+// the case while the pod is Pending or started but not yet ready (unstarted and unbound time gauges), and while it is
+// unbound and not terminal (the undecided time gauge, which also depends on in-memory scheduling state).
+func (c *Controller) hasTimeBasedMetrics(pod *corev1.Pod) bool {
+	if pod.Status.Phase == corev1.PodPending || c.pendingPods.Has(client.ObjectKeyFromObject(pod).String()) {
+		return true
+	}
+	_, scheduled := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodScheduled && c.Status == corev1.ConditionTrue
+	})
+	return !scheduled && pod.Spec.NodeName == "" && !podutils.IsTerminal(pod)
 }
 
 func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
@@ -477,17 +506,16 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	})
 	metricLabels[podReady] = lo.Ternary(ready, "true", "false")
 
+	// The node is only read, so we skip the deep copy of the cached object
 	node := &corev1.Node{}
 	if pod.Spec.NodeName != "" {
-		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); client.IgnoreNotFound(err) != nil {
+		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node, client.UnsafeDisableDeepCopy); client.IgnoreNotFound(err) != nil {
 			return nil, err
 		}
 	}
-	metricLabels[metrics.ZoneLabel] = node.Labels[corev1.LabelTopologyZone]
-	metricLabels[podHostArchitecture] = node.Labels[corev1.LabelArchStable]
-	metricLabels[metrics.CapacityTypeLabel] = node.Labels[v1.CapacityTypeLabelKey]
-	metricLabels[podHostInstanceType] = node.Labels[corev1.LabelInstanceTypeStable]
-	metricLabels[metrics.NodePoolLabel] = node.Labels[v1.NodePoolLabelKey]
+	for metricLabel, nodeLabel := range nodeMetricLabels {
+		metricLabels[metricLabel] = node.Labels[nodeLabel]
+	}
 	metricLabels[managed] = strconv.FormatBool(node.Labels[v1.NodePoolLabelKey] != "")
 	return metricLabels, nil
 }
@@ -496,9 +524,30 @@ func (c *Controller) Name() string {
 	return "metrics.pod"
 }
 
+var nodeLabelsChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		return lo.SomeBy(lo.Values(nodeMetricLabels), func(k string) bool {
+			return e.ObjectOld.GetLabels()[k] != e.ObjectNew.GetLabels()[k]
+		})
+	},
+}
+
+// podsForNode enqueues the pods bound to a node so that their node-derived labels are updated when the node is
+// created, deleted, or has one of the labels in nodeMetricLabels changed
+func (c *Controller) podsForNode(ctx context.Context, o client.Object) []reconcile.Request {
+	pods := &corev1.PodList{}
+	if err := c.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": o.GetName()}, client.UnsafeDisableDeepCopy); err != nil {
+		return nil
+	}
+	return lo.Map(pods.Items, func(p corev1.Pod, _ int) reconcile.Request {
+		return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)}
+	})
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&corev1.Pod{}).
+		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(c.podsForNode), builder.WithPredicates(nodeLabelsChanged)).
 		Complete(c)
 }
