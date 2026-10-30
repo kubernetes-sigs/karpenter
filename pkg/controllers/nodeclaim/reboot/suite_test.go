@@ -299,6 +299,33 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
 		})
 
+		It("doesn't drain DaemonSet pods", func() {
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "10m"})
+			ds := test.DaemonSet()
+			ExpectApplied(ctx, env.Client, ds)
+			dsPod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               ds.Name,
+				UID:                ds.UID,
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
+			}}}})
+			pod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, dsPod, pod)
+
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(queue.Has(pod)).To(BeTrue())
+			Expect(queue.Has(dsPod)).To(BeFalse())
+
+			ExpectDeleted(ctx, env.Client, pod)
+			stepPastDrainFloor()
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(cloudProvider.RebootCalls).To(HaveLen(1))
+			Expect(queue.Has(dsPod)).To(BeFalse())
+			Expect(ExpectExists(ctx, env.Client, dsPod).DeletionTimestamp.IsZero()).To(BeTrue())
+		})
+
 		It("leaves pods that can't be evicted on the node when a bounded drain expires", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "1m"})
 			labels := map[string]string{test.RandomName(): test.RandomName()}
