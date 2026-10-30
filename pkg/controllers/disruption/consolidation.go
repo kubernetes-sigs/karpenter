@@ -123,8 +123,9 @@ func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
-	// Empty nodes are handled by Emptiness (reason "Empty") for correct budget accounting.
-	if cn.IsEmpty() {
+	// Empty nodes are handled by Emptiness (reason "Empty") for correct budget accounting,
+	// unless they host buffer pods, which can still be replaced by a cheaper node.
+	if cn.IsEmpty() && (!c.cluster.HasBufferPods(cn.ProviderID()) || cn.NodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyWhenEmpty) {
 		return false
 	}
 	// WhenEmpty pools only allow empty-node deletions, which Emptiness handles.
@@ -166,6 +167,13 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 			return Command{}, nil
 		}
 		return Command{}, err
+	}
+
+	// Virtual pods are pending, so AllNonPendingPodsScheduled ignores them
+	if lo.SomeBy(candidates, func(cn *Candidate) bool { return cn.IsEmpty() }) {
+		if onExistingNodes, onNewNodeClaims, failed := virtualPodPlacement(results); failed || (!onExistingNodes && !onNewNodeClaims) {
+			return Command{}, nil
+		}
 	}
 
 	// if not all of the pods were scheduled, we can't do anything

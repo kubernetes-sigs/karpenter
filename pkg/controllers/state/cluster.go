@@ -95,12 +95,8 @@ type Cluster struct {
 	// rebuilt wholesale after every provisioning pass — it is NOT incremental.
 	//
 	// Used by:
-	//   - disruption/emptiness.go: prevents empty-consolidation of nodes that host
-	//     buffer capacity (HasBufferPods check in ShouldDisrupt).
-	//
-	// NOT used by consolidation — consolidation naturally accounts for buffer pods
-	// because SimulateScheduling calls GetPendingPods which injects virtual pods
-	// into the pending set. Any replacement must fit both real and virtual pods.
+	//   - disruption/emptiness.go and disruption/consolidation.go: to tell plain
+	//     empty nodes apart from empty nodes that host buffer capacity.
 	bufferPodCountsMu sync.RWMutex
 	bufferPodCounts   map[string]int
 }
@@ -327,10 +323,16 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 // entry that carries the fake-pod annotation is counted. When buffer capacity
 // is consumed (real pods take the space), virtual pods move to other nodes or
 // new NodeClaims, and this map updates accordingly on the next pass.
+//
+// Changes mark the cluster as unconsolidated, since no node or pod event reflects them.
 func (c *Cluster) UpdateBufferPodCounts(counts map[string]int) {
 	c.bufferPodCountsMu.Lock()
-	defer c.bufferPodCountsMu.Unlock()
+	changed := !maps.Equal(c.bufferPodCounts, counts)
 	c.bufferPodCounts = counts
+	c.bufferPodCountsMu.Unlock()
+	if changed {
+		c.MarkUnconsolidated()
+	}
 }
 
 // HasBufferPods returns true if the node with the given providerID has at least
