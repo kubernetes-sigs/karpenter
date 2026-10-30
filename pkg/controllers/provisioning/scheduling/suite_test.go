@@ -4662,6 +4662,32 @@ var _ = Context("Scheduling", func() {
 			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })
 			Expect(ok).To(BeTrue())
 		})
+		It("should surface the topologyBuildDuration metric after building a scheduler", func() {
+			// Find the starting point since the metric is shared across tests
+			m, _ := FindMetricWithLabelValues("karpenter_scheduler_topology_build_duration_seconds", map[string]string{"controller": "provisioner"})
+			val := uint64(0)
+			if m != nil {
+				val = lo.FromPtr(m.Histogram.SampleCount)
+			}
+
+			nodePool = test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := test.UnschedulablePods(test.PodOptions{
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
+					TopologyKey:       corev1.LabelTopologyZone,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}},
+					MaxSkew:           1,
+				}},
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "nginx"}},
+			}, 10)
+			_, err := prov.NewScheduler(injection.WithControllerName(ctx, "provisioner"), pods, nil, nil, scheduling.DisableReservedCapacityFallback)
+			Expect(err).To(BeNil())
+
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_topology_build_duration_seconds", map[string]string{"controller": "provisioner"})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", val+1))
+		})
 		It("should set the PodSchedulerDecisionSeconds metric after a scheduling loop", func() {
 			// Find the starting point since the metric is shared across test suites
 			m, _ := FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
