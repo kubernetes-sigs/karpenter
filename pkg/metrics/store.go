@@ -17,12 +17,13 @@ limitations under the License.
 package metrics
 
 import (
+	"maps"
+	"slices"
 	"sync"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/api/equality"
+	"github.com/prometheus/common/model"
 )
 
 // Store is a mapping from a key to a list of Metrics
@@ -53,15 +54,30 @@ func (s *Store) update(key string, metrics []*StoreMetric) {
 	}
 	// Cleanup old metrics if the old metric family has metrics that weren't updated by this round of metrics
 	if oldMetrics, ok := s.store[key]; ok {
+		current := make(map[uint64][]*StoreMetric, len(metrics)) // hash of new metric labels -> new metrics with that hash
+		for _, metric := range metrics {
+			h := hashLabels(metric.Labels)
+			current[h] = append(current[h], metric)
+		}
 		for _, oldMetric := range oldMetrics {
-			if _, ok = lo.Find(metrics, func(m *StoreMetric) bool {
-				return oldMetric.GaugeMetric == m.GaugeMetric && equality.Semantic.DeepEqual(oldMetric.Labels, m.Labels)
-			}); !ok {
+			if !slices.ContainsFunc(current[hashLabels(oldMetric.Labels)], func(m *StoreMetric) bool {
+				return oldMetric.GaugeMetric == m.GaugeMetric && maps.Equal(oldMetric.Labels, m.Labels)
+			}) {
 				oldMetric.Delete(oldMetric.Labels)
 			}
 		}
 	}
 	s.store[key] = metrics
+}
+
+// hashLabels returns Prometheus' order-independent fingerprint of labels. Equal label maps (including nil and empty)
+// hash equally; collisions are resolved by the caller comparing the label maps.
+func hashLabels(labels prometheus.Labels) uint64 {
+	set := make(model.LabelSet, len(labels))
+	for k, v := range labels {
+		set[model.LabelName(k)] = model.LabelValue(v)
+	}
+	return uint64(set.FastFingerprint())
 }
 
 // Update calls the update() method internally
