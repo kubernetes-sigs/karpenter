@@ -850,16 +850,8 @@ func (s *Scheduler) addToCheapestNewNodeClaim(ctx context.Context, pod *corev1.P
 	limit := len(s.nodeClaimTemplates)
 	order, bounds := s.templatesByPriceBound(pod)
 	for _, i := range order {
-		if i >= limit {
+		if i >= limit || s.canSkipTemplate(i, best, bounds[i], bestPrice) {
 			continue
-		}
-		if best >= 0 {
-			if s.nodeClaimTemplates[i].NodePoolWeight < s.nodeClaimTemplates[best].NodePoolWeight {
-				break
-			}
-			if bounds[i] > bestPrice || (bounds[i] == bestPrice && i > best) {
-				continue
-			}
 		}
 		result, err := s.tryNodeClaimTemplate(ctx, pod, volumes, i)
 		if err != nil {
@@ -881,6 +873,19 @@ func (s *Scheduler) addToCheapestNewNodeClaim(ctx context.Context, pod *corev1.P
 	}
 	s.launchNewNodeClaim(ctx, pod, volumes, bestResult)
 	return nil
+}
+
+// canSkipTemplate reports whether the template at index i can't be preferred over the best template found so far,
+// without evaluating it: it belongs to a NodePool of lower weight, or the lower bound on its price is above the best
+// price, or equal to it while the template comes later in the NodePool order and so loses the tie.
+func (s *Scheduler) canSkipTemplate(i, best int, bound, bestPrice float64) bool {
+	if best < 0 {
+		return false
+	}
+	if s.nodeClaimTemplates[i].NodePoolWeight < s.nodeClaimTemplates[best].NodePoolWeight {
+		return true
+	}
+	return bound > bestPrice || (bound == bestPrice && i > best)
 }
 
 // templateResult is a NodeClaim from a template that the pod can be added to, with the results of adding it.
