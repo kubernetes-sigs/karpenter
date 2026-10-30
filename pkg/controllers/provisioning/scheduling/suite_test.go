@@ -1268,7 +1268,7 @@ var _ = Context("Scheduling", func() {
 					Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 				},
 			}
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1351,7 +1351,7 @@ var _ = Context("Scheduling", func() {
 					Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 				},
 			}
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1376,7 +1376,7 @@ var _ = Context("Scheduling", func() {
 					Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 				},
 			}
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1401,7 +1401,7 @@ var _ = Context("Scheduling", func() {
 					Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 				},
 			}
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1425,7 +1425,7 @@ var _ = Context("Scheduling", func() {
 			cloudProvider.InstanceTypes[0].Capacity[fakeGPU1] = resource.MustParse("25")
 			cloudProvider.InstanceTypes[1].Capacity[fakeGPU2] = resource.MustParse("25")
 
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1586,7 +1586,7 @@ var _ = Context("Scheduling", func() {
 			pods := test.Pods(5, opts)
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			for _, p := range pods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
@@ -1606,7 +1606,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := test.Pods(40, opts)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			for _, p := range pods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
@@ -1638,7 +1638,7 @@ var _ = Context("Scheduling", func() {
 			provPods := append(test.Pods(40, largeOpts), test.Pods(20, smallOpts)...)
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, provPods...)
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			for _, p := range provPods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
@@ -1708,7 +1708,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := test.Pods(25, opts)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			// all of the test instance types support 5 pods each, so we use the 5 instances of the smallest one for our 25 pods
 			for _, p := range pods {
 				node := ExpectScheduled(ctx, env.Client, p)
@@ -1825,8 +1825,8 @@ var _ = Context("Scheduling", func() {
 			// large is the cheapest, so we should pick it, but the other two types are also valid options
 			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("large"))
 			// all three options should be passed to the cloud provider
-			possibleInstanceType := sets.NewString(pscheduling.NewNodeSelectorRequirementsWithMinValues(cloudProvider.CreateCalls[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Values()...)
-			Expect(possibleInstanceType).To(Equal(sets.NewString("small", "medium", "large")))
+			possibleInstanceType := sets.New[string](pscheduling.NewNodeSelectorRequirementsWithMinValues(cloudProvider.CreateCalls[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Values()...)
+			Expect(possibleInstanceType).To(Equal(sets.New[string]("small", "medium", "large")))
 		})
 	})
 

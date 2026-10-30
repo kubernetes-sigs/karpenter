@@ -64,7 +64,7 @@ type SimulationOptions struct {
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
 	schedulerOpts []scheduling.Options, simulationOpts SimulationOptions, candidates ...*Candidate,
 ) (scheduling.Results, error) {
-	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
+	candidateNames := sets.New[string](lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
@@ -253,8 +253,8 @@ func (u *UninitializedNodeError) Error() string {
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
 func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovider.InstanceType) bool {
-	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
-	lhsNames := sets.NewString(lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
+	rhsNames := sets.New[string](lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
+	lhsNames := sets.New[string](lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
@@ -439,7 +439,7 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 
 // mapCandidates maps the list of proposed candidates with the current state
 func mapCandidates(proposed, current []*Candidate) []*Candidate {
-	proposedNames := sets.NewString(lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
+	proposedNames := sets.New[string](lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
 	return lo.Filter(current, func(c *Candidate, _ int) bool {
 		return proposedNames.Has(c.Name())
 	})

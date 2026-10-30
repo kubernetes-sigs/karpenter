@@ -136,13 +136,13 @@ func (m *Monitor) Nodes() []*corev1.Node {
 
 // CreatedNodes returns the nodes that have been created since the last reset (essentially Nodes - NodesAtReset)
 func (m *Monitor) CreatedNodes() []*corev1.Node {
-	resetNodeNames := sets.NewString(lo.Map(m.NodesAtReset(), func(n *corev1.Node, _ int) string { return n.Name })...)
+	resetNodeNames := sets.New[string](lo.Map(m.NodesAtReset(), func(n *corev1.Node, _ int) string { return n.Name })...)
 	return lo.Filter(m.Nodes(), func(n *corev1.Node, _ int) bool { return !resetNodeNames.Has(n.Name) })
 }
 
 // DeletedNodes returns the nodes that have been deleted since the last reset (essentially NodesAtReset - Nodes)
 func (m *Monitor) DeletedNodes() []*corev1.Node {
-	currentNodeNames := sets.NewString(lo.Map(m.Nodes(), func(n *corev1.Node, _ int) string { return n.Name })...)
+	currentNodeNames := sets.New[string](lo.Map(m.Nodes(), func(n *corev1.Node, _ int) string { return n.Name })...)
 	return lo.Filter(m.NodesAtReset(), func(n *corev1.Node, _ int) bool { return !currentNodeNames.Has(n.Name) })
 }
 
