@@ -195,11 +195,21 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
-func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+func (c *Controller) disrupt(ctx context.Context, disruption Method) (started bool, err error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
+	var candidates []*Candidate
+	var cmds []Command
+	var budgetBlocked bool
+	defer func() {
+		report, reported := evaluationReport{}, false
+		if reporter, ok := disruption.(interface{ takeReport() evaluationReport }); ok {
+			report, reported = reporter.takeReport(), true
+		}
+		recordEvaluation(disruption, evaluationOutcome(err, len(candidates), started, budgetBlocked, report), len(candidates), cmds, started, report, reported)
+	}()
 	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
@@ -220,8 +230,10 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
+	// Checked before ComputeCommands, which may consume the budget mapping
+	budgetBlocked = lo.EveryBy(candidates, func(c *Candidate) bool { return disruptionBudgetMapping[c.NodePool.Name] == 0 })
 	// Determine the disruption action
-	cmds, err := disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
+	cmds, err = disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}

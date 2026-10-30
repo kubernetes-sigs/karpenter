@@ -201,6 +201,9 @@ var _ = AfterEach(func() {
 	disruption.NodepoolDecisionsPerformed.Reset()
 	disruption.TerminateFirstDecisionsTotal.Reset()
 	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
+	disruption.EvaluationsTotal.Reset()
+	disruption.EvaluationCandidates.Reset()
+	disruption.MultiNodeBatchSize.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -2122,6 +2125,60 @@ var _ = Describe("Metrics", func() {
 			metrics.ReasonLabel:   "empty",
 			"consolidation_type":  "empty",
 		})
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "empty", "outcome": "command"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 1, map[string]string{"method": "empty", "stage": "selected"})
+	})
+	It("should fire evaluation metrics for every method when there are no candidates", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectSingletonReconciled(ctx, disruptionController)
+		for _, method := range []string{"empty", "static_drift", "drift", "multi", "single"} {
+			ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": method, "outcome": "no_candidates"})
+		}
+	})
+	It("should fire evaluation metrics when consolidation is blocked by budgets", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+		nodeClaims, nodes = nodeClaims[:2], nodes[:2]
+		pods := test.Pods(2, test.PodOptions{})
+		ExpectApplied(ctx, env.Client, pods[0], pods[1], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "multi", "outcome": "budget_blocked"})
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "single", "outcome": "budget_blocked"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 2, map[string]string{"method": "single", "stage": "eligible"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 0, map[string]string{"method": "single", "stage": "evaluated"})
+	})
+	It("should fire evaluation metrics when single-node consolidation times out", func() {
+		DeferCleanup(func(d time.Duration) { disruption.SingleNodeConsolidationTimeoutDuration = d }, disruption.SingleNodeConsolidationTimeoutDuration)
+		disruption.SingleNodeConsolidationTimeoutDuration = -5 * time.Second
+		nodeClaim, node := nodeClaims[0], nodes[0]
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod, nodeClaim, node, nodePool)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectSingletonReconciled(ctx, disruptionController)
+		// a single candidate can't form a multi-node command
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "multi", "outcome": "no_command"})
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "single", "outcome": "timeout"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 0, map[string]string{"method": "single", "stage": "evaluated"})
+	})
+	It("should fire evaluation metrics when multi-node consolidation times out", func() {
+		DeferCleanup(func(d time.Duration) { disruption.MultiNodeConsolidationTimeoutDuration = d }, disruption.MultiNodeConsolidationTimeoutDuration)
+		disruption.MultiNodeConsolidationTimeoutDuration = -5 * time.Second
+		pods := test.Pods(3, test.PodOptions{})
+		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "multi", "outcome": "timeout"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 0, map[string]string{"method": "multi", "stage": "selected"})
+		// the first probe of the 3 candidate window (a batch of 2) hit the timeout with nothing saved
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_multi_node_batch_size", 3, map[string]string{"stage": "window", "outcome": "timeout"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_multi_node_batch_size", 2, map[string]string{"stage": "last_tried", "outcome": "timeout"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_multi_node_batch_size", 0, map[string]string{"stage": "selected", "outcome": "timeout"})
 	})
 	It("should fire metrics for single node delete disruption", func() {
 		nodeClaims, nodes = nodeClaims[:2], nodes[:2]
@@ -2240,6 +2297,14 @@ var _ = Describe("Metrics", func() {
 			metrics.ReasonLabel:   "underutilized",
 			"consolidation_type":  "multi",
 		})
+		ExpectMetricCounterValue(disruption.EvaluationsTotal, 1, map[string]string{"method": "multi", "outcome": "command"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 3, map[string]string{"method": "multi", "stage": "eligible"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 3, map[string]string{"method": "multi", "stage": "evaluated"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_evaluation_candidates", 2, map[string]string{"method": "multi", "stage": "selected"})
+		// the search tried a batch of 2, then 3, and the largest valid batch was 2
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_multi_node_batch_size", 3, map[string]string{"stage": "window", "outcome": "completed"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_multi_node_batch_size", 3, map[string]string{"stage": "last_tried", "outcome": "completed"})
+		ExpectMetricHistogramSampleSumValue("karpenter_voluntary_disruption_multi_node_batch_size", 2, map[string]string{"stage": "selected", "outcome": "completed"})
 	})
 	It("should fire metrics for multi-node replace disruption", func() {
 		nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
