@@ -916,10 +916,9 @@ func (s *Scheduler) firstNodeClaimTemplate(ctx context.Context, pod *corev1.Pod,
 // Templates are evaluated in order of a lower bound on the price of a NodeClaim they could launch for the pod, so
 // templates that can't be cheaper than the best found so far are skipped.
 func (s *Scheduler) cheapestNodeClaimTemplate(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes, tier []int, bounds []float64, limit *int, errs []error) (templateResult, bool) {
-	best, bestPrice := -1, math.MaxFloat64
-	var bestResult templateResult
+	r := templateRanking{scheduler: s, best: -1, alternative: -1, bestPrice: math.MaxFloat64, alternativePrice: math.MaxFloat64}
 	for _, i := range tier {
-		if i >= *limit || canSkipTemplate(i, best, bounds[i], bestPrice) {
+		if i >= *limit || canSkipTemplate(i, r.best, bounds[i], r.bestPrice) {
 			continue
 		}
 		result, err := s.tryNodeClaimTemplate(ctx, pod, volumes, i)
@@ -927,17 +926,60 @@ func (s *Scheduler) cheapestNodeClaimTemplate(ctx context.Context, pod *corev1.P
 			errs[i] = err
 			if IsReservedOfferingError(err) {
 				*limit = i
-				if best > i {
-					best, bestPrice, bestResult = -1, math.MaxFloat64, templateResult{}
-				}
+				r.invalidateAfter(i)
 			}
 			continue
 		}
-		if price := launchPrice(result.instanceTypes, result.requirements); best < 0 || s.preferTemplate(i, best, price, bestPrice) {
-			best, bestPrice, bestResult = i, price, result
-		}
+		r.add(i, launchPrice(result.instanceTypes, result.requirements), result)
 	}
-	return bestResult, best >= 0
+	if r.best < 0 {
+		return templateResult{}, false
+	}
+	r.logChoice(ctx, pod)
+	return r.bestResult, true
+}
+
+// templateRanking tracks the template preferred by preferTemplate among those evaluated for a pod, and the evaluated
+// template that came closest to it. Templates skipped for their price bound are never evaluated, so they can't be the
+// alternative.
+type templateRanking struct {
+	scheduler                   *Scheduler
+	best, alternative           int
+	bestPrice, alternativePrice float64
+	bestResult                  templateResult
+}
+
+func (r *templateRanking) add(i int, price float64, result templateResult) {
+	if r.best < 0 || r.scheduler.preferTemplate(i, r.best, price, r.bestPrice) {
+		if r.best >= 0 {
+			r.alternative, r.alternativePrice = r.best, r.bestPrice
+		}
+		r.best, r.bestPrice, r.bestResult = i, price, result
+	} else if r.alternative < 0 || r.scheduler.preferTemplate(i, r.alternative, price, r.alternativePrice) {
+		r.alternative, r.alternativePrice = i, price
+	}
+}
+
+// invalidateAfter forgets the templates after index i, which a reserved offering error at i invalidates.
+func (r *templateRanking) invalidateAfter(i int) {
+	if r.best > i {
+		r.best, r.bestPrice, r.bestResult = -1, math.MaxFloat64, templateResult{}
+	}
+	if r.alternative > i {
+		r.alternative, r.alternativePrice = -1, math.MaxFloat64
+	}
+}
+
+func (r *templateRanking) logChoice(ctx context.Context, pod *corev1.Pod) {
+	logger := log.FromContext(ctx).V(1)
+	if !logger.Enabled() {
+		return
+	}
+	logger = logger.WithValues("Pod", klog.KObj(pod), "NodePool", klog.KRef("", r.scheduler.nodeClaimTemplates[r.best].NodePoolName), "price", r.bestPrice)
+	if r.alternative >= 0 {
+		logger = logger.WithValues("alternative", klog.KRef("", r.scheduler.nodeClaimTemplates[r.alternative].NodePoolName), "alternative-price", r.alternativePrice)
+	}
+	logger.Info("chose the cheapest of equal weight NodePools")
 }
 
 // canSkipTemplate reports whether the template at index i can't be preferred over the best template of the same weight
