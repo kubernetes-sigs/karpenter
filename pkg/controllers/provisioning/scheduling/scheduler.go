@@ -870,10 +870,10 @@ func (s *Scheduler) isDaemonPodCompatibleWithNode(p *corev1.Pod, taints []corev1
 	if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 		return false
 	}
-	if err := scheduling.NewLabelRequirements(nodeLabels).Compatible(scheduling.NewStrictPodRequirements(p)); err != nil {
-		return false
-	}
-	return true
+	nodeRequirements := scheduling.NewLabelRequirements(nodeLabels)
+	return lo.ContainsBy(daemonPodRequirements(p), func(podRequirements scheduling.Requirements) bool {
+		return nodeRequirements.Compatible(podRequirements) == nil
+	})
 }
 
 // updateRemainingResources updates the remaining resources for the node's nodepool
@@ -1073,22 +1073,27 @@ func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, it *cloudprovid
 	if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).ToleratesPod(pod); err != nil {
 		return false
 	}
-	for {
-		podRequirements := scheduling.NewStrictPodRequirements(pod)
-		// We don't consider pod preferences for scheduling requirements since we know that pod preferences won't matter with Daemonset scheduling
-		if nodeClaimTemplate.Requirements.IsCompatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels) &&
+	// We don't consider pod preferences for scheduling requirements since we know that pod preferences won't matter with Daemonset scheduling
+	// We don't consider other forms of relaxation here since we don't consider pod affinities/anti-affinities
+	// when considering DaemonSet schedulability
+	return lo.ContainsBy(daemonPodRequirements(pod), func(podRequirements scheduling.Requirements) bool {
+		return nodeClaimTemplate.Requirements.IsCompatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels) &&
 			// We use Intersects instead of IsCompatible for instance type requirements since we want to ignore any custom keys on the daemonset pod since they
 			// will not be available on the instance type requirements.
-			it.Requirements.Intersects(podRequirements) == nil {
-			return true
-		}
-		// If relaxing the Node Affinity term didn't succeed, then this DaemonSet can't schedule to this NodePool
-		// We don't consider other forms of relaxation here since we don't consider pod affinities/anti-affinities
-		// when considering DaemonSet schedulability
-		if preferences.removeRequiredNodeAffinityTerm(pod) == nil {
-			return false
-		}
+			it.Requirements.Intersects(podRequirements) == nil
+	})
+}
+
+// daemonPodRequirements returns the strict requirements for each of the daemon pod's required node affinity terms.
+func daemonPodRequirements(pod *corev1.Pod) []scheduling.Requirements {
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil ||
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil ||
+		len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) <= 1 {
+		return []scheduling.Requirements{scheduling.NewStrictPodRequirements(pod)}
 	}
+	return lo.Times(len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms), func(i int) scheduling.Requirements {
+		return scheduling.NewStrictPodRequirementsForTerm(pod, i)
+	})
 }
 
 // subtractMax returns the remaining resources after subtracting the max resource quantity per instance type. To avoid
