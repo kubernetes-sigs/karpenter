@@ -31,7 +31,12 @@ linters:
         type: "module"
         description: Kube API Linter lints Kube like APIs based on API conventions and best practices.
         settings:
-          linters: {}
+          # Bound list and string sizes so CEL cost stays predictable, and make empty-vs-omitted an explicit choice.
+          # Unbounded names already shipped a NodePool that is Ready but can never launch (#3430).
+          linters:
+            enable:
+              - maxlength
+              - minlength
           lintersConfig: {}
     # One owner for helpers that keep getting re-implemented (review on #3028, #2894,
     # #3015, #3407). #2968 replaced retry-go with k8s wait.
