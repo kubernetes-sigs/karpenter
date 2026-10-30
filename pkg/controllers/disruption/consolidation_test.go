@@ -4466,7 +4466,7 @@ var _ = Describe("Consolidation", func() {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			}
 		})
-		It("should consolidate the node with best savings ratio first", func() {
+		It("should consider node lifetime remaining when calculating disruption cost", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -4490,7 +4490,7 @@ var _ = Describe("Consolidation", func() {
 			// need to sleep to force the second node to be created a bit after the first node.
 			ExpectApplied(ctx, env.Client, nodeClaims[1], nodes[1])
 
-			// two pods on node 0, one on node 1
+			// two pods on node 1, one on node 2
 			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
 			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
@@ -4501,16 +4501,16 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
-			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[1])
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
 
 			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
 
-			// Node 1 has fewer pods (lower RescheduleDisruptionCost) so better
-			// savings ratio (price/disruption). It sorts first and consolidates.
+			// the second node has more pods, so it would normally not be picked for consolidation, except it very little
+			// lifetime remaining, so it should be deleted
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 		})
 	})
 	Context("Topology Consideration", func() {
