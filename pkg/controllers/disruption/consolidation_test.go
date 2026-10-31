@@ -32,6 +32,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -2499,6 +2500,79 @@ var _ = Describe("Consolidation", func() {
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
+		DescribeTable("deleting a node whose pod has a volume bound in another zone",
+			func(ephemeral bool, expectDeleted bool) {
+				zone := nodes[0].Labels[corev1.LabelTopologyZone]
+				otherZone := lo.Ternary(zone == "test-zone-1", "test-zone-2", "test-zone-1")
+				otherZoneInstance := leastExpensiveInstanceWithZone(otherZone)
+				for _, l := range []map[string]string{nodes[1].Labels, nodeClaims[1].Labels} {
+					l[corev1.LabelTopologyZone] = otherZone
+					l[corev1.LabelInstanceTypeStable] = otherZoneInstance.Name
+					l[v1.CapacityTypeLabelKey] = otherZoneInstance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any()
+				}
+
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				sc := test.StorageClass(test.StorageClassOptions{
+					ObjectMeta:        metav1.ObjectMeta{Name: "my-storage-class"},
+					VolumeBindingMode: new(storagev1.VolumeBindingWaitForFirstConsumer),
+				})
+				pods := test.Pods(2, test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
+							},
+						}}})
+				pv := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{otherZone}, StorageClassName: sc.Name})
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta:       metav1.ObjectMeta{Namespace: pods[1].Namespace, Name: fmt.Sprintf("%s-data", pods[1].Name)},
+					StorageClassName: new(sc.Name),
+					VolumeName:       pv.Name,
+				})
+				volumeSource := corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvc.Name}}
+				if ephemeral {
+					volumeSource = corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{Spec: corev1.PersistentVolumeClaimSpec{
+							StorageClassName: new(sc.Name),
+							AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+						}},
+					}}
+				}
+				pods[1].Spec.Volumes = append(pods[1].Spec.Volumes, corev1.Volume{Name: "data", VolumeSource: volumeSource})
+				// keep nodes[0] from being a candidate so only nodes[1] is considered
+				pods[0].Annotations = lo.Assign(pods[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+				ExpectApplied(ctx, env.Client, rs, sc, pv, pvc, pods[0], pods[1], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+
+				ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+				ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				if !expectDeleted {
+					// the pod is pinned to the zone of its volume, and nodes[1] is already the cheapest option there
+					Expect(queue.GetCommands()).To(BeEmpty())
+					ExpectExists(ctx, env.Client, nodeClaims[1])
+					return
+				}
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+				ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+			},
+			// the ephemeral PVC is deleted with the pod, so the replacement pod is not tied to the old volume's zone
+			Entry("can delete it when the volume is ephemeral", true, true),
+			Entry("can't delete it when the volume is a persistent volume claim", false, false),
+		)
 		It("does not delete nodes with pod churn, deletes nodes without pod churn", func() {
 			// create our RS so we can link a pod to it
 			ExpectApplied(ctx, env.Client, nodePool)
