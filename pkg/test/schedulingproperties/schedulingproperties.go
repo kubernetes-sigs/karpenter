@@ -237,27 +237,20 @@ func drawScenario(t *caseT, cfg Config, satisfiable bool) scenario {
 	s := scenario{np: np, its: its, volumeSelectors: map[types.UID]*corev1.NodeSelector{}}
 	// Under the Strict policy, minValues can leave satisfiable pods unplaced.
 	s.minValuesPolicy = lo.Ternary(satisfiable || t.bool(), options.MinValuesPolicyBestEffort, options.MinValuesPolicyStrict)
-	// Only draw Exists for keys every instance type defines. Karpenter intersects Exists with NotIn as NotIn, so a pod
-	// requiring a label can share a NodeClaim that lands on a node without it. See #3425.
-	universal := sets.New(lo.Filter(lo.Keys(labels), func(key string, _ int) bool {
-		return lo.EveryBy(its, func(it *cloudprovider.InstanceType) bool {
-			return !it.Requirements.Has(key) || it.Requirements.Get(key).Operator() == corev1.NodeSelectorOpIn
-		})
-	})...)
 	topologyKeys := append([]string{corev1.LabelHostname}, lo.Without([]string{corev1.LabelTopologyZone}, cfg.KnownDeviations.UnsortedList()...)...)
 	constraints := lo.Map(groups, func(group string, _ int) podConstraints {
 		return drawPodConstraints(t, group, topologyKeys, satisfiable)
 	})
 	s.pods = make([]*corev1.Pod, t.intRange(1, t.limits.Pods))
 	for i := range s.pods {
-		pod := drawPod(t, i, np, target.Allocatable(), labels, others, universal, satisfiable)
+		pod := drawPod(t, i, np, target.Allocatable(), labels, others, satisfiable)
 		group := t.Intn(len(groups))
 		constraints[group].apply(pod, groups[group])
 		if lo.ContainsBy(pod.Spec.TopologySpreadConstraints, func(c corev1.TopologySpreadConstraint) bool { return c.WhenUnsatisfiable == corev1.DoNotSchedule }) {
 			avoidSpreadRelaxation(pod)
 		}
 		drawHostPort(t, pod)
-		if volumes, selector := drawVolume(t, i, pod, labels, others, universal, satisfiable); selector != nil {
+		if volumes, selector := drawVolume(t, i, pod, labels, others, satisfiable); selector != nil {
 			s.volumes = append(s.volumes, volumes...)
 			s.volumeSelectors[pod.UID] = selector
 		}
@@ -392,7 +385,7 @@ func drawHostPort(t *caseT, pod *corev1.Pod) {
 // satisfies. The volume constrains a key the pod doesn't, because Karpenter collapses contradictory requirements on one
 // key into DoesNotExist (#3423), and never the nodepool label, because Karpenter ignores pods whose requirements reduce
 // to nodepool DoesNotExist (#1265).
-func drawVolume(t *caseT, i int, pod *corev1.Pod, labels map[string]string, others map[string][]string, universal sets.Set[string], satisfiable bool) ([]runtime.Object, *corev1.NodeSelector) {
+func drawVolume(t *caseT, i int, pod *corev1.Pod, labels map[string]string, others map[string][]string, satisfiable bool) ([]runtime.Object, *corev1.NodeSelector) {
 	keys := lo.Without(lo.Keys(labels), append(nodeAffinityKeys(pod), v1.NodePoolLabelKey)...)
 	if len(keys) == 0 || t.bool() {
 		return nil, nil
@@ -408,7 +401,7 @@ func drawVolume(t *caseT, i int, pod *corev1.Pod, labels map[string]string, othe
 	if t.bool() {
 		for j := range terms {
 			selector.NodeSelectorTerms = append(selector.NodeSelectorTerms, corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{drawRequirement(t, labels, others, universal, key, satisfiable && j == terms-1)},
+				MatchExpressions: []corev1.NodeSelectorRequirement{drawRequirement(t, labels, others, key, satisfiable && j == terms-1)},
 			})
 		}
 		pv := test.PersistentVolume(test.PersistentVolumeOptions{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pv-%d", i)}, NodeSelectorTerms: selector.NodeSelectorTerms})
@@ -513,7 +506,7 @@ func singleValuedLabels(it *cloudprovider.InstanceType, offering *cloudprovider.
 	return labels
 }
 
-func drawPod(t *caseT, i int, np *v1.NodePool, allocatable corev1.ResourceList, labels map[string]string, others map[string][]string, universal sets.Set[string], satisfiable bool) *corev1.Pod {
+func drawPod(t *caseT, i int, np *v1.NodePool, allocatable corev1.ResourceList, labels map[string]string, others map[string][]string, satisfiable bool) *corev1.Pod {
 	keys := lo.Keys(labels)
 	slices.Sort(keys)
 	nodeSelector := map[string]string{}
@@ -549,7 +542,7 @@ func drawPod(t *caseT, i int, np *v1.NodePool, allocatable corev1.ResourceList, 
 	pod.CreationTimestamp = metav1.NewTime(time.Unix(0, 0))
 	// Each key appears at most once across nodeSelector and affinity. Karpenter collapses contradictory requirements on
 	// one key, like Exists and DoesNotExist, into DoesNotExist and launches a node the pod can't schedule to. See #3423.
-	if affinity := drawNodeAffinity(t, labels, others, universal, lo.Without(keys, lo.Keys(nodeSelector)...), satisfiable); affinity != nil {
+	if affinity := drawNodeAffinity(t, labels, others, lo.Without(keys, lo.Keys(nodeSelector)...), satisfiable); affinity != nil {
 		pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: affinity}
 	}
 	return pod
@@ -559,14 +552,14 @@ func drawPod(t *caseT, i int, np *v1.NodePool, allocatable corev1.ResourceList, 
 // pod has one term the target satisfies. It's last because Karpenter relaxes required terms before preferred terms, so
 // an unsatisfiable preference would discard an earlier satisfiable term (#3424). Preferred terms don't reuse required
 // keys, because Karpenter collapses contradictory requirements on one key into DoesNotExist (#3423).
-func drawNodeAffinity(t *caseT, labels map[string]string, others map[string][]string, universal sets.Set[string], keys []string, satisfiable bool) *corev1.NodeAffinity {
+func drawNodeAffinity(t *caseT, labels map[string]string, others map[string][]string, keys []string, satisfiable bool) *corev1.NodeAffinity {
 	keys = append([]string{absentLabelKey}, keys...)
 	affinity := &corev1.NodeAffinity{}
 	if terms := t.intRange(0, t.limits.RequiredTerms); terms > 0 {
 		affinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 		for i := range terms {
 			affinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(affinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-				drawTerm(t, labels, others, universal, keys, satisfiable && i == terms-1))
+				drawTerm(t, labels, others, keys, satisfiable && i == terms-1))
 		}
 		for _, term := range affinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
 			keys = lo.Without(keys, lo.Map(term.MatchExpressions, func(r corev1.NodeSelectorRequirement, _ int) string { return r.Key })...)
@@ -576,7 +569,7 @@ func drawNodeAffinity(t *caseT, labels map[string]string, others map[string][]st
 	for range lo.Ternary(len(keys) > 0, t.intRange(0, t.limits.PreferredTerms), 0) {
 		affinity.PreferredDuringSchedulingIgnoredDuringExecution = append(affinity.PreferredDuringSchedulingIgnoredDuringExecution, corev1.PreferredSchedulingTerm{
 			Weight:     1 + t.Int31n(100),
-			Preference: drawTerm(t, labels, others, universal, keys, false),
+			Preference: drawTerm(t, labels, others, keys, false),
 		})
 	}
 	if affinity.RequiredDuringSchedulingIgnoredDuringExecution == nil && affinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
@@ -586,7 +579,7 @@ func drawNodeAffinity(t *caseT, labels map[string]string, others map[string][]st
 }
 
 // drawTerm draws a term over distinct keys. When satisfy is true, the target satisfies it.
-func drawTerm(t *caseT, labels map[string]string, others map[string][]string, universal sets.Set[string], keys []string, satisfy bool) corev1.NodeSelectorTerm {
+func drawTerm(t *caseT, labels map[string]string, others map[string][]string, keys []string, satisfy bool) corev1.NodeSelectorTerm {
 	if !satisfy {
 		// Unsatisfiable terms never constrain the nodepool label. Karpenter ignores pods whose requirements reduce to
 		// nodepool DoesNotExist as opting out of Karpenter. See #1265.
@@ -594,21 +587,18 @@ func drawTerm(t *caseT, labels map[string]string, others map[string][]string, un
 	}
 	var term corev1.NodeSelectorTerm
 	for _, key := range distinctOf(t, keys, 1, 3) {
-		term.MatchExpressions = append(term.MatchExpressions, drawRequirement(t, labels, others, universal, key, satisfy))
+		term.MatchExpressions = append(term.MatchExpressions, drawRequirement(t, labels, others, key, satisfy))
 	}
 	return term
 }
 
 // drawRequirement draws a requirement on key. When satisfy is true, the target satisfies it.
-func drawRequirement(t *caseT, labels map[string]string, others map[string][]string, universal sets.Set[string], key string, satisfy bool) corev1.NodeSelectorRequirement {
+func drawRequirement(t *caseT, labels map[string]string, others map[string][]string, key string, satisfy bool) corev1.NodeSelectorRequirement {
 	if key == absentLabelKey {
 		return corev1.NodeSelectorRequirement{Key: key, Operator: corev1.NodeSelectorOpDoesNotExist}
 	}
 	value := labels[key]
-	ops := []corev1.NodeSelectorOperator{corev1.NodeSelectorOpIn, corev1.NodeSelectorOpNotIn}
-	if universal.Has(key) {
-		ops = append(ops, corev1.NodeSelectorOpExists)
-	}
+	ops := []corev1.NodeSelectorOperator{corev1.NodeSelectorOpIn, corev1.NodeSelectorOpNotIn, corev1.NodeSelectorOpExists}
 	n, err := strconv.Atoi(value)
 	if err == nil && n > 0 {
 		ops = append(ops, corev1.NodeSelectorOpGt, corev1.NodeSelectorOpLt)
