@@ -102,6 +102,9 @@ type options struct {
 	// disruption candidate will free when it is terminated. Used by the terminate-first "would the pods fit once the
 	// slot is freed?" pass.
 	creditReservationCapacity map[string]int
+	// unschedulablePods are pods the caller already knows can't be scheduled this loop, with the reason. Solve reports
+	// them as pod errors without scheduling them.
+	unschedulablePods map[types.UID]error
 }
 
 type Options = option.Function[options]
@@ -118,6 +121,13 @@ var CreditReservationCapacity = func(reservationID string, count int) Options {
 			opts.creditReservationCapacity = map[string]int{}
 		}
 		opts.creditReservationCapacity[reservationID] += count
+	}
+}
+
+// UnschedulablePods marks pods that can't be scheduled this loop, such as pods whose volume topology lookup failed.
+var UnschedulablePods = func(errs map[types.UID]error) Options {
+	return func(opts *options) {
+		opts.unschedulablePods = errs
 	}
 }
 
@@ -214,6 +224,7 @@ func NewScheduler(
 		reservationManager:        reservationManager,
 		reservedOfferingMode:      resolved.reservedOfferingMode,
 		creditReservationCapacity: resolved.creditReservationCapacity,
+		unschedulablePods:         resolved.unschedulablePods,
 		preferencePolicy:          resolved.preferencePolicy,
 		minValuesPolicy:           minValuesPolicy,
 		numConcurrentReconciles:   lo.Ternary(resolved.numConcurrentReconciles > 0, resolved.numConcurrentReconciles, 1),
@@ -281,6 +292,7 @@ type Scheduler struct {
 	// rather than full — the ReservationManager capacity alone can't distinguish a genuinely-full reservation from one
 	// pessimistically drained this pass, so the offering's static capacity plus this credit is the source of truth.
 	creditReservationCapacity map[string]int
+	unschedulablePods         map[types.UID]error
 	preferencePolicy          PreferencePolicy
 	minValuesPolicy           karpopts.MinValuesPolicy
 	numConcurrentReconciles   int
@@ -484,6 +496,13 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	podErrors := map[*corev1.Pod]error{}
+	pods = lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+		if err, ok := s.unschedulablePods[p.UID]; ok {
+			podErrors[p] = err
+			return false
+		}
+		return true
+	})
 	// Reset the metric for the controller, so we don't keep old ids around
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	PendingPodsByEffectiveZone.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
