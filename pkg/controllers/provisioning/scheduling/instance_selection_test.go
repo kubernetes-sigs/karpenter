@@ -534,7 +534,7 @@ var _ = Describe("Instance Type Selection", func() {
 					test.UnschedulablePod(opts), test.UnschedulablePod(opts), test.UnschedulablePod(opts),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-				nodeNames := sets.NewString()
+				nodeNames := sets.New[string]()
 				for _, p := range pods {
 					node := ExpectScheduled(ctx, env.Client, p)
 					nodeNames.Insert(node.Name)

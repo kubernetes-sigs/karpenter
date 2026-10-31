@@ -43,7 +43,7 @@ var _ = Describe("Reboot", func() {
 
 	BeforeEach(func() {
 		if _, ok := env.RebootCondition(); !ok {
-			Skip("reboot specs require --reboot-condition for this provider")
+			Skip("[unsupported:reboot-condition] reboot specs require --reboot-condition for this provider")
 		}
 		dep = test.Deployment(test.DeploymentOptions{
 			Replicas: 1,

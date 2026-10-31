@@ -58,6 +58,8 @@ type KarpenterProfiler struct {
 // in the background. Heap profiles are captured every 30 seconds (instant).
 // CPU profiles are captured every 60 seconds (blocks for CPUProfileSeconds).
 func StartKarpenterProfiler(env *Environment) *KarpenterProfiler {
+	GinkgoHelper()
+	env.RequireInClusterController("profiling karpenter")
 	ctx, cancel := context.WithCancel(env.Context)
 	kp := &KarpenterProfiler{
 		env:    env,

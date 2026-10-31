@@ -477,7 +477,7 @@ var _ = Describe("Topology", func() {
 			// pods we are adding don't count toward skew). This behavior is called out at
 			// https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/ , though it's not
 			// recommended for users.
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			for _, p := range pods {
 				nodeNames.Insert(p.Spec.NodeName)
 			}
@@ -810,7 +810,7 @@ var _ = Describe("Topology", func() {
 			// pods we are adding don't count toward skew). This behavior is called out at
 			// https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/ , though it's not
 			// recommended for users.
-			nodeNames := sets.NewString()
+			nodeNames := sets.New[string]()
 			for _, p := range pods {
 				nodeNames.Insert(p.Spec.NodeName)
 			}

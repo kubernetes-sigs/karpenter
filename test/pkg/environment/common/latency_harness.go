@@ -50,6 +50,7 @@ var TargetHistograms = []string{
 	"karpenter_pods_provisioning_bound_duration_seconds",
 	"karpenter_pods_provisioning_startup_duration_seconds",
 	"karpenter_scheduler_scheduling_duration_seconds",
+	"karpenter_scheduler_topology_build_duration_seconds",
 	"karpenter_voluntary_disruption_decision_evaluation_duration_seconds",
 	"karpenter_nodeclaims_termination_duration_seconds",
 	"karpenter_consolidation_score",
@@ -77,6 +78,8 @@ type LatencyHarness struct {
 }
 
 func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
+	GinkgoHelper()
+	env.RequireInClusterController("measuring karpenter latency metrics")
 	pod, err := env.EventuallyFindActiveKarpenterPod(env.Context)
 	if err != nil {
 		return nil, fmt.Errorf("finding karpenter pod: %w", err)

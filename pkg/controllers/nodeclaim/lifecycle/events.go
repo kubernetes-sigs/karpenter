@@ -50,6 +50,7 @@ func InsufficientCapacityErrorPodEvent(pod *corev1.Pod, nodeClaim *v1.NodeClaim,
 	}
 }
 
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func NodeClassNotReadyEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,

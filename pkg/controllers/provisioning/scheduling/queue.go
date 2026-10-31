@@ -65,6 +65,7 @@ func (q *Queue) Push(pod *v1.Pod) {
 	q.lastLen[pod.UID] = len(q.pods)
 }
 
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func (q *Queue) List() []*v1.Pod {
 	return q.pods
 }
