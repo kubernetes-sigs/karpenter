@@ -114,7 +114,8 @@ func (in *NodeClaimTemplateSpec) validateRequirements(ctx context.Context) (errs
 	return errs
 }
 
-func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error { //nolint:gocyclo
+// ValidateRequirement validates a requirement. allowedLabels are exempt from the restricted label check.
+func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues, allowedLabels ...string) error { //nolint:gocyclo
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
@@ -122,7 +123,7 @@ func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequiremen
 	if !SupportedNodeSelectorOps.Has(string(requirement.Operator)) {
 		errs = multierr.Append(errs, fmt.Errorf("key %s has an unsupported operator %s not in %s", requirement.Key, requirement.Operator, SupportedNodeSelectorOps.UnsortedList()))
 	}
-	if e := IsRestrictedLabel(requirement.Key); e != nil {
+	if e := IsRestrictedLabel(requirement.Key); e != nil && !lo.Contains(allowedLabels, requirement.Key) {
 		errs = multierr.Append(errs, e)
 	}
 	// Validate that at least one value is valid for well-known labels with known values
