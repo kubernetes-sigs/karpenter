@@ -38,6 +38,7 @@ import (
 type Requirement struct {
 	Key        string
 	complement bool
+	mustExist  bool // the label must be present; a complement set alone (NotIn) also matches nodes without it
 	values     sets.Set[string]
 	gte        *int // inclusive lower bound (Gt is converted to Gte)
 	lte        *int // inclusive upper bound (Lt is converted to Lte)
@@ -84,6 +85,7 @@ func NewRequirementWithFlexibility(
 		Key:        key,
 		values:     sets.New[string](),
 		complement: true,
+		mustExist:  operator != corev1.NodeSelectorOpNotIn && operator != corev1.NodeSelectorOpDoesNotExist,
 		minValues:  minValues,
 	}
 	if operator == corev1.NodeSelectorOpIn || operator == corev1.NodeSelectorOpDoesNotExist {
@@ -222,6 +224,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 		Key:        r.Key,
 		values:     values,
 		complement: complement,
+		mustExist:  complement && (r.mustExist || requirement.mustExist), // concrete values already imply the label
 		gte:        gte,
 		lte:        lte,
 		minValues:  minValues,
@@ -284,6 +287,12 @@ func (r *Requirement) Any() string {
 		return fmt.Sprint(rand.Intn(max-min) + min) //nolint:gosec
 	}
 	return ""
+}
+
+// mayBeAbsent returns true if nodes without the label satisfy the requirement
+func (r *Requirement) mayBeAbsent() bool {
+	operator := r.Operator()
+	return !r.mustExist && (operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist)
 }
 
 // Has returns true if the requirement allows the value
@@ -349,6 +358,9 @@ func (r *Requirement) String() string {
 			values = append(values[:5], fmt.Sprintf("and %d others", length-5))
 		}
 		s = fmt.Sprintf("%s %s %s", r.Key, r.Operator(), values)
+		if r.mustExist {
+			s = fmt.Sprintf("%s %s, %s", r.Key, corev1.NodeSelectorOpExists, s)
+		}
 	}
 	if r.gte != nil {
 		s += fmt.Sprintf(" >=%d", *r.gte)
@@ -375,6 +387,7 @@ func (r *Requirement) DeepCopyInto(out *Requirement) {
 
 	out.Key = r.Key
 	out.complement = r.complement
+	out.mustExist = r.mustExist
 	if r.gte != nil {
 		gte := *r.gte
 		out.gte = &gte
