@@ -1,6 +1,4 @@
-# Provider-defined node pricing
-
-Draft — 2026-10-27. Interfaces and rollout remain proposals. Sources verified on October 24; no implementation, benchmarks, or live cloud validation.
+# Provider defined node pricing
 
 ## Motivation
 
