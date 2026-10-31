@@ -1652,6 +1652,18 @@ var _ = Describe("Provisioning", func() {
 				Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 			}
 		})
+		It("should schedule pods that select the NodeClass label when the provider restricts its domain", func() {
+			// Real providers restrict their own label domain, which also covers the NodeClass label that core stamps.
+			v1.RestrictedLabelDomains.Insert(v1alpha1.Group)
+			DeferCleanup(func() { v1.RestrictedLabelDomains.Delete(v1alpha1.Group) })
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+			key := v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())
+			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{key: nodePool.Spec.Template.Spec.NodeClassRef.Name}})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(key, nodePool.Spec.Template.Spec.NodeClassRef.Name))
+		})
 		It("should not label nodes with well-known labels from requirements", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{

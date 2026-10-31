@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
@@ -587,10 +588,14 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*corev1.Pod, erro
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {
+	// Karpenter stamps the NodeClass label on every node, so pods may select it even when the provider restricts its domain.
+	nodeClassLabels := lo.Map(p.cloudProvider.GetSupportedNodeClasses(), func(nodeClass status.Object, _ int) string {
+		return v1.NodeClassLabelKey(object.GVK(nodeClass).GroupKind())
+	})
 	return multierr.Combine(
 		validateKarpenterManagedLabelCanExist(pod),
-		validateNodeSelector(ctx, pod),
-		validateAffinity(ctx, pod),
+		validateNodeSelector(ctx, pod, nodeClassLabels),
+		validateAffinity(ctx, pod, nodeClassLabels),
 		p.volumeTopology.ValidatePersistentVolumeClaims(ctx, pod),
 	)
 }
@@ -631,7 +636,7 @@ func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []
 	return schedulablePods, volumeReqs, nil
 }
 
-func validateNodeSelector(ctx context.Context, p *corev1.Pod) (errs error) {
+func validateNodeSelector(ctx context.Context, p *corev1.Pod, allowedLabels []string) (errs error) {
 	terms := lo.MapToSlice(p.Spec.NodeSelector, func(k string, v string) corev1.NodeSelectorTerm {
 		return corev1.NodeSelectorTerm{
 			MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -644,26 +649,26 @@ func validateNodeSelector(ctx context.Context, p *corev1.Pod) (errs error) {
 		}
 	})
 	for _, term := range terms {
-		errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term))
+		errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term, allowedLabels))
 	}
 	return errs
 }
 
-func validateAffinity(ctx context.Context, p *corev1.Pod) (errs error) {
+func validateAffinity(ctx context.Context, p *corev1.Pod, allowedLabels []string) (errs error) {
 	if p.Spec.Affinity == nil {
 		return nil
 	}
 	if p.Spec.Affinity.NodeAffinity != nil {
 		if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term))
+				errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term, allowedLabels))
 			}
 		}
 	}
 	return errs
 }
 
-func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm) (errs error) {
+func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm, allowedLabels []string) (errs error) {
 	if term.MatchFields != nil {
 		errs = multierr.Append(errs, fmt.Errorf("node selector term with matchFields is not supported"))
 	}
@@ -674,7 +679,7 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 					Key:      requirement.Key,
 					Operator: requirement.Operator,
 					Values:   requirement.Values,
-				}))
+				}, allowedLabels...))
 		}
 	}
 	return errs
