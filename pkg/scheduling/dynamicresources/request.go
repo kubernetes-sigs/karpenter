@@ -38,6 +38,7 @@ type deviceRequestAccessor interface {
 	AllocationMode() resourcev1.DeviceAllocationMode
 	Count() int64
 	Capacity() *resourcev1.CapacityRequirements
+	AdminAccess() bool
 }
 
 type exactRequestAccessor struct {
@@ -59,6 +60,9 @@ func (a exactRequestAccessor) Count() int64 {
 func (a exactRequestAccessor) Capacity() *resourcev1.CapacityRequirements {
 	return a.req.Capacity
 }
+func (a exactRequestAccessor) AdminAccess() bool {
+	return lo.FromPtr(a.req.AdminAccess)
+}
 
 type subRequestAccessor struct {
 	sub *resourcev1.DeviceSubRequest
@@ -78,6 +82,12 @@ func (a subRequestAccessor) Count() int64 {
 }
 func (a subRequestAccessor) Capacity() *resourcev1.CapacityRequirements {
 	return a.sub.Capacity
+}
+
+// AdminAccess is always false for FirstAvailable sub-requests: the DRA API only
+// exposes adminAccess on top-level (Exactly) requests.
+func (a subRequestAccessor) AdminAccess() bool {
+	return false
 }
 
 // RequestData holds the parsed and validated metadata for a single device request.
@@ -112,6 +122,10 @@ type RequestData struct {
 	// CapacityRequests contains the per-dimension capacity requirements from
 	// ExactDeviceRequest.Capacity.Requests. nil when no capacity is requested.
 	CapacityRequests map[resourcev1.QualifiedName]resource.Quantity
+	// AdminAccess indicates the request is for privileged administrative access
+	// (KEP-5018). Admin-access requests may bind to already-allocated devices and
+	// don't consume the device. Only set for Exactly requests.
+	AdminAccess bool
 }
 
 // ClaimData holds the parsed constraints and requests for a single ResourceClaim.
@@ -343,6 +357,7 @@ func buildRequestData(
 		Selectors:      selectors,
 		NumDevices:     int(req.Count()),
 		AllocationMode: resourcev1.DeviceAllocationModeExactCount,
+		AdminAccess:    req.AdminAccess(),
 	}
 
 	if req.Capacity() != nil {
