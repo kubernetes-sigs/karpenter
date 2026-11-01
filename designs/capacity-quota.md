@@ -79,12 +79,74 @@ A launch is allowed only if it fits every limit that applies to it: the NodePool
 - **Static capacity / repair:** the node-count checks that `repair.go` and `staticdrift.go` make against `NodePool.spec.limits[nodes]` also consider quotas with a `nodes` limit that select the node.
 - **Weighted NodePools:** a quota that blocks a higher-weight NodePool makes the scheduler fall through to lower-weight NodePools, as NodePool limits do today.
 
-### Observability
+### User Experience
 
-- The existing log line "instance types were excluded because they would breach limits" names the quota as well as the NodePool.
-- Pod events: when no NodePool can launch because of quotas, the `FailedScheduling` event says which CapacityQuota is exhausted.
-- Metrics: `karpenter_capacityquota_limit` and `karpenter_capacityquota_usage` gauges per quota and resource.
-- `kubectl get capacityquota` shows `status.used` once the status controller is enabled.
+This section describes what a user sees. Names of events, metrics and fields are proposals for review.
+
+**A limit blocks provisioning.** When a pending pod can't be scheduled because of quotas, the pod gets the usual `FailedScheduling` event, and its message names the quota and the resource that ran out, next to the NodePool reason that exists today:
+
+```
+Warning  FailedScheduling  karpenter  Failed to schedule pod, all available instance types exceed limits for
+nodepool "default"; CapacityQuota "team-a" has no room left for cpu (limit 64, used 62, requested 4)
+```
+
+The same text is logged by the provisioner and recorded as a `CapacityQuotaExceeded` event on the CapacityQuota object, so the owner of the quota can find it with `kubectl describe capacityquota team-a` without looking at pods. Events are deduplicated per quota and resource, so a long backlog of pending pods doesn't flood the object.
+
+**A limit restricts provisioning to a subset of instances.** A quota that selects a zone or a capacity type blocks only the matching offerings, so the pod can still be scheduled on the others. In that case nothing fails, and the user sees the effect in two places:
+
+- the NodeClaim is created with the remaining offerings (for example only the other zones), and the provisioner's debug log lists which offerings were dropped and by which quota, extending the "instance types were excluded because they would breach limits" line;
+- if the pod can only run in the blocked offerings (for example it has a zone `nodeSelector`), it fails scheduling with the message above, which names the offering label that the quota selected.
+
+**Knowing that limits are applied.**
+
+- `kubectl get capacityquota` shows the limits and `status.used` for each resource once the status controller is enabled, so a user sees how close a quota is to its limit.
+- When Karpenter can't enforce a quota (the selector is invalid, or it uses labels Karpenter can't know at launch, see Edge Cases), it logs a warning and records a `CapacityQuotaNotEnforced` event on the CapacityQuota. The upstream status only has `used`, so Karpenter doesn't add conditions to an object owned by another API.
+- At start-up Karpenter logs whether the `CapacityQuota` feature gate is on and whether the CRD was found.
+
+**Metrics.**
+
+- `karpenter_capacityquota_limit{name,resource_type}` and `karpenter_capacityquota_usage{name,resource_type}`, in the style of the existing `karpenter_nodepools_limit` and `karpenter_nodepools_usage`, so the same dashboards and alerts can be reused.
+- `karpenter_capacityquota_blocked_launches_total{name,resource_type}`, a counter of scheduling attempts in which a quota removed all offerings of a NodePool, for alerting on quotas that actively block provisioning.
+
+**Debugging.** To find out why a pod is pending, a user (1) reads the `FailedScheduling` event, (2) checks `kubectl get capacityquota` for the quota it names, (3) compares `karpenter_capacityquota_usage` with the limit, and (4) turns on debug logging to see the dropped offerings.
+
+### Detailed Design
+
+**Components.** Three pieces are added to Karpenter. None of them changes an existing API.
+
+| Component | Where | Responsibility |
+|---|---|---|
+| Quota reader | `pkg/controllers/state/capacityquota.go` | Holds the CapacityQuota objects in cluster state, kept current by an informer, and computes usage for a selector. |
+| Scheduler filter | `pkg/controllers/provisioning/scheduling/` (next to `filterByRemainingResources`) | Enforces the limits during provisioning, per offering. This is the only place that blocks a launch. |
+| Status controller | `pkg/controllers/capacityquota/counter/` | Writes `status.used` (beta). It never blocks anything. |
+
+**Who reads the objects.** A CapacityQuota informer in `pkg/controllers/state/informer/` watches the CRD and stores the objects in `state.Cluster`. The scheduler and the status controller both read from `state.Cluster`, so they see the same quotas and the same usage, and neither reads the API server on the scheduling path. The informer only starts when the feature gate is on and the CRD exists.
+
+**What enforces the limits.** Only the provisioning scheduler. When it is built (`NewScheduler`), it asks `state.Cluster` for the quotas and, for each, the remaining capacity `limits - ResourcesFor(selector)`. `addToNewNodeClaim` then filters offerings as described in How It Works. Consolidation and drift use the same scheduler for their replacement simulations, so they follow the same path. The node-count checks in `repair.go` and `staticdrift.go` call the same helper for the `nodes` resource.
+
+**Who pushes status.** The status controller reconciles each CapacityQuota when it changes and when nodes or NodeClaims selected by it change, with a mapping from node and NodeClaim events to the quotas that select them (the NodePool counter controller reconciles on NodePool changes only, so this part is new). It computes `status.used` with the same `ResourcesFor(selector)` helper that the scheduler uses and patches the status subresource with its own field manager. Because the scheduler computes usage from cluster state and not from `status.used`, a stale or missing status never changes what is enforced; the status is for users and for other controllers.
+
+**How they interact.**
+
+```
+CapacityQuota CRD --informer--> state.Cluster <--reads-- Scheduler filter (enforces)
+                                      |
+                                      +----reads-- Status controller --patches--> CapacityQuota status
+Node / NodeClaim events --> state.Cluster (usage per selector)
+```
+
+**Files touched.**
+
+- `pkg/operator/options/options.go`: the `CapacityQuota` feature gate and the `--capacity-quota-status` flag.
+- `pkg/controllers/state/`: the quota store and `ResourcesFor(selector)`.
+- `pkg/controllers/state/informer/`: the CapacityQuota informer.
+- `pkg/controllers/provisioning/scheduling/scheduler.go`: remaining capacity per quota, per-offering filtering, in-flight accounting.
+- `pkg/controllers/capacityquota/counter/`: the status controller.
+- `pkg/controllers/controllers.go`: registers the controller when the gate is on.
+- `pkg/controllers/metrics/`: the quota gauges.
+- `pkg/events/`: the `CapacityQuotaExceeded` and `CapacityQuotaNotEnforced` events.
+
+**Failure modes.** If the informer hasn't synced, the scheduler waits for cluster state to sync, as it does for NodePools today. If the CRD disappears at runtime, the informer stops and quotas are treated as absent (a log line says so), and launches fall back to NodePool limits only.
 
 ### Edge Cases
 
