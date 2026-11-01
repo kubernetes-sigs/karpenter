@@ -377,10 +377,12 @@ func (t *TopologyGroup) nextDomainAffinity(pod *corev1.Pod, podDomains *scheduli
 		}
 
 		// and if there are no node domains, just return the first random domain that is viable
-		for domain := range t.domains {
-			if podDomains.Has(domain) {
-				options.Insert(domain)
-				break
+		if options.Len() == 0 {
+			for domain := range t.domains {
+				if podDomains.Has(domain) {
+					options.Insert(domain)
+					break
+				}
 			}
 		}
 	}
