@@ -191,7 +191,7 @@ node.Status.NodeInfo.BootID != preBootID
 
 the reboot taint is removed, independently of Node readiness. If reboot reaches a terminal failure without observing a changed `bootID`, the executor removes the reboot-owned taint as part of terminal cleanup.
 
-**Draining reuses termination’s existing** `Terminator.Drain`**.** The phase remains `RebootRequested` until drain completes. For `drainGracePeriod > 0`, the executor drains with `deadline = drainStart + drainGracePeriod`, honoring PDBs and pod grace up to the deadline; residual pods ride the reboot. For `0`, drain is skipped and reboot is issued immediately. **Karpenter does not inspect or branch on kubelet shutdown configuration.** After the reboot is issued, workload fate is governed by kubelet graceful-node-shutdown behavior and normal Kubernetes node-failure handling.
+**Draining reuses termination’s existing** `Terminator.Drain`**.** The phase remains `RebootRequested` until drain completes. For `drainGracePeriod > 0`, the executor drains with `deadline = drainStart + drainGracePeriod`, honoring PDBs and pod grace up to the deadline; residual pods ride the reboot. For `0`, drain is skipped and reboot is issued immediately. DaemonSet pods are not drained: their replacements could only schedule back to the same Node, where they would compete with other pods for its capacity once it returns. **Karpenter does not inspect or branch on kubelet shutdown configuration.** After the reboot is issued, workload fate is governed by kubelet graceful-node-shutdown behavior and normal Kubernetes node-failure handling.
 
 #### Issuing
 

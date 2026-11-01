@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -163,8 +164,8 @@ func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
 func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	opts := option.Resolve(o...)
 
-	// Root Context
-	ctx := context.Background()
+	// Root Context, canceled on SIGTERM/SIGINT so the manager stops and releases the leader lease
+	ctx := ctrl.SetupSignalHandler()
 
 	// Options
 	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
@@ -216,6 +217,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		LeaderElectionNamespace:       options.FromContext(ctx).LeaderElectionNamespace,
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,
+		GracefulShutdownTimeout:       new(15 * time.Second), // under the default 30s pod grace period, so the lease is released even if a runnable is slow to stop
 		LeaderElectionConfig:          leaderConfig,
 		LeaderElectionLabels:          opts.LeaderElectionLabels,
 		Metrics: server.Options{

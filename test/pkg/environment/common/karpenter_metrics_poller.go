@@ -62,6 +62,8 @@ type KarpenterMetricsPoller struct {
 }
 
 func StartKarpenterMetricsPoller(env *Environment) *KarpenterMetricsPoller {
+	GinkgoHelper()
+	env.RequireInClusterController("polling karpenter metrics")
 	ctx, cancel := context.WithCancel(env.Context)
 	mp := &KarpenterMetricsPoller{
 		env:    env,

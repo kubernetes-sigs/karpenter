@@ -7,6 +7,8 @@ aliases:
     - jackfrancis
     - omerap12
     - towca
+  # Keep karpenter-maintainers, karpenter-reviewers, and emeritus-karpenter-maintainers in sync with
+  # https://github.com/kubernetes/test-infra/blob/master/config/jobs/kubernetes-sigs/karpenter/OWNERS
   karpenter-maintainers:
     - ellistarn
     - jonathan-innis

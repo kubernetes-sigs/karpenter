@@ -40,6 +40,7 @@ var _ = Describe("CapacityBuffer", func() {
 	var bufferTemplate *corev1.PodTemplate
 
 	BeforeEach(func() {
+		env.RequireCRD(&autoscalingv1beta1.CapacityBuffer{})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 

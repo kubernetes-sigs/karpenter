@@ -86,7 +86,7 @@ var _ = Describe("DefaultTopologySpreadConstraints", func() {
 
 	BeforeEach(func() {
 		if !schedulerHasDefaultConstraints() {
-			Skip(fmt.Sprintf("cluster's kube-scheduler isn't configured with %s, see hack/kind/cluster.yaml", schedulerConfigMountPath))
+			Skip(fmt.Sprintf("[unsupported:kube-scheduler-config] cluster's kube-scheduler isn't configured with %s, see hack/kind/cluster.yaml", schedulerConfigMountPath))
 		}
 		schedulerName, defaultConstraints = defaultConstraintsProfile()
 		appLabels = map[string]string{"app": test.RandomName()}

@@ -347,7 +347,9 @@ func (p *Provisioner) NewScheduler(
 	scheduler.NewDefaultTopologySpreadInjector(p.kubeClient).Inject(ctx, pods)
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
+	stopTopologyTimer := metrics.Measure(scheduler.TopologyBuildDurationSeconds, map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
+	stopTopologyTimer()
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
