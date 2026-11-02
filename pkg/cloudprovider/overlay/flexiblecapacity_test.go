@@ -18,6 +18,7 @@ package overlay_test
 
 import (
 	"context"
+	"errors"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -200,6 +201,34 @@ var _ = Describe("Flexible Capacity", func() {
 			created, err := decorated.Create(gatedCtx, nodeClaim)
 			Expect(err).ToNot(HaveOccurred())
 			expectChosenAmount(created)
+		})
+	})
+	Context("when loading what the correction needs fails", func() {
+		// Create loads the NodePool and the instance types before the launch. If that fails, it must not launch, so
+		// that Karpenter retries the launch instead of keeping an uncorrected status.
+		It("should not launch when the instance types cannot be loaded", func() {
+			ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(nil, corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")}))
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+			fakeCloudProvider.ErrorsForNodePool[nodePool.Name] = errors.New("instance types are not available")
+
+			_, err := decorated.Create(gatedCtx, nodeClaim)
+			Expect(err).To(HaveOccurred())
+			Expect(fakeCloudProvider.CreateCalls).To(BeEmpty())
+		})
+		It("should not launch when the NodePool cannot be loaded", func() {
+			// The NodePool is not applied, so getting it fails.
+			_, err := decorated.Create(gatedCtx, nodeClaim)
+			Expect(err).To(HaveOccurred())
+			Expect(fakeCloudProvider.CreateCalls).To(BeEmpty())
+		})
+		It("should launch without loading anything when no correction is needed", func() {
+			// No annotation and no maxCapacity overlay, so the missing NodePool does not matter.
+			delete(nodeClaim.Annotations, v1.FlexibleCapacityAnnotationKey)
+			decorated = overlay.Decorate(fakeCloudProvider, env.Client, store)
+
+			_, err := decorated.Create(gatedCtx, nodeClaim)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(fakeCloudProvider.CreateCalls).To(HaveLen(1))
 		})
 	})
 	It("should not change the status when the NodeOverlay feature gate is off", func() {

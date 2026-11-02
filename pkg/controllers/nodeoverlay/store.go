@@ -99,6 +99,14 @@ func (s *InstanceTypeStore) HasFlexibleCapacity(nodePoolName string, instanceTyp
 	return ok && update.Capacity != nil && len(update.Capacity.FlexibleUpdate) != 0
 }
 
+// NodePoolHasFlexibleCapacity reports whether a NodeOverlay sets maxCapacity for any instance type in the NodePool.
+func (s *InstanceTypeStore) NodePoolHasFlexibleCapacity(nodePoolName string) bool {
+	internalStore := lo.FromPtr(s.store.Load())
+	return lo.SomeBy(lo.Values(internalStore.updates[nodePoolName]), func(update *instanceTypeUpdate) bool {
+		return update.Capacity != nil && len(update.Capacity.FlexibleUpdate) != 0
+	})
+}
+
 // InstanceTypeStore manages instance type updates for node pools.
 // It maintains a nested mapping structure where:
 //   - First level:  nodePoolName -> map of instance updates
