@@ -92,6 +92,8 @@ The AWS provider supports hugepages on the AL2 and AL2023 AMI families. AL2 user
   * on AL2, before `/etc/eks/bootstrap.sh`;
   * on AL2023, before nodeadm, which starts kubelet only after cloud-init has run the user data scripts.
 * If the kernel allocates fewer pages than asked, the script frees cached memory, compacts memory and tries once more. It logs the result.
+* User data scripts run only on the first boot. So the script also writes the 2Mi page count to `/etc/sysctl.d/zzzz-hugepages.conf`. On every later boot, systemd-sysctl sets `vm.nr_hugepages` from that file before kubelet starts. Other page sizes have no sysctl, so their counts are lost when the node reboots.
+* The script runs after the user's own user data. If that user data also writes `/etc/sysctl.d/zzzz-hugepages.conf`, Karpenter's script replaces the file, so the node keeps Karpenter's count after a reboot too.
 * The page counts are part of the user data, so each distinct page count gets its own launch template.
 * On the other AMI families (Bottlerocket, Windows and Custom), a launch that needs hugepages fails with an error. Without this check, the node would start without its hugepages and never initialize.
 * A flexible resource that is not hugepages also fails the launch, because the provider cannot allocate it.
