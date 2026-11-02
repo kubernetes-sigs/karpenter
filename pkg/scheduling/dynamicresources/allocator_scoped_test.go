@@ -357,7 +357,7 @@ var _ = Describe("Requirement-scoped template sets", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("should satisfy a binding on a reused device ID within one set, and never across sets", func() {
+		It("should satisfy a binding on a reused device ID within one set", func() {
 			numa := resourcev1.QualifiedName("gpu.example.com/numa")
 			it := reusedSets(&cloudprovider.AttributeBinding{Attribute: numa, Devices: []cloudprovider.DeviceID{
 				deviceID("gpu.example.com", "gpus", "gpu-0").DeviceID, deviceID("gpu.example.com", "gpus", "gpu-1").DeviceID,
@@ -374,6 +374,23 @@ var _ = Describe("Requirement-scoped template sets", func() {
 			Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf("a"))
 			result.Allocation.Commit(ctx)
 			Expect(lo.Uniq(allocatedPools(alloc, "c-bound", "it-reuse"))).To(ConsistOf(cloudprovider.TemplatePoolName("gpus", 0)))
+		})
+		It("should ignore a one-device binding on a reused device ID", func() {
+			numa := resourcev1.QualifiedName("gpu.example.com/numa")
+			// Expanded across both sets, this binding would look like a pair, so a one-device claim matching on the
+			// runtime-only attribute would be accepted through the binding fallback.
+			it := reusedSets(&cloudprovider.AttributeBinding{Attribute: numa, Devices: []cloudprovider.DeviceID{
+				deviceID("gpu.example.com", "gpus", "gpu-0").DeviceID,
+			}})
+			bindings := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{"test-np": {it}})
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, bindings, env.Client, nil)
+			nc := scopedNodeClaim([]string{"it-reuse"}, map[string][]dynamicresources.ResourceSlice{"it-reuse": instanceTypeSlices(it)})
+			claim := makeClaimWithConstraints("c-unbound",
+				[]resourcev1.DeviceConstraint{{MatchAttribute: new(resourcev1.FullyQualifiedName(numa))}},
+				exactRequest("req-1", "gpu", 1),
+			)
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })

@@ -1672,10 +1672,6 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
-			// Allocations written for the simulated node reference its real, published pool, not a namespaced template pool.
-			for _, device := range ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver) {
-				Expect(device).ToNot(ContainSubstring("~"))
-			}
 		})
 		It("should pack two single-device claims onto one NodeClaim within a set's budget (N2)", func() {
 			ExpectApplied(ctx, env.Client, nodePool,

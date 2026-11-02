@@ -375,8 +375,19 @@ var _ = Describe("DynamicResources", func() {
 		It("should keep a bound device that appears in no set unchanged", func() {
 			it := reusedInstanceType()
 			unknown := id("gpu.example.com", "elsewhere", "gpu-9")
-			it.AttributeBindings = []*cloudprovider.AttributeBinding{{Attribute: "example.com/numa", Devices: []cloudprovider.DeviceID{unknown}}}
-			Expect(it.ResolvedAttributeBindings()[0].Devices).To(ConsistOf(unknown))
+			it.AttributeBindings = []*cloudprovider.AttributeBinding{{Attribute: "example.com/numa", Devices: []cloudprovider.DeviceID{
+				unknown, id("gpu.example.com", "gpus", "gpu-0"),
+			}}}
+			Expect(it.ResolvedAttributeBindings()[0].Devices).To(ContainElement(unknown))
+		})
+		It("should drop a binding with fewer than two distinct provider devices before expanding it", func() {
+			it := reusedInstanceType()
+			// gpu-0 is reused across sets, so expanding first would yield two copies and pass the two-device check.
+			it.AttributeBindings = []*cloudprovider.AttributeBinding{
+				{Attribute: "example.com/numa", Devices: []cloudprovider.DeviceID{id("gpu.example.com", "gpus", "gpu-0")}},
+				{Attribute: "example.com/numa", Devices: []cloudprovider.DeviceID{id("gpu.example.com", "gpus", "gpu-0"), id("gpu.example.com", "gpus", "gpu-0")}},
+			}
+			Expect(it.ResolvedAttributeBindings()).To(BeEmpty())
 		})
 		It("should round-trip namespaced pool names", func() {
 			pool, setIndex, ok := cloudprovider.ParseTemplatePoolName(cloudprovider.TemplatePoolName("gpus-node.example/a", 12))

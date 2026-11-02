@@ -430,7 +430,8 @@ func (i *InstanceType) AvailableDynamicResources() []*DynamicResources {
 // ResolvedAttributeBindings returns the instance type's AttributeBindings rewritten to reference the namespaced
 // devices of AllDynamicResources. A bound device that appears in several sets is bound in every one of them, which is
 // sound because a binding must hold in every launch configuration in which the bound devices coexist. Devices that
-// appear in no set are kept unchanged; no template device carries their ID, so they never match.
+// appear in no set are kept unchanged; no template device carries their ID, so they never match. Bindings with fewer
+// than two distinct provider devices are dropped, as BuildAttributeBindings would ignore them before namespacing.
 func (i *InstanceType) ResolvedAttributeBindings() []*AttributeBinding {
 	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
 	return i.resolvedAttributeBindings
@@ -467,6 +468,11 @@ func (i *InstanceType) resolveDynamicResources() {
 	})
 	i.resolvedAttributeBindings = make([]*AttributeBinding, 0, len(i.AttributeBindings))
 	for _, b := range i.AttributeBindings {
+		// A binding needs at least two distinct provider devices. Check before expanding: a one-device binding on a
+		// device reused across sets would otherwise expand into copies that look like a pair but can never coexist.
+		if len(lo.Uniq(b.Devices)) < 2 {
+			continue
+		}
 		i.resolvedAttributeBindings = append(i.resolvedAttributeBindings, &AttributeBinding{
 			Attribute: b.Attribute,
 			Devices: lo.FlatMap(b.Devices, func(id DeviceID, _ int) []DeviceID {
