@@ -84,12 +84,14 @@ func (d *decorator) correctFlexibleCapacity(ctx context.Context, nodeClaim *v1.N
 	if !ok {
 		return nil
 	}
-	if !d.store.HasFlexibleCapacity(nodePoolName, instanceTypeName) {
-		return nil
-	}
+	// The annotation holds the amounts that the cloud provider gave the node. The NodeOverlays may have changed since
+	// Karpenter chose them, so the annotation decides whether to correct the status, not only the current overlays.
 	flexible, err := cloudprovider.FlexibleCapacityFromNodeClaim(nodeClaim)
 	if err != nil {
 		return err
+	}
+	if len(flexible) == 0 && !d.store.HasFlexibleCapacity(nodePoolName, instanceTypeName) {
+		return nil
 	}
 	nodePool := &v1.NodePool{}
 	if err := d.kubeClient.Get(ctx, client.ObjectKey{Name: nodePoolName}, nodePool); err != nil {
@@ -103,9 +105,15 @@ func (d *decorator) correctFlexibleCapacity(ctx context.Context, nodeClaim *v1.N
 	if !ok {
 		return serrors.Wrap(fmt.Errorf("instance type not found"), "instance-type", instanceTypeName)
 	}
-	it, err = d.store.Apply(nodePoolName, it)
-	if err != nil {
+	overlaid, err := d.store.Apply(nodePoolName, it)
+	switch {
+	case cloudprovider.IsUnevaluatedNodePoolError(err):
+		// The NodeOverlay controller has not evaluated the NodePool yet, for example right after Karpenter starts. Use
+		// the instance type without NodeOverlays. The status then still reports the amounts in the annotation.
+	case err != nil:
 		return fmt.Errorf("applying nodeoverlays, %w", err)
+	default:
+		it = overlaid
 	}
 	created.Status.Capacity, created.Status.Allocatable = cloudprovider.FlexibleCapacityStatus(it, created.Status.Capacity, created.Status.Allocatable, flexible)
 	return nil

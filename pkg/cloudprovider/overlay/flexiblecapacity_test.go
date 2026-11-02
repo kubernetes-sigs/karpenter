@@ -40,7 +40,7 @@ import (
 const hugePages2Mi corev1.ResourceName = "hugepages-2Mi"
 
 // rawStatusCloudProvider reports the capacity and allocatable of the instance type with NodeOverlays applied, as they
-// are, in the status that Create returns. The AWS provider does the same.
+// are, in the status that Create returns. This is the case where a provider reports the ceiling.
 type rawStatusCloudProvider struct {
 	*fake.CloudProvider
 }
@@ -56,6 +56,22 @@ func (r *rawStatusCloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeC
 	}
 	created.Status.Capacity = it.Capacity
 	created.Status.Allocatable = it.Allocatable()
+	return created, nil
+}
+
+// noOverlayStatusCloudProvider reports the capacity and allocatable of the instance type without NodeOverlays, in the
+// status that Create returns. The AWS provider does the same.
+type noOverlayStatusCloudProvider struct {
+	*fake.CloudProvider
+}
+
+func (r *noOverlayStatusCloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
+	created, err := r.CloudProvider.Create(ctx, nodeClaim)
+	if err != nil {
+		return nil, err
+	}
+	created.Status.Capacity = r.InstanceTypes[0].Capacity
+	created.Status.Allocatable = r.InstanceTypes[0].Allocatable()
 	return created, nil
 }
 
@@ -134,12 +150,56 @@ var _ = Describe("Flexible Capacity", func() {
 	It("should not change the status of a fixed capacity overlay", func() {
 		ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")}, nil))
 		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+		// Karpenter writes no annotation when the resource is fixed.
+		delete(nodeClaim.Annotations, v1.FlexibleCapacityAnnotationKey)
 
 		created, err := decorated.Create(gatedCtx, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(created.Status.Capacity).To(HaveKeyWithValue(hugePages2Mi, resource.MustParse("8Gi")))
 		Expect(created.Status.Allocatable).To(HaveKeyWithValue(hugePages2Mi, resource.MustParse("8Gi")))
 		Expect(created.Status.Allocatable.Memory().Value()).To(Equal(overlaidMemory()))
+	})
+	Context("when the NodeOverlays change after scheduling", func() {
+		// The cloud provider gives the node the amounts in the annotation, whatever the NodeOverlays say when Create
+		// runs. So the status must report those amounts.
+		var oneGi resource.Quantity
+		var noOverlayMemory int64
+		BeforeEach(func() {
+			decorated = overlay.Decorate(&noOverlayStatusCloudProvider{CloudProvider: fakeCloudProvider}, env.Client, store)
+			oneGi = resource.MustParse("1Gi")
+			allocatable := fakeCloudProvider.InstanceTypes[0].Allocatable()
+			noOverlayMemory = allocatable.Memory().Value()
+		})
+		expectChosenAmount := func(created *v1.NodeClaim) {
+			GinkgoHelper()
+			Expect(created.Status.Capacity).To(HaveKeyWithValue(hugePages2Mi, oneGi))
+			Expect(created.Status.Allocatable).To(HaveKeyWithValue(hugePages2Mi, oneGi))
+			Expect(created.Status.Allocatable.Memory().Value()).To(Equal(noOverlayMemory - oneGi.Value()))
+		}
+		It("should report the chosen amount when the NodeOverlay was deleted", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+			created, err := decorated.Create(gatedCtx, nodeClaim)
+			Expect(err).ToNot(HaveOccurred())
+			expectChosenAmount(created)
+		})
+		It("should report the chosen amount when the resource became fixed", func() {
+			ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")}, nil))
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+			created, err := decorated.Create(gatedCtx, nodeClaim)
+			Expect(err).ToNot(HaveOccurred())
+			expectChosenAmount(created)
+		})
+		It("should report the chosen amount before the NodeOverlays are evaluated", func() {
+			// The store is empty, as it is right after Karpenter starts.
+			ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(nil, corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")}))
+
+			created, err := decorated.Create(gatedCtx, nodeClaim)
+			Expect(err).ToNot(HaveOccurred())
+			expectChosenAmount(created)
+		})
 	})
 	It("should not change the status when the NodeOverlay feature gate is off", func() {
 		ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(nil, corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")}))

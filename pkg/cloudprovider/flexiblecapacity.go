@@ -76,22 +76,35 @@ func ApplyFlexibleCapacity(capacity, allocatable, flexible corev1.ResourceList) 
 }
 
 // FlexibleCapacityStatus returns copies of the capacity and allocatable that a cloud provider reported for a NodeClaim
-// that launched as the instance type. Each flexible resource of the instance type is set to its chosen amount, or
-// removed when no amount was chosen. Allocatable memory becomes the lower of the reported value and the instance
-// type's allocatable memory less the chosen hugepages. The result is therefore the same whether the cloud provider
-// reported the ceiling and full memory, or already applied the chosen amounts.
+// that launched as the instance type. Each resource in flexible is set to its chosen amount. Each other flexible
+// resource of the instance type is removed. Allocatable memory becomes the lower of the reported value and the
+// instance type's allocatable memory less the chosen hugepages. The result is therefore the same whether the cloud
+// provider reported the ceiling and full memory, or already applied the chosen amounts.
+//
+// The cloud provider gives the node the amounts in flexible, even when the NodeOverlays changed after Karpenter chose
+// them. So a resource in flexible is set to its chosen amount even when the instance type no longer has it as
+// flexible. If the instance type now has a fixed amount of that hugepages resource, that amount is not taken out of
+// the expected memory, because the node does not have it.
 func FlexibleCapacityStatus(instanceType *InstanceType, capacity, allocatable, flexible corev1.ResourceList) (corev1.ResourceList, corev1.ResourceList) {
-	names := lo.Keys(instanceType.FlexibleCapacity())
-	chosen := lo.PickByKeys(flexible, names)
-	capacity = lo.Assign(lo.OmitByKeys(capacity, names), chosen)
-	allocatable = lo.Assign(lo.OmitByKeys(allocatable, names), chosen)
+	names := lo.Union(lo.Keys(instanceType.FlexibleCapacity()), lo.Keys(flexible))
+	capacity = lo.Assign(lo.OmitByKeys(capacity, names), flexible)
+	allocatable = lo.Assign(lo.OmitByKeys(allocatable, names), flexible)
 	reported, ok := allocatable[corev1.ResourceMemory]
 	if !ok {
 		return capacity, allocatable
 	}
-	baseAllocatable := instanceType.Allocatable()
-	expected := baseAllocatable.Memory().DeepCopy()
-	for name, quantity := range chosen {
+	// The expected memory is the instance type's memory, less its overhead and less the hugepages that the node has:
+	// the fixed amounts of hugepages resources that are not in flexible, and the chosen amounts.
+	expected := instanceType.Capacity.Memory().DeepCopy()
+	overhead := lo.FromPtr(instanceType.Overhead).Total()
+	expected.Sub(*overhead.Memory())
+	for name, quantity := range instanceType.Capacity {
+		_, chosen := flexible[name]
+		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) && !instanceType.IsFlexible(name) && !chosen {
+			expected.Sub(quantity)
+		}
+	}
+	for name, quantity := range flexible {
 		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
 			expected.Sub(quantity)
 		}

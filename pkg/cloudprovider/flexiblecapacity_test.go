@@ -265,13 +265,28 @@ var _ = Describe("Flexible Capacity", func() {
 			Expect(allocatable).ToNot(HaveKey(hugePages2Mi))
 			Expect(allocatable.Memory().Value()).To(Equal(baseMemory))
 		})
-		It("should ignore a chosen amount for a resource that is not flexible", func() {
+		It("should report a chosen amount for a resource that is no longer flexible", func() {
+			// The NodeOverlays changed after Karpenter chose the amount, but the cloud provider still gave it to the node.
 			capacity, allocatable := cloudprovider.FlexibleCapacityStatus(it, it.Capacity, it.Allocatable(), corev1.ResourceList{
 				hugePages1Gi: resource.MustParse("2Gi"),
 			})
-			Expect(capacity).ToNot(HaveKey(hugePages1Gi))
-			Expect(allocatable).ToNot(HaveKey(hugePages1Gi))
-			Expect(allocatable.Memory().Value()).To(Equal(baseMemory))
+			Expect(capacity).To(HaveKeyWithValue(hugePages1Gi, resource.MustParse("2Gi")))
+			Expect(allocatable).To(HaveKeyWithValue(hugePages1Gi, resource.MustParse("2Gi")))
+			Expect(allocatable.Memory().Value()).To(Equal(baseMemory - value("2Gi")))
+			// The flexible resource with no chosen amount is removed
+			Expect(capacity).ToNot(HaveKey(hugePages2Mi))
+		})
+		It("should not take a fixed amount out of memory when the node has the chosen amount instead", func() {
+			// The resource was flexible when Karpenter chose the amount, and is fixed now.
+			fixed := newFlexibleTestInstanceType()
+			fixed.ApplyCapacityOverlay(corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")})
+			noHugePages := newFlexibleTestInstanceType()
+			noHugePagesMemory := memoryOf(noHugePages.Allocatable())
+			capacity, allocatable := cloudprovider.FlexibleCapacityStatus(fixed, noHugePages.Capacity, noHugePages.Allocatable(), corev1.ResourceList{
+				hugePages2Mi: resource.MustParse("2Gi"),
+			})
+			Expect(capacity).To(HaveKeyWithValue(hugePages2Mi, resource.MustParse("2Gi")))
+			Expect(allocatable.Memory().Value()).To(Equal(noHugePagesMemory - value("2Gi")))
 		})
 	})
 })
