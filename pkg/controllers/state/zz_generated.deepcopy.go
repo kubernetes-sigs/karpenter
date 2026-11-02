@@ -24,6 +24,7 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	apisv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -117,6 +118,13 @@ func (in *StateNode) DeepCopyInto(out *StateNode) {
 	if in.podDisruptionCosts != nil {
 		in, out := &in.podDisruptionCosts, &out.podDisruptionCosts
 		*out = make(map[types.NamespacedName]float64, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.terminatingPodKeys != nil {
+		in, out := &in.terminatingPodKeys, &out.terminatingPodKeys
+		*out = make(sets.Set[types.NamespacedName], len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}

@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -189,6 +190,11 @@ type StateNode struct {
 	podLimits          map[types.NamespacedName]corev1.ResourceList
 	podDisruptionCosts map[types.NamespacedName]float64
 
+	// terminatingPodKeys tracks pods that have a DeletionTimestamp set (evicted / terminating but not yet
+	// terminal). During a reboot, Available() excludes their requests so the scheduling simulation sees
+	// the rebooting node's capacity as returning and does not over-provision.
+	terminatingPodKeys sets.Set[types.NamespacedName]
+
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
@@ -208,6 +214,7 @@ func NewNode() *StateNode {
 		podRequests:        map[types.NamespacedName]corev1.ResourceList{},
 		podLimits:          map[types.NamespacedName]corev1.ResourceList{},
 		podDisruptionCosts: map[types.NamespacedName]float64{},
+		terminatingPodKeys: sets.New[types.NamespacedName](),
 		hostPortUsage:      scheduling.NewHostPortUsage(),
 		volumeUsage:        scheduling.NewVolumeUsage(),
 	}
@@ -222,6 +229,7 @@ func (in *StateNode) ShallowCopy() *StateNode {
 		podRequests:         in.podRequests,
 		podLimits:           in.podLimits,
 		podDisruptionCosts:  in.podDisruptionCosts,
+		terminatingPodKeys:  in.terminatingPodKeys,
 		hostPortUsage:       in.hostPortUsage,
 		volumeUsage:         in.volumeUsage,
 		markedForDeletion:   in.markedForDeletion,
@@ -490,9 +498,15 @@ func (in *StateNode) Allocatable() corev1.ResourceList {
 	return in.Node.Status.Allocatable
 }
 
-// Available is allocatable minus anything allocated to pods.
+// Available is allocatable minus anything allocated to pods. When a reboot is in progress,
+// terminating pods' requests are excluded so the scheduling simulation sees the rebooting
+// node's capacity as returning and does not launch unnecessary replacement nodes.
 func (in *StateNode) Available() corev1.ResourceList {
-	return resources.Subtract(in.Allocatable(), in.PodRequests())
+	podRequests := in.PodRequests()
+	if in.RebootInProgress() {
+		resources.SubtractFrom(podRequests, in.TerminatingPodRequests())
+	}
+	return resources.Subtract(in.Allocatable(), podRequests)
 }
 
 func (in *StateNode) DaemonSetRequests() corev1.ResourceList {
@@ -515,6 +529,18 @@ func (in *StateNode) PodRequests() corev1.ResourceList {
 	var totalRequests corev1.ResourceList
 	for _, requests := range in.podRequests {
 		totalRequests = resources.MergeInto(totalRequests, requests)
+	}
+	return totalRequests
+}
+
+// TerminatingPodRequests returns the aggregate resource requests of pods that are terminating
+// (DeletionTimestamp set) on this node but have not yet reached a terminal phase.
+func (in *StateNode) TerminatingPodRequests() corev1.ResourceList {
+	var totalRequests corev1.ResourceList
+	for key := range in.terminatingPodKeys {
+		if requests, ok := in.podRequests[key]; ok {
+			totalRequests = resources.MergeInto(totalRequests, requests)
+		}
 	}
 	return totalRequests
 }
@@ -567,6 +593,15 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 	}
 	in.podRequests[podKey] = resources.RequestsForPods(pod)
 	in.podLimits[podKey] = resources.LimitsForPods(pod)
+	// Track whether the pod is terminating so Available() can exclude its requests during a reboot.
+	if pod.DeletionTimestamp != nil {
+		if in.terminatingPodKeys == nil {
+			in.terminatingPodKeys = sets.New[types.NamespacedName]()
+		}
+		in.terminatingPodKeys.Insert(podKey)
+	} else {
+		in.terminatingPodKeys.Delete(podKey)
+	}
 	// if it's a daemonset, we track what it has requested separately
 	if podutils.IsOwnedByDaemonSet(pod) {
 		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
@@ -597,6 +632,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 	delete(in.daemonSetRequests, podKey)
 	delete(in.daemonSetLimits, podKey)
 	delete(in.podDisruptionCosts, podKey)
+	in.terminatingPodKeys.Delete(podKey)
 }
 
 func nominationWindow(ctx context.Context) time.Duration {
