@@ -714,16 +714,24 @@ func narrowFlexibleConsistency(remaining cloudprovider.InstanceTypes, totalReque
 // But the NodeClaim gets one amount, which includes the largest daemonset overhead across all remaining instance
 // types. That amount can be above another instance type's ceiling, or leave too little memory for the pods.
 // Removing an instance type can lower the amount, so this repeats until no more instance types are removed.
+//
+// With more than one flexible resource, the largest overheads can come from different instance types, and then no
+// instance type may fit. In that case, only the instance types in one daemonset overhead group are kept. Their
+// amounts are the pod requests plus their own overhead, and the filter above already checked that each of them fits
+// that.
 func fitFlexibleAmounts(remaining cloudprovider.InstanceTypes, requirements scheduling.Requirements, totalRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup) cloudprovider.InstanceTypes {
 	if len(remaining) == 0 || len(remaining[0].FlexibleCapacity()) == 0 {
 		return remaining
 	}
 	overheads := map[*cloudprovider.InstanceType]corev1.ResourceList{}
-	for _, group := range daemonOverheadGroups {
+	groupIndex := map[*cloudprovider.InstanceType]int{}
+	for i, group := range daemonOverheadGroups {
 		for _, it := range group.InstanceTypes {
 			overheads[it] = group.DaemonOverhead
+			groupIndex[it] = i
 		}
 	}
+	usedFallback := false
 	for {
 		amounts := flexibleAmounts(remaining, totalRequests, daemonOverheadGroups)
 		if len(amounts) == 0 {
@@ -737,8 +745,35 @@ func fitFlexibleAmounts(remaining cloudprovider.InstanceTypes, requirements sche
 		if len(fitting) == len(remaining) {
 			return remaining
 		}
+		// The fallback is used once, so the loop always ends
+		if len(fitting) == 0 && !usedFallback {
+			usedFallback = true
+			fitting = largestOverheadGroup(remaining, groupIndex)
+		}
 		remaining = fitting
 	}
+}
+
+// largestOverheadGroup returns the instance types of the daemonset overhead group that has the most of the given
+// instance types. Instance types in no group count as one group. The order of the instance types is kept.
+func largestOverheadGroup(instanceTypes cloudprovider.InstanceTypes, groupIndex map[*cloudprovider.InstanceType]int) cloudprovider.InstanceTypes {
+	// -1 stands for the instance types that are in no group
+	keyOf := func(it *cloudprovider.InstanceType) int {
+		if i, ok := groupIndex[it]; ok {
+			return i
+		}
+		return -1
+	}
+	counts := map[int]int{}
+	best := keyOf(instanceTypes[0])
+	for _, it := range instanceTypes {
+		key := keyOf(it)
+		counts[key]++
+		if counts[key] > counts[best] {
+			best = key
+		}
+	}
+	return lo.Filter(instanceTypes, func(it *cloudprovider.InstanceType, _ int) bool { return keyOf(it) == best })
 }
 
 // flexibleCapacityRequests returns the amount of each flexible resource the NodeClaim needs. See flexibleAmounts.

@@ -34,6 +34,7 @@ import (
 )
 
 const hugePages2Mi corev1.ResourceName = "hugepages-2Mi"
+const hugePages1Gi corev1.ResourceName = "hugepages-1Gi"
 
 // hugePagesPodOptions returns pod options that request hugepages and memory. Kubernetes requires hugepages requests
 // to equal their limits, and a pod that requests hugepages must also request cpu or memory.
@@ -179,6 +180,46 @@ var _ = Describe("Flexible Capacity", func() {
 			nodeClaim := expectSingleNodeClaim()
 			Expect(instanceTypeOptions(nodeClaim)).To(ConsistOf("large"))
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.FlexibleCapacityAnnotationKey, `{"hugepages-2Mi":"4Gi"}`))
+		})
+		It("should keep the instance types of one daemonset when the largest overheads together fit no instance type", func() {
+			// Both instance types have two flexible page sizes. Each daemonset asks for 4Gi of a different page size on
+			// a different instance type. The largest overheads together are 8Gi, more than either instance type's memory,
+			// but each instance type fits the pod and its own daemonset.
+			bothSizes := func(name string) *cloudprovider.InstanceType {
+				it := fake.NewInstanceType(name, fake.WithResources(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("7Gi"),
+					corev1.ResourcePods:   resource.MustParse("10"),
+				}))
+				it.ApplyMaxCapacityOverlay(corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi"), hugePages1Gi: resource.MustParse("8Gi")})
+				return it
+			}
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{bothSizes("small"), bothSizes("large")}
+			daemonSetOn := func(instanceType string, pageSize corev1.ResourceName) *appsv1.DaemonSet {
+				hugePages := corev1.ResourceList{pageSize: resource.MustParse("4Gi")}
+				return test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+					NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: instanceType},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: lo.Assign(corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("64Mi")}, hugePages),
+						Limits:   hugePages,
+					},
+				}})
+			}
+			smallDaemonSet, largeDaemonSet := daemonSetOn("small", hugePages2Mi), daemonSetOn("large", hugePages1Gi)
+			ExpectApplied(ctx, env.Client, nodePool, smallDaemonSet, largeDaemonSet)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(smallDaemonSet), smallDaemonSet)).To(Succeed())
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(largeDaemonSet), largeDaemonSet)).To(Succeed())
+			pod := test.UnschedulablePod(hugePagesPodOptions("", "256Mi"))
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// The NodeClaim can launch as one instance type only, and gets only that instance type's daemonset amount
+			nodeClaim := expectSingleNodeClaim()
+			Expect(instanceTypeOptions(nodeClaim)).To(HaveLen(1))
+			instanceType := node.Labels[corev1.LabelInstanceTypeStable]
+			Expect(instanceTypeOptions(nodeClaim)).To(ConsistOf(instanceType))
+			want := lo.Ternary(instanceType == "small", `{"hugepages-2Mi":"4Gi"}`, `{"hugepages-1Gi":"4Gi"}`)
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.FlexibleCapacityAnnotationKey, want))
 		})
 		It("should keep fixed instance types when only a daemonset on an excluded instance type requests the resource", func() {
 			fixed := fake.NewInstanceType("fixed", fake.WithResources(corev1.ResourceList{
