@@ -243,7 +243,6 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 
 // consolidationWarnings potentially writes logs warning about possible unexpected interactions
 // between scheduling constraints and consolidation
-// nolint:gocyclo
 func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.Pod) {
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
 	// unexpectedly with consolidation, so we warn once per hour when we see these pods.
@@ -278,7 +277,6 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
-//nolint:gocyclo
 func (p *Provisioner) NewScheduler(
 	ctx context.Context,
 	pods []*corev1.Pod,

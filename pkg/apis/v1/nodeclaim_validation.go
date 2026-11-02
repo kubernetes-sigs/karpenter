@@ -114,7 +114,7 @@ func (in *NodeClaimTemplateSpec) validateRequirements(ctx context.Context) (errs
 	return errs
 }
 
-func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error { //nolint:gocyclo
+func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error {
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized

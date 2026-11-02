@@ -176,8 +176,6 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 
 // tryVolumeAlternative attempts to add a pod with a specific set of volume requirements,
 // checking topology, instance types, and offerings compatibility.
-//
-//nolint:gocyclo
 func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, instanceTypes []*cloudprovider.InstanceType, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool, allocator *dynamicresources.Allocator) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, *dynamicresources.AllocationResult, error) {
 	nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
 
@@ -316,8 +314,6 @@ func (n *NodeClaim) releaseReservedOfferings(current, updated cloudprovider.Offe
 // reserveOfferings handles the reservation of `karpenter.sh/capacity-type: reserved` offerings, returning the set of
 // reserved offerings. If the ReservedOfferingMode is set to strict, this function may also return an error if it failed
 // to reserve compatible offerings when some were available.
-//
-//nolint:gocyclo
 func (n *NodeClaim) offeringsToReserve(
 	ctx context.Context,
 	instanceTypes []*cloudprovider.InstanceType,
@@ -533,7 +529,6 @@ func (e InstanceTypeFilterError) resourcesString() string {
 	return fmt.Sprintf("min=%s, max=%s", minStr, maxStr)
 }
 
-//nolint:gocyclo
 func (e InstanceTypeFilterError) Error() string {
 	// minValues is specified in the requirements and is not met
 	if e.minValuesIncompatibleErr != nil {
@@ -586,7 +581,6 @@ func (e InstanceTypeFilterError) Error() string {
 	return fmt.Sprintf("no instance type met the requirements/resources/offering tuple, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 }
 
-//nolint:gocyclo
 func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
 	unsatisfiableKeys := map[string]int{}
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
