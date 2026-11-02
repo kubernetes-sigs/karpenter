@@ -79,7 +79,7 @@ var _ = Describe("StaticDrift", func() {
 	Context("Backoff", func() {
 		BeforeEach(func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
-				FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(true)},
+				FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(true)},
 			}))
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -100,7 +100,7 @@ var _ = Describe("StaticDrift", func() {
 
 		It("should ignore backoff when the feature gate is disabled", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
-				FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)},
+				FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(false)},
 			}))
 
 			ExpectSingletonReconciled(ctx, disruptionController)

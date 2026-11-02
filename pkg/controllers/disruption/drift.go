@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -143,6 +144,21 @@ func (d *Drift) ConsolidationType() string {
 
 func driftBackoffEnabled(ctx context.Context, backoff *nodepoolbackoff.State) bool {
 	return options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff && backoff != nil
+}
+
+// clearUndriftedNodePoolBackoffs resets back-off state (including escalated level) for any NodePool
+// that no longer has any non-deleted drifted NodeClaims in cluster state.
+func clearUndriftedNodePoolBackoffs(ctx context.Context, cluster *state.Cluster, backoff *nodepoolbackoff.State) {
+	if !driftBackoffEnabled(ctx, backoff) {
+		return
+	}
+	driftedNodePools := sets.New[string]()
+	for n := range cluster.Nodes() {
+		if n.NodeClaim != nil && !n.Deleted() && n.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue() {
+			driftedNodePools.Insert(n.Labels()[v1.NodePoolLabelKey])
+		}
+	}
+	backoff.ResetUndrifted(driftedNodePools)
 }
 
 // initDriftBackoffMetrics registers a zero-valued back-off counter for each NodePool so the metric is visible (at 0)

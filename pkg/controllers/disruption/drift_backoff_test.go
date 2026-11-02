@@ -22,12 +22,12 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -90,8 +90,8 @@ func driftedNodeClaimAndNode(nodePoolName string, driftAge time.Duration, rs *ap
 					Kind:               "ReplicaSet",
 					Name:               rs.Name,
 					UID:                rs.UID,
-					Controller:         lo.ToPtr(true),
-					BlockOwnerDeletion: lo.ToPtr(true),
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -104,7 +104,7 @@ func driftedNodeClaimAndNode(nodePoolName string, driftAge time.Duration, rs *ap
 
 var _ = Describe("Drift back-off", func() {
 	BeforeEach(func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(true)}}))
 	})
 	Context("Selection", func() {
 		It("skips a backed-off NodePool's candidates and services a healthy NodePool instead", func() {
@@ -142,7 +142,7 @@ var _ = Describe("Drift back-off", func() {
 			nodePoolBackoff.Fail(backedOff, env.Clock.Now())
 			Expect(nodePoolBackoff.IsBackedOff(backedOff)).To(BeTrue())
 
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(false)}}))
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			cmds := queue.GetCommands()
@@ -180,6 +180,30 @@ var _ = Describe("Drift back-off", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Candidates[0].NodePool.Name).To(Equal(nodePool.Name))
+		})
+		It("resets back-off and level when a NodePool becomes un-drifted", func() {
+			nodePool := backoffNodePool()
+			nc, node, _ := driftedNodeClaimAndNode(nodePool.Name, -time.Hour, nil)
+			ExpectApplied(ctx, env.Client, nodePool, nc, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nc})
+
+			// Escalate to level 2 across two windows.
+			Expect(nodePoolBackoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
+			env.Clock.Step(2 * time.Minute)
+			Expect(nodePoolBackoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
+			level, _, backedOff := nodePoolBackoff.GetBackoff(nodePool)
+			Expect(level).To(Equal(2))
+			Expect(backedOff).To(BeTrue())
+
+			// Clear the Drifted condition on the NodeClaim and update cluster state.
+			_ = nc.StatusConditions().Clear(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nc)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			level, _, backedOff = nodePoolBackoff.GetBackoff(nodePool)
+			Expect(level).To(Equal(0))
+			Expect(backedOff).To(BeFalse())
 		})
 	})
 	Context("Starvation regression", func() {

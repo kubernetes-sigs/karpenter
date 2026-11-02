@@ -266,6 +266,10 @@ defined in [Back-off state](#back-off-state).
 - **`Reset(nodePoolName)`** — on a successful drift command that created replacement
   capacity or when the NodePool is deleted: delete the entry, returning the pool to
   healthy (`level == 0`, no window).
+- **`ResetUndrifted(driftedNodePools)`** — on each disruption reconcile pass: delete
+  entries for any NodePool that no longer has any non-deleted drifted `NodeClaim`s in
+  cluster state, clearing both the window and escalated `level` if the pool becomes
+  un-drifted.
 - **`GetBackoff(nodePool) → (level, until, backedOff)`** — read-only, called during
   selection: `backedOff` is `true` iff `level > 0` and `now < until`.
 - **`IsBackedOff(nodePool) → bool`** — read-only convenience over `GetBackoff`.

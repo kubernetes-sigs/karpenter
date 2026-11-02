@@ -17,11 +17,13 @@ limitations under the License.
 package nodepoolbackoff
 
 import (
+	"maps"
 	"math/rand"
 	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -126,6 +128,15 @@ func (s *State) Reset(nodePoolName string) {
 	delete(s.state, nodePoolName)
 }
 
+// ResetUndrifted removes back-off state for any NodePool not in driftedNodePools.
+func (s *State) ResetUndrifted(driftedNodePools sets.Set[string]) {
+	s.Lock()
+	defer s.Unlock()
+	maps.DeleteFunc(s.state, func(nodePoolName string, _ *backoffEntry) bool {
+		return !driftedNodePools.Has(nodePoolName)
+	})
+}
+
 // IsBackedOff reports whether a NodePool is currently backed off and should be skipped during
 // drift candidate selection.
 func (s *State) IsBackedOff(nodePool *v1.NodePool) bool {
@@ -160,10 +171,7 @@ func (s *State) Remaining(nodePool *v1.NodePool) time.Duration {
 // window returns the exponential back-off window for a given level, clamped to max. It is
 // overflow-safe: once the shift would exceed max (or wrap), it returns max.
 func (s *State) window(level int) time.Duration {
-	shift := level - 1
-	if shift < 0 {
-		shift = 0
-	}
+	shift := max(level-1, 0)
 	if shift >= 63 {
 		return s.max
 	}

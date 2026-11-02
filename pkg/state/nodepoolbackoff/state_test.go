@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -149,6 +150,19 @@ var _ = Describe("State", func() {
 		Expect(backoff.Remaining(spark)).To(BeZero())
 		level, _, _ := backoff.GetBackoff(spark)
 		Expect(level).To(Equal(0))
+	})
+
+	It("clears back-off and level for NodePools not in the drifted set", func() {
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
+		Expect(backoff.Fail(ingress, fakeClock.Now())).To(BeTrue())
+		expireWindow(spark)
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
+
+		backoff.ResetUndrifted(sets.New(ingress.Name))
+		level, _, backedOff := backoff.GetBackoff(spark)
+		Expect(level).To(Equal(0))
+		Expect(backedOff).To(BeFalse())
+		Expect(backoff.IsBackedOff(ingress)).To(BeTrue())
 	})
 
 	It("de-synchronizes pools that fail at the same instant", func() {

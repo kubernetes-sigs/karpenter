@@ -29,7 +29,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -462,7 +461,7 @@ var _ = Describe("Queue", func() {
 		})
 		Context("Drift back-off", func() {
 			BeforeEach(func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(true)}}))
 			})
 			driftMethod := func() disruption.Method {
 				return disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)
@@ -564,7 +563,7 @@ var _ = Describe("Queue", func() {
 					Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 					Replacements:      withReplacement(nodePool),
 				}
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(false)}}))
 				completeViaTimeout(cmd)
 
 				Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeFalse())
