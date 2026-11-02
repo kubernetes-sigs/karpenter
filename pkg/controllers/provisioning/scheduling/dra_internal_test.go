@@ -85,20 +85,20 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		})
 
 		It("should map identity, nodepool, and instance types", func() {
-			adapter := &draNodeClaim{nc: nc}
+			adapter := &draNodeClaim{nc: nc, requirements: nc.Requirements}
 			Expect(adapter.ID()).To(Equal(unique.Make("hostname-1")))
 			Expect(adapter.NodePoolID()).To(Equal(unique.Make("np-a")))
 			its := lo.Map(adapter.InstanceTypes(), func(id unique.Handle[string], _ int) string { return id.Value() })
 			Expect(its).To(ConsistOf("it-1", "it-2"))
 		})
 		It("should expose template slices per instance type", func() {
-			adapter := &draNodeClaim{nc: nc}
+			adapter := &draNodeClaim{nc: nc, requirements: nc.Requirements}
 			slices := adapter.ResourceSlices()
 			Expect(slices[unique.Make("it-1")]).To(HaveLen(1))
 			Expect(slices[unique.Make("it-2")]).To(BeEmpty())
 		})
 		It("should be superposed", func() {
-			Expect((&draNodeClaim{nc: nc}).Superposed()).To(BeTrue())
+			Expect((&draNodeClaim{nc: nc, requirements: nc.Requirements}).Superposed()).To(BeTrue())
 		})
 	})
 
@@ -151,20 +151,27 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		})
 
 		It("should expose sets with an available offering that are compatible with the NodeClaim", func() {
-			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped", "dra"}))
+			Expect(slicesFor(&draNodeClaim{nc: nc, requirements: nc.Requirements})).To(Equal([]string{"unscoped", "dra"}))
 		})
 		It("should exclude sets that are incompatible with the NodeClaim's requirements", func() {
 			nc.Requirements = modeReqs("device-plugin")
-			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped"}))
+			Expect(slicesFor(&draNodeClaim{nc: nc, requirements: nc.Requirements})).To(Equal([]string{"unscoped"}))
 		})
 		It("should check availability and NodeClaim compatibility independently", func() {
 			// The only available DRA offering is in zone-b, but the set is still a device source for a zone-a NodeClaim.
 			// The offering checks that follow allocation reject the instance type.
 			nc.Requirements = scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"))
-			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped", "dra"}))
+			Expect(slicesFor(&draNodeClaim{nc: nc, requirements: nc.Requirements})).To(Equal([]string{"unscoped", "dra"}))
+		})
+		It("should use the merged requirements rather than the NodeClaim's alone", func() {
+			// A pod being added pins the mode; the NodeClaim itself is unconstrained.
+			merged := modeReqs("device-plugin")
+			adapter := &draNodeClaim{nc: nc, requirements: merged}
+			Expect(adapter.Requirements()).To(Equal(merged))
+			Expect(slicesFor(adapter)).To(Equal([]string{"unscoped"}))
 		})
 		It("should tag each slice with its set's requirements", func() {
-			slices := (&draNodeClaim{nc: nc}).ResourceSlices()[unique.Make("it-1")]
+			slices := (&draNodeClaim{nc: nc, requirements: nc.Requirements}).ResourceSlices()[unique.Make("it-1")]
 			Expect(slices[0].TemplateRequirements()).To(BeEmpty())
 			Expect(slices[1].TemplateRequirements().Get(modeKey).Values()).To(ConsistOf("dra"))
 		})

@@ -99,7 +99,7 @@ func benchmarkDRAAllocate(b *testing.B, n int, scoped, cold bool) {
 			b.StartTimer()
 		}
 		alloc := dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, kubeClient, nil)
-		if _, err := alloc.Allocate(ctx, &draNodeClaim{nc: nc}, []*resourcev1.ResourceClaim{claim}); err != nil {
+		if _, err := alloc.Allocate(ctx, &draNodeClaim{nc: nc, requirements: nc.Requirements}, []*resourcev1.ResourceClaim{claim}); err != nil {
 			b.Fatal(err)
 		}
 	}

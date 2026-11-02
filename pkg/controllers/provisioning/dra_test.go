@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -738,6 +739,20 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(found).To(BeTrue())
 			Expect(req.Values).To(ConsistOf("test-zone-2"))
 		})
+		It("should allocate the zoned in-cluster device that matches a pod's zone affinity (D3)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			ExpectApplied(ctx, env.Client,
+				zonedSlice("a-zone-1-gpu-pool", gpuDriver, "test-zone-1", "zoned-gpu-1"),
+				zonedSlice("b-zone-2-gpu-pool", gpuDriver, "test-zone-2", "zoned-gpu-2"),
+			)
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: "test-zone-2"}
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
+		})
 		It("should collapse a NodeClaim to the shared zone of two compatibly-zoned claims (D2)", func() {
 			// plain-it provides no templates, so both claims are satisfied by the zoned in-cluster pools and both
 			// contribute their zone requirement — exercising the intersection of two device topologies.
@@ -1434,6 +1449,40 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 
 			ExpectNotScheduled(ctx, env.Client, draGPUPod)
 			Expect(ExpectScheduled(ctx, env.Client, dpGPUPod).Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDevicePlugin))
+		})
+		It("should honor a pod that pins a driver mode with a DRA claim (M6b)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{fake.DriverModeGPULabelKey: fake.DriverModeDRA}
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDRA))
+		})
+		It("should not schedule a DRA pod that pins device-plugin mode (M6c)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{fake.DriverModeGPULabelKey: fake.DriverModeDevicePlugin}
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+		It("should only allocate from sets compatible with a pod's own requirements (M6d)", func() {
+			// Two sets of one driver, scoped by zone. Without the pod's requirements, the allocator would pick the first
+			// set's device and narrow the NodeClaim to a zone the pod excludes.
+			zoneReq := func(zone string) scheduling.Requirements {
+				return scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
+			}
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("zoned-sets-it",
+				fake.WithDynamicResources(zoneReq("test-zone-1"), fake.ResourceSliceTemplate(gpuDriver, "zone-1-gpus", fake.Devices("gpu-z1")...)),
+				fake.WithDynamicResources(zoneReq("test-zone-2"), fake.ResourceSliceTemplate(gpuDriver, "zone-2-gpus", fake.Devices("gpu-z2")...)),
+			)}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: "test-zone-2"}
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 		})
 		It("should not use a set whose offerings are all unavailable as a device source (M7)", func() {
 			for _, o := range cloudProvider.InstanceTypes[0].Offerings {

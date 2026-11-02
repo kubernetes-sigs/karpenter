@@ -40,6 +40,9 @@ import (
 // for every candidate instance type. An adapter is constructed for each Allocate call.
 type draNodeClaim struct {
 	nc *NodeClaim
+	// requirements are the NodeClaim's requirements merged with those of the pod being added (and its volumes), so the
+	// allocator only considers devices the pod can be placed with.
+	requirements scheduling.Requirements
 }
 
 func (d *draNodeClaim) ID() dynamicresources.NodeClaimID {
@@ -57,7 +60,7 @@ func (d *draNodeClaim) NodePoolID() dynamicresources.NodePoolID {
 }
 
 func (d *draNodeClaim) Requirements() scheduling.Requirements {
-	return d.nc.Requirements
+	return d.requirements
 }
 
 // Superposed is true: a NodeClaim being planned is still a superposition of the instance types it could launch as, and
@@ -74,7 +77,7 @@ func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
 
 // ResourceSlices returns, for each candidate instance type, the templates of every DynamicResources set that can be a
 // source of devices for this NodeClaim: the set has an available offering, and its requirements are compatible with
-// the NodeClaim's. The two conditions are checked independently, so a set may be included even though no single
+// the merged requirements (see Requirements). The two conditions are checked independently, so a set may be included even though no single
 // available offering satisfies both. That's safe: an allocation from such a set narrows the NodeClaim to requirements
 // that no available offering satisfies, and the instance type is rejected by the offering checks that follow. The
 // allocator calls ResourceSlices at most once per Allocate (see dynamicresources.NodeClaim), so the result isn't cached.
@@ -82,7 +85,7 @@ func (d *draNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dy
 	slices := make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice, len(d.nc.InstanceTypeOptions))
 	for _, it := range d.nc.InstanceTypeOptions {
 		sets := lo.Filter(it.AvailableDynamicResources(), func(dr *cloudprovider.DynamicResources, _ int) bool {
-			return d.nc.Requirements.IsCompatible(dr.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+			return d.requirements.IsCompatible(dr.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 		})
 		slices[unique.Make(it.Name)] = templateSlices(sets)
 	}
