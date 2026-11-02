@@ -119,11 +119,14 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		modeReqs := func(mode string) scheduling.Requirements {
 			return scheduling.NewRequirements(scheduling.NewRequirement(modeKey, corev1.NodeSelectorOpIn, mode))
 		}
+		// slicesFor returns the provider pool names of the adapter's slices, with the per-set namespacing stripped.
 		slicesFor := func(adapter interface {
 			ResourceSlices() map[unique.Handle[string]][]dynamicresources.ResourceSlice
 		}) []string {
 			return lo.Map(adapter.ResourceSlices()[unique.Make("it-1")], func(s dynamicresources.ResourceSlice, _ int) string {
-				return s.Pool().Name.Value()
+				pool, _, ok := cloudprovider.ParseTemplatePoolName(s.Pool().Name.Value())
+				Expect(ok).To(BeTrue(), "template pool %q isn't namespaced", s.Pool().Name.Value())
+				return pool
 			})
 		}
 
@@ -171,6 +174,16 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		})
 		It("should expose every set on a pre-initialized existing node, regardless of availability", func() {
 			Expect(slicesFor(draExistingNodeForTest(false, it))).To(Equal([]string{"unscoped", "dra", "other"}))
+		})
+		It("should namespace each slice's pool by its set's index", func() {
+			pools := lo.Map(draExistingNodeForTest(false, it).ResourceSlices()[unique.Make("it-1")], func(s dynamicresources.ResourceSlice, _ int) string {
+				return s.Pool().Name.Value()
+			})
+			Expect(pools).To(Equal([]string{
+				cloudprovider.TemplatePoolName("unscoped", 0),
+				cloudprovider.TemplatePoolName("dra", 1),
+				cloudprovider.TemplatePoolName("other", 2),
+			}))
 		})
 	})
 

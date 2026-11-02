@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -252,7 +253,7 @@ var _ = Describe("DynamicResources", func() {
 					o.Available = false
 				}
 			}
-			Expect(it.AvailableDynamicResources()).To(ConsistOf(it.DynamicResources[1]))
+			Expect(it.AvailableDynamicResources()).To(ConsistOf(it.AllDynamicResources()[1]))
 		})
 		It("should always include an unscoped set", func() {
 			it := modeInstanceType()
@@ -262,7 +263,7 @@ var _ = Describe("DynamicResources", func() {
 			for _, o := range it.Offerings {
 				o.Available = false
 			}
-			Expect(it.AvailableDynamicResources()).To(ConsistOf(it.DynamicResources[2]))
+			Expect(it.AvailableDynamicResources()).To(ConsistOf(it.AllDynamicResources()[2]))
 		})
 		It("should compute the result once per instance type", func() {
 			it := modeInstanceType()
@@ -272,6 +273,120 @@ var _ = Describe("DynamicResources", func() {
 			}
 			Expect(it.AvailableDynamicResources()).To(HaveLen(2))
 			Expect(it.DeepCopy().AvailableDynamicResources()).To(BeEmpty())
+		})
+	})
+
+	Describe("Namespacing", func() {
+		// reusedInstanceType has two GPU sets that reuse the same pool and device names, and a NIC set.
+		reusedInstanceType := func() *cloudprovider.InstanceType {
+			it := modeInstanceType()
+			it.DynamicResources = []*cloudprovider.DynamicResources{
+				{Requirements: scheduling.NewRequirements(scheduling.NewRequirement(gpuModeKey, corev1.NodeSelectorOpIn, modeDRA)),
+					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{template("gpu.example.com", "gpus", "gpu-0", "gpu-1")}},
+				{Requirements: scheduling.NewRequirements(scheduling.NewRequirement(gpuModeKey, corev1.NodeSelectorOpIn, modeDP)),
+					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{template("gpu.example.com", "gpus", "gpu-0", "gpu-1")}},
+				{Requirements: scheduling.NewRequirements(scheduling.NewRequirement(nicModeKey, corev1.NodeSelectorOpIn, modeDRA)),
+					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{template("nic.example.com", "nics", "nic-0")}},
+			}
+			return it
+		}
+		poolsOf := func(sets []*cloudprovider.DynamicResources) []string {
+			return lo.FlatMap(sets, func(dr *cloudprovider.DynamicResources, _ int) []string {
+				return lo.Map(dr.ResourceSliceTemplates, func(t *cloudprovider.ResourceSliceTemplate, _ int) string { return t.Pool.Name.Value() })
+			})
+		}
+		id := func(driver, pool, device string) cloudprovider.DeviceID {
+			return cloudprovider.DeviceID{Driver: unique.Make(driver), Pool: unique.Make(pool), Device: unique.Make(device)}
+		}
+
+		BeforeEach(func() {
+			v1.WellKnownLabels.Insert(gpuModeKey, nicModeKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(gpuModeKey, nicModeKey) })
+		})
+
+		It("should namespace each set's template pools by the set's index", func() {
+			it := reusedInstanceType()
+			Expect(poolsOf(it.AllDynamicResources())).To(Equal([]string{
+				cloudprovider.TemplatePoolName("gpus", 0), cloudprovider.TemplatePoolName("gpus", 1), cloudprovider.TemplatePoolName("nics", 2),
+			}))
+		})
+		It("should keep sets that reuse pool and device names distinct", func() {
+			sets := reusedInstanceType().AllDynamicResources()
+			Expect(sets[0].ResourceSliceTemplates[0].Pool).ToNot(Equal(sets[1].ResourceSliceTemplates[0].Pool))
+			Expect(sets[0].ResourceSliceTemplates[0].Devices).To(Equal(sets[1].ResourceSliceTemplates[0].Devices))
+		})
+		It("should namespace an unscoped single set", func() {
+			it := &cloudprovider.InstanceType{DynamicResources: []*cloudprovider.DynamicResources{
+				{ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{template("gpu.example.com", "gpus", "gpu-0")}},
+			}}
+			Expect(poolsOf(it.AllDynamicResources())).To(Equal([]string{cloudprovider.TemplatePoolName("gpus", 0)}))
+			Expect(it.AllDynamicResources()[0].Requirements).To(BeEmpty())
+		})
+		It("should namespace a template whose pool is unset", func() {
+			it := &cloudprovider.InstanceType{DynamicResources: []*cloudprovider.DynamicResources{
+				{ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("gpu.example.com")}}},
+			}}
+			Expect(poolsOf(it.AllDynamicResources())).To(Equal([]string{cloudprovider.TemplatePoolName("", 0)}))
+		})
+		It("should not modify the provider's templates", func() {
+			it := reusedInstanceType()
+			original := it.DynamicResources[0].ResourceSliceTemplates[0]
+			namespaced := it.AllDynamicResources()[0].ResourceSliceTemplates[0]
+			Expect(namespaced).ToNot(BeIdenticalTo(original))
+			Expect(original.Pool.Name.Value()).To(Equal("gpus"))
+			Expect(poolsOf(it.DynamicResources)).To(Equal([]string{"gpus", "gpus", "nics"}))
+		})
+		It("should compute the namespaced sets once, and recompute them for a deep copy", func() {
+			it := reusedInstanceType()
+			first := it.AllDynamicResources()
+			Expect(it.AllDynamicResources()).To(Equal(first))
+			Expect(it.AllDynamicResources()[0]).To(BeIdenticalTo(first[0]))
+			copied := it.DeepCopy().AllDynamicResources()
+			Expect(copied[0]).ToNot(BeIdenticalTo(first[0]))
+			Expect(poolsOf(copied)).To(Equal(poolsOf(first)))
+		})
+		It("should return the available subset of the namespaced sets", func() {
+			it := reusedInstanceType()
+			for _, o := range it.Offerings {
+				if o.Requirements.Get(gpuModeKey).Has(modeDP) {
+					o.Available = false
+				}
+			}
+			all := it.AllDynamicResources()
+			Expect(all).To(HaveLen(3))
+			Expect(it.AvailableDynamicResources()).To(ConsistOf(all[0], all[2]))
+		})
+		It("should expand a binding to every set's copy of a bound device", func() {
+			it := reusedInstanceType()
+			it.AttributeBindings = []*cloudprovider.AttributeBinding{{
+				Attribute: "resource.kubernetes.io/pcieRoot",
+				Devices:   []cloudprovider.DeviceID{id("gpu.example.com", "gpus", "gpu-0"), id("nic.example.com", "nics", "nic-0")},
+			}}
+			bindings := it.ResolvedAttributeBindings()
+			Expect(bindings).To(HaveLen(1))
+			Expect(bindings[0].Attribute).To(Equal(resourcev1.QualifiedName("resource.kubernetes.io/pcieRoot")))
+			Expect(bindings[0].Devices).To(ConsistOf(
+				id("gpu.example.com", cloudprovider.TemplatePoolName("gpus", 0), "gpu-0"),
+				id("gpu.example.com", cloudprovider.TemplatePoolName("gpus", 1), "gpu-0"),
+				id("nic.example.com", cloudprovider.TemplatePoolName("nics", 2), "nic-0"),
+			))
+			Expect(it.AttributeBindings[0].Devices).To(ConsistOf(id("gpu.example.com", "gpus", "gpu-0"), id("nic.example.com", "nics", "nic-0")))
+		})
+		It("should keep a bound device that appears in no set unchanged", func() {
+			it := reusedInstanceType()
+			unknown := id("gpu.example.com", "elsewhere", "gpu-9")
+			it.AttributeBindings = []*cloudprovider.AttributeBinding{{Attribute: "example.com/numa", Devices: []cloudprovider.DeviceID{unknown}}}
+			Expect(it.ResolvedAttributeBindings()[0].Devices).To(ConsistOf(unknown))
+		})
+		It("should round-trip namespaced pool names", func() {
+			pool, setIndex, ok := cloudprovider.ParseTemplatePoolName(cloudprovider.TemplatePoolName("gpus-node.example/a", 12))
+			Expect(ok).To(BeTrue())
+			Expect(pool).To(Equal("gpus-node.example/a"))
+			Expect(setIndex).To(Equal(12))
+			_, _, ok = cloudprovider.ParseTemplatePoolName("gpus")
+			Expect(ok).To(BeFalse())
+			_, _, ok = cloudprovider.ParseTemplatePoolName("gpus~x")
+			Expect(ok).To(BeFalse())
 		})
 	})
 })

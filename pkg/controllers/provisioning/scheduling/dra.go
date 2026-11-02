@@ -143,7 +143,7 @@ func (d *draExistingNode) ResourceSlices() map[dynamicresources.InstanceTypeID][
 		return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{}
 	}
 	return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{
-		unique.Make(d.instanceType.Name): templateSlices(d.instanceType.DynamicResources),
+		unique.Make(d.instanceType.Name): templateSlices(d.instanceType.AllDynamicResources()),
 	}
 }
 
