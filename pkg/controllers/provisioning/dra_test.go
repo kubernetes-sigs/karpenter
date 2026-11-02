@@ -1710,5 +1710,22 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(pairNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 		})
+		It("should split a pod that pins one set itself from a claim only the other set fits (N3b)", func() {
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.ResourceClaimForRequests("pinned-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("pair-claim", test.ExactDeviceRequest("req", "gpu", 2)),
+			)
+			pinned := draPod("gpu", "pinned-claim")
+			pinned.Spec.NodeSelector = map[string]string{fake.DriverModeGPULabelKey: modeB}
+			pair := draPod("gpu", "pair-claim")
+			provisionDRA(pinned, pair)
+
+			pinnedNode := ExpectScheduled(ctx, env.Client, pinned)
+			pairNode := ExpectScheduled(ctx, env.Client, pair)
+			Expect(pinnedNode.Name).ToNot(Equal(pairNode.Name))
+			Expect(pinnedNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeB))
+			Expect(pairNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		})
 	})
 })
