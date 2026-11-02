@@ -93,21 +93,19 @@ func FlexibleCapacityStatus(instanceType *InstanceType, capacity, allocatable, f
 	if !ok {
 		return capacity, allocatable
 	}
-	// The expected memory is the instance type's memory, less its overhead and less the hugepages that the node has:
-	// the fixed amounts of hugepages resources that are not in flexible, and the chosen amounts.
-	expected := instanceType.Capacity.Memory().DeepCopy()
-	overhead := lo.FromPtr(instanceType.Overhead).Total()
-	expected.Sub(*overhead.Memory())
-	for name, quantity := range instanceType.Capacity {
-		_, chosen := flexible[name]
-		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) && !instanceType.IsFlexible(name) && !chosen {
-			expected.Sub(quantity)
-		}
-	}
+	baseAllocatable := instanceType.Allocatable()
+	expected := baseAllocatable.Memory().DeepCopy()
 	for name, quantity := range flexible {
-		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
-			expected.Sub(quantity)
+		if !strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+			continue
 		}
+		// Allocatable memory already excludes a fixed hugepages amount. The node has the chosen amount instead, so add
+		// the fixed amount back. If the fixed amount was larger than the memory, Allocatable stopped at zero, and the
+		// result is too high. Such an overlay is wrong anyway.
+		if fixed, ok := instanceType.Capacity[name]; ok && !instanceType.IsFlexible(name) {
+			expected.Add(fixed)
+		}
+		expected.Sub(quantity)
 	}
 	if expected.Sign() == -1 {
 		expected.Set(0)

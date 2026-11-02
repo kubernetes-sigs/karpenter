@@ -185,7 +185,8 @@ var _ = Describe("Flexible Capacity", func() {
 			expectChosenAmount(created)
 		})
 		It("should report the chosen amount when the resource became fixed", func() {
-			ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(corev1.ResourceList{hugePages2Mi: resource.MustParse("8Gi")}, nil))
+			// The fixed amount is smaller than the instance type's memory, as in a valid NodeOverlay.
+			ExpectApplied(ctx, env.Client, nodePool, hugePagesOverlay(corev1.ResourceList{hugePages2Mi: resource.MustParse("2Gi")}, nil))
 			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			created, err := decorated.Create(gatedCtx, nodeClaim)
