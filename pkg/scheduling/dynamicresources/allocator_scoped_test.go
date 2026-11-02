@@ -320,8 +320,10 @@ var _ = Describe("Requirement-scoped template sets", func() {
 
 	Context("sets that reuse pool and device names", func() {
 		// reusedSets builds an instance type whose two GPU sets (gpu mode "a" and "b") both publish pool "gpus" with
-		// devices gpu-0 and gpu-1. Each device consumes one counter; set "a" allows two devices, set "b" one.
-		reusedSets := func(bindings ...*cloudprovider.AttributeBinding) *cloudprovider.InstanceType {
+		// devices gpu-0 and gpu-1. Each device consumes one counter; set "a" allows two devices, set "b" one. bFirst lists
+		// set "b" first. Without per-set namespacing the sets would share the budget of whichever set is listed last, so
+		// specs run in both orders.
+		reusedSets := func(bFirst bool, bindings ...*cloudprovider.AttributeBinding) *cloudprovider.InstanceType {
 			consume := counterConsumption("memory", map[string]resource.Quantity{"mem": resource.MustParse("1")})
 			set := func(mode, budget string) *cloudprovider.DynamicResources {
 				return &cloudprovider.DynamicResources{
@@ -333,19 +335,20 @@ var _ = Describe("Requirement-scoped template sets", func() {
 			}
 			return &cloudprovider.InstanceType{
 				Name:              "it-reuse",
-				DynamicResources:  []*cloudprovider.DynamicResources{set("a", "2"), set("b", "1")},
+				DynamicResources:  lo.Ternary(bFirst, []*cloudprovider.DynamicResources{set("b", "1"), set("a", "2")}, []*cloudprovider.DynamicResources{set("a", "2"), set("b", "1")}),
 				AttributeBindings: bindings,
 			}
 		}
 
-		It("should keep separate counter budgets per set", func() {
-			it := reusedSets()
+		DescribeTable("should keep separate counter budgets per set", func(bFirst bool) {
+			it := reusedSets(bFirst)
+			setA := lo.Ternary(bFirst, 1, 0)
 			nc := scopedNodeClaim([]string{"it-reuse"}, map[string][]dynamicresources.ResourceSlice{"it-reuse": instanceTypeSlices(it)})
 			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 2))})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf("a"))
 			result.Allocation.Commit(ctx)
-			Expect(allocatedPools(alloc, "c1", "it-reuse")).To(ConsistOf(cloudprovider.TemplatePoolName("gpus", 0), cloudprovider.TemplatePoolName("gpus", 0)))
+			Expect(allocatedPools(alloc, "c1", "it-reuse")).To(ConsistOf(cloudprovider.TemplatePoolName("gpus", setA), cloudprovider.TemplatePoolName("gpus", setA)))
 
 			// Set "b" still has its own budget of one device.
 			nc = scopedNodeClaim([]string{"it-reuse"}, map[string][]dynamicresources.ResourceSlice{"it-reuse": instanceTypeSlices(it)},
@@ -355,11 +358,14 @@ var _ = Describe("Requirement-scoped template sets", func() {
 			Expect(err).To(HaveOccurred())
 			_, err = alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c3", exactRequest("req-1", "gpu", 1))})
 			Expect(err).ToNot(HaveOccurred())
-		})
+		},
+			Entry("set a first", false),
+			Entry("set b first", true),
+		)
 
 		It("should satisfy a binding on a reused device ID within one set", func() {
 			numa := resourcev1.QualifiedName("gpu.example.com/numa")
-			it := reusedSets(&cloudprovider.AttributeBinding{Attribute: numa, Devices: []cloudprovider.DeviceID{
+			it := reusedSets(false, &cloudprovider.AttributeBinding{Attribute: numa, Devices: []cloudprovider.DeviceID{
 				deviceID("gpu.example.com", "gpus", "gpu-0").DeviceID, deviceID("gpu.example.com", "gpus", "gpu-1").DeviceID,
 			}})
 			bindings := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{"test-np": {it}})
@@ -379,7 +385,7 @@ var _ = Describe("Requirement-scoped template sets", func() {
 			numa := resourcev1.QualifiedName("gpu.example.com/numa")
 			// Expanded across both sets, this binding would look like a pair, so a one-device claim matching on the
 			// runtime-only attribute would be accepted through the binding fallback.
-			it := reusedSets(&cloudprovider.AttributeBinding{Attribute: numa, Devices: []cloudprovider.DeviceID{
+			it := reusedSets(false, &cloudprovider.AttributeBinding{Attribute: numa, Devices: []cloudprovider.DeviceID{
 				deviceID("gpu.example.com", "gpus", "gpu-0").DeviceID,
 			}})
 			bindings := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{"test-np": {it}})
