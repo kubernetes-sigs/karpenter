@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -59,6 +60,35 @@ func scopedNodeClaim(itNames []string, slices map[string][]dynamicresources.Reso
 		nc.resourceSlices[unique.Make(name)] = slices[name]
 	}
 	return nc
+}
+
+// preferredRequest prefers devices whose "tier" attribute is "preferred", falling back to any device of the class. A
+// spec uses it to make the device it expects to be excluded the one the allocator would otherwise pick, so the spec
+// doesn't depend on allocation order.
+func preferredRequest(name, className string, count int64) resourcev1.DeviceRequest {
+	return resourcev1.DeviceRequest{
+		Name: name,
+		FirstAvailable: []resourcev1.DeviceSubRequest{
+			{
+				Name:            "preferred",
+				DeviceClassName: className,
+				Count:           count,
+				Selectors:       []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].tier == "preferred"`}}},
+			},
+			{Name: "fallback", DeviceClassName: className, Count: count},
+		},
+	}
+}
+
+// preferredTemplate builds a template whose devices all carry tier=preferred.
+func preferredTemplate(driver, pool string, deviceNames ...string) *cloudprovider.ResourceSliceTemplate {
+	specs := make([]apiDeviceSpec, len(deviceNames))
+	for i, name := range deviceNames {
+		specs[i] = deviceWithAttrs(name, map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+			"gpu.example.com/tier": {StringValue: new("preferred")},
+		})
+	}
+	return makeTemplateWithAttrs(driver, pool, specs...)
 }
 
 func allocatedPools(alloc *dynamicresources.Allocator, claim, it string) []string {
@@ -127,35 +157,42 @@ var _ = Describe("Requirement-scoped template sets", func() {
 	})
 
 	It("should treat an undefined set key as unknown on an existing node", func() {
+		// The claim prefers the scoped device, and the unscoped one is listed first, so the scoped device is the one
+		// that would be allocated if the undefined key were treated as open.
 		nc := scopedNodeClaim([]string{"it-1"}, map[string][]dynamicresources.ResourceSlice{
 			"it-1": {
-				scopedSlice(gpuModeKey, "dra", makeTemplate("gpu.example.com", "scoped-gpus", "gpu-0")),
 				dynamicresources.NewTemplateSlice(makeTemplate("gpu.example.com", "unscoped-gpus", "gpu-1")),
+				scopedSlice(gpuModeKey, "dra", preferredTemplate("gpu.example.com", "scoped-gpus", "gpu-0")),
 			},
 		})
 		nc.existing = true
-		claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+		claim := makeClaim("c1", preferredRequest("req-1", "gpu", 1))
 		result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
 		Expect(err).ToNot(HaveOccurred())
 		result.Allocation.Commit(ctx)
 		Expect(allocatedPools(alloc, "c1", "it-1")).To(ConsistOf("unscoped-gpus"))
 	})
 
-	It("should backtrack out of a set, undoing its requirements, when another set of the driver is needed", func() {
-		// Set "x" has one device, set "y" has two. Two devices from one set are needed, so the DFS's first pick from
-		// "x" has to be undone along with the requirement it added.
-		nc := scopedNodeClaim([]string{"it-1"}, map[string][]dynamicresources.ResourceSlice{
-			"it-1": {
-				scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-x", "gpu-x0")),
-				scopedSlice(gpuModeKey, "y", makeTemplate("gpu.example.com", "pool-y", "gpu-y0", "gpu-y1")),
-			},
-		})
-		result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 2))})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf("y"))
-		result.Allocation.Commit(ctx)
-		Expect(allocatedPools(alloc, "c1", "it-1")).To(ConsistOf("pool-y", "pool-y"))
-	})
+	DescribeTable("should allocate from the only set that can satisfy the claim, in either set order",
+		func(order []string) {
+			// Set "x" has one device and set "y" has two, and the claim needs two devices from one set. With "x" first,
+			// the DFS's pick from "x" has to be undone along with the requirement it added.
+			templates := map[string]dynamicresources.ResourceSlice{
+				"x": scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-x", "gpu-x0")),
+				"y": scopedSlice(gpuModeKey, "y", makeTemplate("gpu.example.com", "pool-y", "gpu-y0", "gpu-y1")),
+			}
+			nc := scopedNodeClaim([]string{"it-1"}, map[string][]dynamicresources.ResourceSlice{
+				"it-1": lo.Map(order, func(set string, _ int) dynamicresources.ResourceSlice { return templates[set] }),
+			})
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 2))})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf("y"))
+			result.Allocation.Commit(ctx)
+			Expect(allocatedPools(alloc, "c1", "it-1")).To(ConsistOf("pool-y", "pool-y"))
+		},
+		Entry("backtracking out of set x", []string{"x", "y"}),
+		Entry("allocating from set y directly", []string{"y", "x"}),
+	)
 
 	It("should not allocate devices from mutually exclusive sets of one driver together", func() {
 		nc := scopedNodeClaim([]string{"it-1"}, map[string][]dynamicresources.ResourceSlice{
@@ -188,25 +225,32 @@ var _ = Describe("Requirement-scoped template sets", func() {
 		Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf("dra"))
 	})
 
-	It("should evaluate later instance types against the requirements earlier ones contributed", func() {
-		nc := scopedNodeClaim([]string{"it-a", "it-b"}, map[string][]dynamicresources.ResourceSlice{
-			"it-a": {scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-a", "gpu-0"))},
-			"it-b": {scopedSlice(gpuModeKey, "y", makeTemplate("gpu.example.com", "pool-b", "gpu-0"))},
-		})
-		result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(result.InstanceTypes).To(ConsistOf(unique.Make("it-a")))
-		Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf("x"))
+	DescribeTable("should evaluate later instance types against the requirements earlier ones contributed",
+		func(first, second, firstSet string) {
+			// The first instance type evaluated decides the set, whichever it is.
+			sets := map[string]string{"it-a": "x", "it-b": "y"}
+			nc := scopedNodeClaim([]string{first, second}, map[string][]dynamicresources.ResourceSlice{
+				"it-a": {scopedSlice(gpuModeKey, sets["it-a"], makeTemplate("gpu.example.com", "pool-a", "gpu-0"))},
+				"it-b": {scopedSlice(gpuModeKey, sets["it-b"], makeTemplate("gpu.example.com", "pool-b", "gpu-0"))},
+			})
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.InstanceTypes).To(ConsistOf(unique.Make(first)))
+			Expect(result.Requirements.Get(gpuModeKey).Values()).To(ConsistOf(firstSet))
 
-		nc = scopedNodeClaim([]string{"it-a", "it-b"}, map[string][]dynamicresources.ResourceSlice{
-			"it-a": {scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-a", "gpu-0"))},
-			"it-b": {scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-b", "gpu-0"))},
-		})
-		nc.id = unique.Make("test-nc-2")
-		result, err = alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c2", exactRequest("req-1", "gpu", 1))})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(result.InstanceTypes).To(ConsistOf(unique.Make("it-a"), unique.Make("it-b")))
-	})
+			// Instance types that agree on the set both survive.
+			nc = scopedNodeClaim([]string{first, second}, map[string][]dynamicresources.ResourceSlice{
+				"it-a": {scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-a", "gpu-0"))},
+				"it-b": {scopedSlice(gpuModeKey, "x", makeTemplate("gpu.example.com", "pool-b", "gpu-0"))},
+			})
+			nc.id = unique.Make("test-nc-2")
+			result, err = alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c2", exactRequest("req-1", "gpu", 1))})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.InstanceTypes).To(ConsistOf(unique.Make("it-a"), unique.Make("it-b")))
+		},
+		Entry("it-a first", "it-a", "it-b", "x"),
+		Entry("it-b first", "it-b", "it-a", "y"),
+	)
 
 	It("should never satisfy a binding with devices from mutually exclusive sets", func() {
 		gx := deviceID("gpu.example.com", "pool-x", "gpu-x0")

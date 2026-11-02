@@ -77,10 +77,12 @@ func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
 
 // ResourceSlices returns, for each candidate instance type, the templates of every DynamicResources set that can be a
 // source of devices for this NodeClaim: the set has an available offering, and its requirements are compatible with
-// the merged requirements (see Requirements). The two conditions are checked independently, so a set may be included even though no single
-// available offering satisfies both. That's safe: an allocation from such a set narrows the NodeClaim to requirements
-// that no available offering satisfies, and the instance type is rejected by the offering checks that follow. The
-// allocator calls ResourceSlices at most once per Allocate (see dynamicresources.NodeClaim), so the result isn't cached.
+// the merged requirements (see Requirements). The two conditions are checked separately, so a set may be included even
+// though no single available offering satisfies both. An allocation from such a set narrows the NodeClaim to
+// requirements that no available offering satisfies, and the instance type is rejected by the offering checks that
+// follow rather than by the allocator, which therefore can't backtrack to another device. This is a known limitation
+// (jmdeal/karpenter#27). The allocator calls ResourceSlices at most once per Allocate (see dynamicresources.NodeClaim),
+// so the result isn't cached.
 func (d *draNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	slices := make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice, len(d.nc.InstanceTypeOptions))
 	for _, it := range d.nc.InstanceTypeOptions {

@@ -1468,21 +1468,38 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
 		})
 		It("should only allocate from sets compatible with a pod's own requirements (M6d)", func() {
-			// Two sets of one driver, scoped by zone. Without the pod's requirements, the allocator would pick the first
-			// set's device and narrow the NodeClaim to a zone the pod excludes.
+			// Two sets of one driver, scoped by zone. The claim prefers the zone-1 device, and the zone-2 set is listed
+			// first, so without the pod's zone-2 requirement the allocator would pick the zone-1 device and narrow the
+			// NodeClaim to a zone the pod excludes.
 			zoneReq := func(zone string) scheduling.Requirements {
 				return scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
 			}
+			tier := resourcev1.QualifiedName(gpuDriver + "/tier")
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("zoned-sets-it",
-				fake.WithDynamicResources(zoneReq("test-zone-1"), fake.ResourceSliceTemplate(gpuDriver, "zone-1-gpus", fake.Devices("gpu-z1")...)),
 				fake.WithDynamicResources(zoneReq("test-zone-2"), fake.ResourceSliceTemplate(gpuDriver, "zone-2-gpus", fake.Devices("gpu-z2")...)),
+				fake.WithDynamicResources(zoneReq("test-zone-1"), fake.ResourceSliceTemplate(gpuDriver, "zone-1-gpus",
+					fake.Device("gpu-z1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{tier: {StringValue: new("preferred")}}))),
 			)}
-			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.FirstAvailableDeviceRequest("req",
+				resourcev1.DeviceSubRequest{
+					Name: "preferred", DeviceClassName: "gpu", Count: 1,
+					Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{
+						Expression: fmt.Sprintf(`device.attributes[%q].tier == "preferred"`, gpuDriver),
+					}}},
+				},
+				test.DeviceSubRequest("fallback", "gpu", 1),
+			)))
 			pod := draPod("gpu", "gpu-claim")
 			pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: "test-zone-2"}
 			provisionDRA(pod)
 
 			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
+			claim := &resourcev1.ResourceClaim{}
+			Expect(env.Client.Get(ctx, client.ObjectKey{Namespace: "default", Name: "gpu-claim"}, claim)).To(Succeed())
+			Expect(claim.Status.Allocation).ToNot(BeNil())
+			Expect(lo.Map(claim.Status.Allocation.Devices.Results, func(r resourcev1.DeviceRequestAllocationResult, _ int) string {
+				return r.Device
+			})).To(ConsistOf("gpu-z2"))
 		})
 		It("should not use a set whose offerings are all unavailable as a device source (M7)", func() {
 			for _, o := range cloudProvider.InstanceTypes[0].Offerings {

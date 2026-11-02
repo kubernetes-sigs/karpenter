@@ -157,12 +157,6 @@ var _ = Describe("DRA Scheduling Internals", func() {
 			nc.Requirements = modeReqs("device-plugin")
 			Expect(slicesFor(&draNodeClaim{nc: nc, requirements: nc.Requirements})).To(Equal([]string{"unscoped"}))
 		})
-		It("should check availability and NodeClaim compatibility independently", func() {
-			// The only available DRA offering is in zone-b, but the set is still a device source for a zone-a NodeClaim.
-			// The offering checks that follow allocation reject the instance type.
-			nc.Requirements = scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"))
-			Expect(slicesFor(&draNodeClaim{nc: nc, requirements: nc.Requirements})).To(Equal([]string{"unscoped", "dra"}))
-		})
 		It("should use the merged requirements rather than the NodeClaim's alone", func() {
 			// A pod being added pins the mode; the NodeClaim itself is unconstrained.
 			merged := modeReqs("device-plugin")
