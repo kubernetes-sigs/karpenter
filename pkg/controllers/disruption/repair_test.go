@@ -1006,6 +1006,32 @@ var _ = Describe("Repair", func() {
 		})
 	})
 
+	// A policy terminationGracePeriod of 0s overrides the NodeClaim's unset one, so both counters should say forceful.
+	It("should report a forceful repair as forceful on the disrupted counter", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: new(time.Duration(0)), Action: cloudprovider.ReplaceNode},
+		})
+		newRepairController()
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+			disruption.RepairCondition.Name: "bad_node",
+			metrics.NodePoolLabel:           nodePool.Name,
+			metrics.TerminationModeLabel:    metrics.TerminationModeForceful,
+		})
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			metrics.ReasonLabel:          strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeForceful,
+		})
+	})
+
 	// The deadline is stamped only after required replacement readiness, so a replacement that never becomes healthy
 	// leaves the original both un-terminated AND un-stamped (the bounded policy proves it would stamp if termination ran).
 	It("should neither terminate nor stamp a deadline when the replacement never becomes healthy", func() {
