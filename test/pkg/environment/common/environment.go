@@ -82,6 +82,9 @@ type Environment struct {
 
 	OutputDir         string
 	StartingNodeCount int
+
+	ExternalController *ExternalController
+	knownFlakes        []knownFlake
 }
 
 func NewEnvironment(t *testing.T) *Environment {
@@ -108,6 +111,8 @@ func NewEnvironment(t *testing.T) *Environment {
 		TimeIntervalCollector: debug.NewTimestampCollector(),
 		OutputDir:             outputDir,
 		DefaultNodeClass:      decodeNodeClass(),
+		ExternalController:    externalControllerFromEnv(),
+		knownFlakes:           knownFlakesFromEnv(),
 	}
 }
 

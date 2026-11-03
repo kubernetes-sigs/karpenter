@@ -103,7 +103,7 @@ var _ = Describe("Unhealthy Nodes", func() {
 			{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionUnknown, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Action: cloudprovider.ReplaceNode},
 		}
 		matcher = lo.Must(health.NewRepairPolicyMatcher(
-			options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}})), cloudProvider))
+			options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}})), cloudProvider))
 		useMatcher(matcher)
 	})
 	AfterEach(func() {

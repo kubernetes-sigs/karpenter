@@ -165,9 +165,7 @@ func (d *DefaultTopologySpreadInjector) defaultSelector(ctx context.Context, p *
 
 	var matchExpressions []metav1.LabelSelectorRequirement
 	if owner := d.ownerContributionFor(ctx, p); owner != nil {
-		for k, v := range owner.matchLabels {
-			matchLabels[k] = v
-		}
+		maps.Copy(matchLabels, owner.matchLabels)
 		matchExpressions = append(matchExpressions, owner.matchExpressions...)
 	}
 
@@ -195,9 +193,7 @@ func (d *DefaultTopologySpreadInjector) serviceMatchLabels(ctx context.Context, 
 		}
 		if labels.SelectorFromValidatedSet(svc.Spec.Selector).Matches(labels.Set(p.Labels)) {
 			// A key set by more than one matching Service takes the last one's value, as labels.Merge does.
-			for k, v := range svc.Spec.Selector {
-				matchLabels[k] = v
-			}
+			maps.Copy(matchLabels, svc.Spec.Selector)
 		}
 	}
 	return matchLabels

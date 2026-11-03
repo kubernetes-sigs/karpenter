@@ -18,6 +18,7 @@ package provisioning_test
 
 import (
 	"fmt"
+	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -40,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -130,7 +132,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Skip("DRA is only available in K8s versions >= 1.34.x")
 		}
 		// DRA support is gated off by default; enable it for these tests.
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(false)}))
 		nodePool = test.NodePool()
 		// Use a provisioner backed by a fresh deviceallocation controller so each test starts with clean
 		// allocated-device tracking state. The controller must be reconciled (hydrated) before a provisioning round
@@ -484,7 +486,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 
 	Context("Enablement gating (N)", func() {
 		It("should reject DRA pods with a DRAError when IgnoreDRARequests is enabled (N1)", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(true)}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(true)}))
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
 			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
@@ -672,6 +674,48 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(scheduled.Name).To(Equal(node.Name))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		})
+		It("should not allocate a device that requires a well-known label the existing node lacks (C3)", func() {
+			// plain-it provides no templates, so the claim can only be satisfied by the in-cluster device.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+
+			// The existing node doesn't have the windows-build label, so whether it matches the slice's NodeSelector is
+			// unknown, and kube-scheduler wouldn't allocate the device to it.
+			node := existingNode("plain-it", true, corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("10"),
+			})
+			ExpectApplied(ctx, env.Client, test.ResourceSlice(resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "windows-gpu-pool"},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver: gpuDriver,
+					Pool:   resourcev1.ResourcePool{Name: "windows-gpu-pool", Generation: 1, ResourceSliceCount: 1},
+					NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      corev1.LabelWindowsBuild,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"10.0.20348"},
+						}},
+					}}},
+					Devices: []resourcev1.Device{{Name: "windows-gpu-0"}},
+				},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			// The pod isn't placed on the existing node. A new NodeClaim is still open to any windows-build value, so the
+			// device is allocated to it and its requirements are narrowed to the slice's NodeSelector.
+			scheduled := ExpectScheduled(ctx, env.Client, pod)
+			Expect(scheduled.Name).ToNot(Equal(node.Name))
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			req, found := lo.Find(nodeClaims[0].Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool {
+				return r.Key == corev1.LabelWindowsBuild
+			})
+			Expect(found).To(BeTrue())
+			Expect(req.Values).To(ConsistOf("10.0.20348"))
+		})
 	})
 
 	Context("Topology propagation from node-local devices (D)", func() {
@@ -694,6 +738,20 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			})
 			Expect(found).To(BeTrue())
 			Expect(req.Values).To(ConsistOf("test-zone-2"))
+		})
+		It("should allocate the zoned in-cluster device that matches a pod's zone affinity (D3)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			ExpectApplied(ctx, env.Client,
+				zonedSlice("a-zone-1-gpu-pool", gpuDriver, "test-zone-1", "zoned-gpu-1"),
+				zonedSlice("b-zone-2-gpu-pool", gpuDriver, "test-zone-2", "zoned-gpu-2"),
+			)
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: "test-zone-2"}
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 		})
 		It("should collapse a NodeClaim to the shared zone of two compatibly-zoned claims (D2)", func() {
 			// plain-it provides no templates, so both claims are satisfied by the zoned in-cluster pools and both
@@ -1086,7 +1144,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// Device capacity restricted to {4Gi,8Gi,16Gi}; a 32Gi request exceeds all valid values and is rejected.
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityPolicyGPUInstanceType("gpu-it", "16Gi",
 				&resourcev1.CapacityRequestPolicy{
-					Default:     lo.ToPtr(resource.MustParse("4Gi")),
+					Default:     new(resource.MustParse("4Gi")),
 					ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
 				})}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
@@ -1107,7 +1165,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// Device has 16Gi with a Default consumption of 4Gi. Three pods that request the device WITHOUT naming the
 			// capacity dimension each consume the 4Gi default (not the whole device), so all three pack onto one device.
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityPolicyGPUInstanceType("gpu-it", "16Gi",
-				&resourcev1.CapacityRequestPolicy{Default: lo.ToPtr(resource.MustParse("4Gi"))})}
+				&resourcev1.CapacityRequestPolicy{Default: new(resource.MustParse("4Gi"))})}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
 			pods := lo.Times(3, func(i int) *corev1.Pod {
 				name := fmt.Sprintf("default-claim-%d", i)
@@ -1249,5 +1307,463 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(nodeA.Name).ToNot(Equal(nodeB.Name), "60+60 compute exceeds the 100 budget, so the profiles can't share a pool")
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 		})
+	})
+	// Requirement-scoped DynamicResources: the fixture's GPU and NIC each run in DRA or device-plugin mode, selected by
+	// offering-level mode labels. Device-plugin offerings advertise the extended resources; DRA offerings zero them and
+	// publish the driver's devices through a set scoped to that driver's DRA mode.
+	Context("Requirement-scoped DynamicResources (M)", func() {
+		modeReq := func(nc *v1.NodeClaim, key string) []string {
+			GinkgoHelper()
+			req, ok := lo.Find(nc.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool { return r.Key == key })
+			if !ok {
+				return nil
+			}
+			return req.Values
+		}
+		devicePluginGPUPod := func(claims ...corev1.PodResourceClaim) *corev1.Pod {
+			gpu := corev1.ResourceList{fake.ResourceDevicePluginGPU: resource.MustParse("1")}
+			return test.UnschedulablePod(test.PodOptions{
+				ResourceClaims: claims,
+				ContainerResourceClaims: lo.Map(claims, func(c corev1.PodResourceClaim, _ int) corev1.ResourceClaim {
+					return corev1.ResourceClaim{Name: c.Name}
+				}),
+				ResourceRequirements: corev1.ResourceRequirements{Requests: gpu, Limits: gpu},
+			})
+		}
+		// preInitializedNode creates a launched, registered, but uninitialized NodeClaim and Node of the given instance
+		// type with the given labels, and registers both in cluster state. While uninitialized, the node's devices come
+		// from its instance type's templates.
+		preInitializedNode := func(instanceType string, labels map[string]string) *corev1.Node {
+			GinkgoHelper()
+			resources := corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("10"),
+			}
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: lo.Assign(map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: instanceType,
+						v1.NodeRegisteredLabelKey:      "true",
+					}, labels),
+				},
+				Status: v1.NodeClaimStatus{Capacity: resources, Allocatable: resources},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			cluster.UpdateNodeClaim(nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			return node
+		}
+
+		BeforeEach(func() {
+			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey) })
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.DriverModeInstanceType("mode-it", 2, nil)}
+			ExpectApplied(ctx, env.Client, test.DeviceClassWithSelector("gpu", gpuDriver), test.DeviceClassWithSelector("nic", nicDriver))
+		})
+
+		It("should narrow the NodeClaim to the allocated driver's DRA mode (M1)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			node := ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(modeReq(nodeClaims[0], fake.DriverModeGPULabelKey)).To(ConsistOf(fake.DriverModeDRA))
+			Expect(modeReq(nodeClaims[0], fake.DriverModeNICLabelKey)).ToNot(Equal([]string{fake.DriverModeDRA}))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDRA))
+			// The annotation is still the scheduler's record of allocated drivers.
+			ExpectNodeClaimDRADrivers(nodeClaims[0], gpuDriver)
+			ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
+		})
+		It("should launch a device-plugin pod into device-plugin mode regardless of offering order (M1b)", func() {
+			// List the DRA offerings first, so launching into the first compatible offering would pick DRA mode. Only the
+			// DRA offerings' CapacityOverride (zero device-plugin GPUs) keeps the pod out of them.
+			instanceType := fake.DriverModeInstanceType("mode-it", 2, nil)
+			slices.Reverse(instanceType.Offerings)
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := devicePluginGPUPod()
+			provisionDRA(pod)
+
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDevicePlugin))
+		})
+		It("should split a DRA pod and a device-plugin pod for the same driver onto separate NodeClaims (M2)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			draGPUPod := draPod("gpu", "gpu-claim")
+			dpGPUPod := devicePluginGPUPod()
+			provisionDRA(draGPUPod, dpGPUPod)
+
+			draNode := ExpectScheduled(ctx, env.Client, draGPUPod)
+			dpNode := ExpectScheduled(ctx, env.Client, dpGPUPod)
+			Expect(draNode.Name).ToNot(Equal(dpNode.Name))
+			Expect(draNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDRA))
+			Expect(dpNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDevicePlugin))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("should not schedule a pod that requests both DRA and device-plugin resources for the same driver (M3)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := devicePluginGPUPod(test.PodResourceClaimReference("gpu", "gpu-claim"))
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+		It("should let a NIC DRA pod join a NodeClaim narrowed to GPU DRA mode (M4)", func() {
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("nic-claim", test.ExactDeviceRequest("req", "nic", 1)),
+			)
+			gpuPod := draPod("gpu", "gpu-claim")
+			nicPod := draPod("nic", "nic-claim")
+			provisionDRA(gpuPod, nicPod)
+
+			Expect(ExpectScheduled(ctx, env.Client, gpuPod).Name).To(Equal(ExpectScheduled(ctx, env.Client, nicPod).Name))
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(modeReq(nodeClaims[0], fake.DriverModeGPULabelKey)).To(ConsistOf(fake.DriverModeDRA))
+			Expect(modeReq(nodeClaims[0], fake.DriverModeNICLabelKey)).To(ConsistOf(fake.DriverModeDRA))
+		})
+		It("should let a GPU DRA pod and a NIC device-plugin pod share a NodeClaim (M5)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			nic := corev1.ResourceList{fake.ResourceDevicePluginNIC: resource.MustParse("1")}
+			gpuPod := draPod("gpu", "gpu-claim")
+			nicPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{Requests: nic, Limits: nic}})
+			provisionDRA(gpuPod, nicPod)
+
+			node := ExpectScheduled(ctx, env.Client, gpuPod)
+			Expect(ExpectScheduled(ctx, env.Client, nicPod).Name).To(Equal(node.Name))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDRA))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeNICLabelKey, fake.DriverModeDevicePlugin))
+		})
+		It("should honor a NodePool that pins a driver mode (M6)", func() {
+			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+				Key: fake.DriverModeGPULabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{fake.DriverModeDevicePlugin},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			draGPUPod := draPod("gpu", "gpu-claim")
+			dpGPUPod := devicePluginGPUPod()
+			provisionDRA(draGPUPod, dpGPUPod)
+
+			ExpectNotScheduled(ctx, env.Client, draGPUPod)
+			Expect(ExpectScheduled(ctx, env.Client, dpGPUPod).Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDevicePlugin))
+		})
+		It("should honor a pod that pins a driver mode with a DRA claim (M6b)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{fake.DriverModeGPULabelKey: fake.DriverModeDRA}
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, fake.DriverModeDRA))
+		})
+		It("should not schedule a DRA pod that pins device-plugin mode (M6c)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{fake.DriverModeGPULabelKey: fake.DriverModeDevicePlugin}
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+		It("should only allocate from sets compatible with a pod's own requirements (M6d)", func() {
+			// Two sets of one driver, scoped by zone. The claim prefers the zone-1 device, and the zone-2 set is listed
+			// first, so without the pod's zone-2 requirement the allocator would pick the zone-1 device and narrow the
+			// NodeClaim to a zone the pod excludes.
+			zoneReq := func(zone string) scheduling.Requirements {
+				return scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
+			}
+			tier := resourcev1.QualifiedName(gpuDriver + "/tier")
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("zoned-sets-it",
+				fake.WithDynamicResources(zoneReq("test-zone-2"), fake.ResourceSliceTemplate(gpuDriver, "zone-2-gpus", fake.Devices("gpu-z2")...)),
+				fake.WithDynamicResources(zoneReq("test-zone-1"), fake.ResourceSliceTemplate(gpuDriver, "zone-1-gpus",
+					fake.Device("gpu-z1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{tier: {StringValue: new("preferred")}}))),
+			)}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.FirstAvailableDeviceRequest("req",
+				resourcev1.DeviceSubRequest{
+					Name: "preferred", DeviceClassName: "gpu", Count: 1,
+					Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{
+						Expression: fmt.Sprintf(`device.attributes[%q].tier == "preferred"`, gpuDriver),
+					}}},
+				},
+				test.DeviceSubRequest("fallback", "gpu", 1),
+			)))
+			pod := draPod("gpu", "gpu-claim")
+			pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: "test-zone-2"}
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
+			claim := &resourcev1.ResourceClaim{}
+			Expect(env.Client.Get(ctx, client.ObjectKey{Namespace: "default", Name: "gpu-claim"}, claim)).To(Succeed())
+			Expect(claim.Status.Allocation).ToNot(BeNil())
+			Expect(lo.Map(claim.Status.Allocation.Devices.Results, func(r resourcev1.DeviceRequestAllocationResult, _ int) string {
+				return r.Device
+			})).To(ConsistOf("gpu-z2"))
+		})
+		It("should not use a set whose offerings are all unavailable as a device source (M7)", func() {
+			for _, o := range cloudProvider.InstanceTypes[0].Offerings {
+				if o.Requirements.Get(fake.DriverModeGPULabelKey).Has(fake.DriverModeDRA) {
+					o.Available = false
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			draGPUPod := draPod("gpu", "gpu-claim")
+			dpGPUPod := devicePluginGPUPod()
+			provisionDRA(draGPUPod, dpGPUPod)
+
+			ExpectNotScheduled(ctx, env.Client, draGPUPod)
+			ExpectScheduled(ctx, env.Client, dpGPUPod)
+		})
+		It("should not provision for a DRA pod when every offering publishing its devices is unavailable (M7b)", func() {
+			for _, o := range cloudProvider.InstanceTypes[0].Offerings {
+				if o.Requirements.Get(fake.DriverModeGPULabelKey).Has(fake.DriverModeDRA) {
+					o.Available = false
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+		It("should not provision for a device-plugin pod when every device-plugin offering is unavailable (M7c)", func() {
+			for _, o := range cloudProvider.InstanceTypes[0].Offerings {
+				if o.Requirements.Get(fake.DriverModeGPULabelKey).Has(fake.DriverModeDevicePlugin) {
+					o.Available = false
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := devicePluginGPUPod()
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+		It("should reject an instance type that has no offering for the allocated combination of devices (M8)", func() {
+			partial := fake.DriverModeInstanceType("partial-it", 2, func(gpuMode, nicMode string) bool {
+				return gpuMode != fake.DriverModeDRA || nicMode != fake.DriverModeDRA
+			})
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{partial}
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("nic-claim", test.ExactDeviceRequest("req", "nic", 1)),
+			)
+			pod := draPodForClaims(test.PodResourceClaimReference("gpu", "gpu-claim"), test.PodResourceClaimReference("nic", "nic-claim"))
+			provisionDRA(pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.DriverModeInstanceType("partial-it", 2, func(gpuMode, nicMode string) bool {
+					return gpuMode != fake.DriverModeDRA || nicMode != fake.DriverModeDRA
+				}),
+				fake.DriverModeInstanceType("full-it", 2, nil),
+			}
+			provisionDRA(pod)
+			Expect(ExpectScheduled(ctx, env.Client, pod).Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "full-it"))
+		})
+		It("should use a pre-initialized node's devices only from the configuration it was launched with (M9)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			node := preInitializedNode("mode-it", map[string]string{
+				fake.DriverModeGPULabelKey: fake.DriverModeDRA,
+				fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin,
+			})
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Name).To(Equal(node.Name))
+			// Only the pre-initialized node's own NodeClaim exists.
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+		It("should not use scoped devices on a pre-initialized node whose configuration is unknown (M10)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			node := preInitializedNode("mode-it", nil)
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Name).ToNot(Equal(node.Name))
+			// The pre-initialized node's NodeClaim, plus a new one for the pod.
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("should not use a pre-initialized node's devices from a configuration it wasn't launched with (M11)", func() {
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			node := preInitializedNode("mode-it", map[string]string{
+				fake.DriverModeGPULabelKey: fake.DriverModeDevicePlugin,
+				fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin,
+			})
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			Expect(ExpectScheduled(ctx, env.Client, pod).Name).ToNot(Equal(node.Name))
+		})
+		It("should keep an unscoped set's behavior unchanged (M12)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(modeReq(nodeClaims[0], fake.DriverModeGPULabelKey)).To(BeNil())
+			ExpectNodeClaimDRADrivers(nodeClaims[0], gpuDriver)
+		})
+	})
+
+	Context("DynamicResources sets that reuse pool and device names (N)", func() {
+		// Two GPU sets, selected by gpu mode "a" and "b", publish the same pool and device names. Each device consumes
+		// one counter: set "a"'s budget allows two devices, set "b"'s one. Without per-set namespacing, the sets would
+		// share the budget of whichever set is listed last, so each spec runs with either set first (bFirst).
+		const modeA, modeB = "a", "b"
+		reusedInstanceType := func(bFirst bool) *cloudprovider.InstanceType {
+			consume := fake.CounterConsumption("memory", map[string]resource.Quantity{"mem": resource.MustParse("1")})
+			// Set "a"'s devices carry tier=preferred, so a claim can prefer set "a" without depending on set order.
+			devices := func(preferred bool) cloudprovider.ResourceSliceTemplate {
+				opts := []fake.DeviceOption{fake.WithConsumesCounters(consume)}
+				if preferred {
+					opts = append(opts, func(d *cloudprovider.Device) {
+						d.Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							resourcev1.QualifiedName(gpuDriver + "/tier"): {StringValue: new("preferred")},
+						}
+					})
+				}
+				return fake.ResourceSliceTemplate(gpuDriver, "reuse-pool", fake.DeviceWith("gpu-0", opts...), fake.DeviceWith("gpu-1", opts...))
+			}
+			counters := func(budget string) cloudprovider.ResourceSliceTemplate {
+				return fake.ResourceSliceTemplateWithCounters(gpuDriver, "reuse-pool", fake.CounterSet("memory", map[string]resource.Quantity{"mem": resource.MustParse(budget)}))
+			}
+			mode := func(m string) scheduling.Requirements {
+				return scheduling.NewRequirements(scheduling.NewRequirement(fake.DriverModeGPULabelKey, corev1.NodeSelectorOpIn, m))
+			}
+			resources := corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("5")}
+			offerings := lo.Map([]string{modeA, modeB}, func(m string, _ int) cloudprovider.Offering {
+				return cloudprovider.Offering{
+					Available: true,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{
+						v1.CapacityTypeLabelKey:    v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:   "test-zone-1",
+						fake.DriverModeGPULabelKey: m,
+					}),
+					Price: fake.PriceFromResources(resources),
+				}
+			})
+			sets := []fake.InstanceTypeOptions{
+				fake.WithDynamicResources(mode(modeA), counters("2"), devices(true)),
+				fake.WithDynamicResources(mode(modeB), counters("1"), devices(false)),
+			}
+			if bFirst {
+				slices.Reverse(sets)
+			}
+			return fake.NewInstanceType("reuse-it", append([]fake.InstanceTypeOptions{
+				fake.WithResources(resources),
+				fake.WithOfferings(offerings...),
+				fake.WithRequirements(scheduling.NewRequirement(fake.DriverModeGPULabelKey, corev1.NodeSelectorOpIn, modeA, modeB)),
+			}, sets...)...)
+		}
+		// pinnedPod targets the given NodePool, which pins the set through its requirements.
+		pinnedPod := func(nodePoolName, claimName string) *corev1.Pod {
+			claim := test.PodResourceClaimReference("gpu", claimName)
+			return test.UnschedulablePod(test.PodOptions{
+				NodeSelector:            map[string]string{v1.NodePoolLabelKey: nodePoolName},
+				ResourceClaims:          []corev1.PodResourceClaim{claim},
+				ContainerResourceClaims: []corev1.ResourceClaim{{Name: claim.Name}},
+			})
+		}
+
+		BeforeEach(func() {
+			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey) })
+			ExpectApplied(ctx, env.Client, test.DeviceClassWithSelector("gpu", gpuDriver))
+		})
+
+		DescribeTable("should narrow to the set whose own counter budget fits the claim (N1)", func(bFirst bool) {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{reusedInstanceType(bFirst)}
+			ExpectApplied(ctx, env.Client, nodePool, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 2)))
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
+		},
+			Entry("set a first", false),
+			Entry("set b first", true),
+		)
+		DescribeTable("should pack two single-device claims onto one NodeClaim within a set's budget (N2)", func(bFirst bool) {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{reusedInstanceType(bFirst)}
+			// Both claims prefer set "a", whichever set is listed first.
+			preferA := func() resourcev1.DeviceRequest {
+				return test.FirstAvailableDeviceRequest("req",
+					resourcev1.DeviceSubRequest{
+						Name: "preferred", DeviceClassName: "gpu", Count: 1,
+						Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{
+							Expression: fmt.Sprintf(`device.attributes[%q].tier == "preferred"`, gpuDriver),
+						}}},
+					},
+					test.DeviceSubRequest("fallback", "gpu", 1),
+				)
+			}
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.ResourceClaimForRequests("gpu-claim-1", preferA()),
+				test.ResourceClaimForRequests("gpu-claim-2", preferA()),
+			)
+			pod1, pod2 := draPod("gpu", "gpu-claim-1"), draPod("gpu", "gpu-claim-2")
+			provisionDRA(pod1, pod2)
+
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+			Expect(node1.Name).To(Equal(node2.Name))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(node1.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
+		},
+			Entry("set a first", false),
+			Entry("set b first", true),
+		)
+		DescribeTable("should split a pod pinned to one set from a claim only the other set fits (N3)", func(bFirst bool) {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{reusedInstanceType(bFirst)}
+			modeBPool := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{{Key: fake.DriverModeGPULabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{modeB}}},
+			}}}})
+			ExpectApplied(ctx, env.Client, nodePool, modeBPool,
+				test.ResourceClaimForRequests("pinned-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("pair-claim", test.ExactDeviceRequest("req", "gpu", 2)),
+			)
+			pinned := pinnedPod(modeBPool.Name, "pinned-claim")
+			pair := draPod("gpu", "pair-claim")
+			provisionDRA(pinned, pair)
+
+			pinnedNode := ExpectScheduled(ctx, env.Client, pinned)
+			pairNode := ExpectScheduled(ctx, env.Client, pair)
+			Expect(pinnedNode.Name).ToNot(Equal(pairNode.Name))
+			Expect(pinnedNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeB))
+			Expect(pairNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		},
+			Entry("set a first", false),
+			Entry("set b first", true),
+		)
+		DescribeTable("should split a pod that pins one set itself from a claim only the other set fits (N3b)", func(bFirst bool) {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{reusedInstanceType(bFirst)}
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.ResourceClaimForRequests("pinned-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("pair-claim", test.ExactDeviceRequest("req", "gpu", 2)),
+			)
+			pinned := draPod("gpu", "pinned-claim")
+			pinned.Spec.NodeSelector = map[string]string{fake.DriverModeGPULabelKey: modeB}
+			pair := draPod("gpu", "pair-claim")
+			provisionDRA(pinned, pair)
+
+			pinnedNode := ExpectScheduled(ctx, env.Client, pinned)
+			pairNode := ExpectScheduled(ctx, env.Client, pair)
+			Expect(pinnedNode.Name).ToNot(Equal(pairNode.Name))
+			Expect(pinnedNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeB))
+			Expect(pairNode.Labels).To(HaveKeyWithValue(fake.DriverModeGPULabelKey, modeA))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		},
+			Entry("set a first", false),
+			Entry("set b first", true),
+		)
 	})
 })

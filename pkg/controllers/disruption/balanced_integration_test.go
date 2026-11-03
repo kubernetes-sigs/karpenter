@@ -66,8 +66,8 @@ var _ = Describe("Balanced Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}},
 				ResourceRequirements: corev1.ResourceRequirements{
@@ -136,8 +136,8 @@ var _ = Describe("Balanced Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}},
 				ResourceRequirements: corev1.ResourceRequirements{
@@ -193,8 +193,8 @@ var _ = Describe("Balanced Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}},
 				ResourceRequirements: corev1.ResourceRequirements{
@@ -260,8 +260,8 @@ var _ = Describe("Balanced Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}},
 				ResourceRequirements: corev1.ResourceRequirements{
@@ -320,8 +320,8 @@ var _ = Describe("Balanced Consolidation", func() {
 				Kind:               "ReplicaSet",
 				Name:               rs.Name,
 				UID:                rs.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}
 
 			// Node 1: empty (no pods)
@@ -398,8 +398,8 @@ var _ = Describe("Balanced Consolidation", func() {
 				Kind:               "ReplicaSet",
 				Name:               rs.Name,
 				UID:                rs.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}
 
 			// Use the second cheapest on-demand instance for node A so the pod
@@ -498,8 +498,8 @@ var _ = Describe("Balanced Consolidation", func() {
 				Kind:               "ReplicaSet",
 				Name:               rs.Name,
 				UID:                rs.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}
 
 			// Node A: expensive (mostExpensiveInstance), with a pod that requires
@@ -562,8 +562,8 @@ var _ = Describe("Balanced Consolidation", func() {
 				Kind:               "ReplicaSet",
 				Name:               rs.Name,
 				UID:                rs.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}
 
 			// Pick three on-demand instance types with different prices.
@@ -723,8 +723,8 @@ var _ = Describe("Balanced Consolidation", func() {
 				Kind:               "ReplicaSet",
 				Name:               rs.Name,
 				UID:                rs.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}
 
 			balancedPod := test.Pod(test.PodOptions{

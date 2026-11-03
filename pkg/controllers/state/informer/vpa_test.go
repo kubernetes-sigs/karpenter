@@ -178,7 +178,7 @@ var _ = Describe("VPA Controller", func() {
 				StartupBoost: &vpav1.StartupBoost{
 					CPU: &vpav1.GenericStartupBoost{
 						Type:   vpav1.FactorStartupBoostType,
-						Factor: lo.ToPtr(int32(3)),
+						Factor: new(int32(3)),
 					},
 				},
 			},
@@ -195,7 +195,7 @@ var _ = Describe("VPA Controller", func() {
 				StartupBoost: &vpav1.StartupBoost{
 					CPU: &vpav1.GenericStartupBoost{
 						Type:     vpav1.QuantityStartupBoostType,
-						Quantity: lo.ToPtr(resource.MustParse("1")),
+						Quantity: new(resource.MustParse("1")),
 					},
 				},
 			},
@@ -212,7 +212,7 @@ var _ = Describe("VPA Controller", func() {
 				StartupBoost: &vpav1.StartupBoost{
 					CPU: &vpav1.GenericStartupBoost{
 						Type:   vpav1.FactorStartupBoostType,
-						Factor: lo.ToPtr(int32(2)),
+						Factor: new(int32(2)),
 					},
 				},
 				ResourcePolicy: &vpav1.PodResourcePolicy{
@@ -221,7 +221,7 @@ var _ = Describe("VPA Controller", func() {
 						StartupBoost: &vpav1.StartupBoost{
 							CPU: &vpav1.GenericStartupBoost{
 								Type:   vpav1.FactorStartupBoostType,
-								Factor: lo.ToPtr(int32(5)),
+								Factor: new(int32(5)),
 							},
 						},
 					}},
@@ -407,6 +407,25 @@ var _ = Describe("VPA Controller", func() {
 		pred, ok = store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("800m")))
+	})
+
+	It("should publish a PredictionStored event when a prediction is stored or changes", func() {
+		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
+		ExpectApplied(ctx, env.Client, vpa)
+		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
+			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
+		})
+		ExpectSingletonReconciled(ctx, controller)
+		Expect(recorder.Calls(events.PredictionStored)).To(Equal(1))
+
+		ExpectSingletonReconciled(ctx, controller)
+		Expect(recorder.Calls(events.PredictionStored)).To(Equal(1))
+
+		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
+			"main": {corev1.ResourceCPU: resource.MustParse("800m")},
+		})
+		ExpectSingletonReconciled(ctx, controller)
+		Expect(recorder.Calls(events.PredictionStored)).To(Equal(2))
 	})
 
 	It("should not store a prediction for an unsupported target kind and publish an event", func() {

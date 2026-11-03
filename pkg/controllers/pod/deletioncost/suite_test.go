@@ -23,7 +23,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -90,7 +89,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(coreapis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	// Every spec here exercises the enabled path; the gate-disabled spec builds its own ctx.
 	opts := test.Options(test.OptionsFields{
-		FeatureGates: test.FeatureGates{PodDeletionCostManagement: lo.ToPtr(true)},
+		FeatureGates: test.FeatureGates{PodDeletionCostManagement: new(true)},
 	})
 
 	ctx = options.ToContext(ctx, opts)
@@ -122,8 +121,8 @@ func rsOwnedPod(opts ...test.PodOptions) *corev1.Pod {
 		Kind:               "ReplicaSet",
 		Name:               "test-rs",
 		UID:                types.UID("test-rs-uid"),
-		Controller:         lo.ToPtr(true),
-		BlockOwnerDeletion: lo.ToPtr(true),
+		Controller:         new(true),
+		BlockOwnerDeletion: new(true),
 	}
 	if len(opts) == 0 {
 		opts = []test.PodOptions{{}}

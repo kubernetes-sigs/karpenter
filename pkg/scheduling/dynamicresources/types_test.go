@@ -25,7 +25,6 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
@@ -48,24 +47,24 @@ var _ = Describe("ResourceSlice Interface", func() {
 					Pool: resourcev1.ResourcePool{
 						Name: "test-pool",
 					},
-					NodeName: ptr.To("test-node"),
+					NodeName: new("test-node"),
 					Devices: []resourcev1.Device{
 						{
 							Name: "gpu-0",
 							Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.nvidia.com/model":  {StringValue: ptr.To("H100")},
-								"gpu.nvidia.com/memory": {IntValue: ptr.To(int64(80))},
+								"gpu.nvidia.com/model":  {StringValue: new("H100")},
+								"gpu.nvidia.com/memory": {IntValue: new(int64(80))},
 							},
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.nvidia.com/vram": {Value: resource.MustParse("80Gi")},
 							},
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 						},
 						{
 							Name: "gpu-1",
 							Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.nvidia.com/model":  {StringValue: ptr.To("H100")},
-								"gpu.nvidia.com/memory": {IntValue: ptr.To(int64(80))},
+								"gpu.nvidia.com/model":  {StringValue: new("H100")},
+								"gpu.nvidia.com/memory": {IntValue: new(int64(80))},
 							},
 							AllowMultipleAllocations: nil,
 						},
@@ -92,8 +91,8 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(devices).To(HaveLen(2))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))
 			Expect(devices[0].Attributes).To(HaveLen(2))
-			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(ptr.To("H100")))
-			Expect(devices[0].Attributes["gpu.nvidia.com/memory"].IntValue).To(Equal(ptr.To(int64(80))))
+			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(new("H100")))
+			Expect(devices[0].Attributes["gpu.nvidia.com/memory"].IntValue).To(Equal(new(int64(80))))
 			Expect(devices[0].Capacity).To(HaveLen(1))
 			Expect(devices[0].Capacity["gpu.nvidia.com/vram"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
 			Expect(devices[0].AllowMultipleAllocations).To(BeTrue())
@@ -129,7 +128,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 		})
 
 		It("should return AllNodes from the API object", func() {
-			apiSlice.Spec.AllNodes = ptr.To(true)
+			apiSlice.Spec.AllNodes = new(true)
 			slice = dynamicresources.NewAPIServerSlice(apiSlice)
 			Expect(slice.AllNodes()).To(BeTrue())
 		})
@@ -141,7 +140,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 		})
 
 		It("should return false for AllNodes when explicitly false", func() {
-			apiSlice.Spec.AllNodes = ptr.To(false)
+			apiSlice.Spec.AllNodes = new(false)
 			slice = dynamicresources.NewAPIServerSlice(apiSlice)
 			Expect(slice.AllNodes()).To(BeFalse())
 		})
@@ -211,7 +210,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 					{
 						Name: unique.Make("gpu-0"),
 						Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.nvidia.com/model": {StringValue: ptr.To("A100")},
+							"gpu.nvidia.com/model": {StringValue: new("A100")},
 						},
 						Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 							"gpu.nvidia.com/memory": {Value: resource.MustParse("80Gi")},
@@ -239,7 +238,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 			devices := slice.Devices()
 			Expect(devices).To(HaveLen(1))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))
-			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(ptr.To("A100")))
+			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(new("A100")))
 			Expect(devices[0].Capacity).To(HaveLen(1))
 			Expect(devices[0].Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
 			Expect(devices[0].AllowMultipleAllocations).To(BeTrue())

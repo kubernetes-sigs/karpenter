@@ -183,7 +183,6 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 
 // waitOrTerminate will wait until launched nodeclaims are ready.
 // Once the replacements are ready, it will terminate the candidates.
-// nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// We use the number of commands in the queue as a proxy for cloud provider traffic.
 	// As the number of commands increase, we expect more delays and scale the retry duration accordingly.

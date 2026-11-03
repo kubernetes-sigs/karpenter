@@ -100,9 +100,9 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					Namespace: "default",
 				},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
-					ProvisioningStrategy: lo.ToPtr("buffer.x-k8s.io/active-capacity"),
+					ProvisioningStrategy: new("buffer.x-k8s.io/active-capacity"),
 					PodTemplateRef:       &autoscalingv1beta1.LocalObjectRef{Name: "test-template"},
-					Replicas:             lo.ToPtr(int32(5)),
+					Replicas:             new(int32(5)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -129,7 +129,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "nonexistent"},
-					Replicas:       lo.ToPtr(int32(3)),
+					Replicas:       new(int32(3)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -151,7 +151,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(10)),
+					Replicas: new(int32(10)),
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "my-app"}},
 					Template: v1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "my-app"}},
@@ -181,7 +181,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "Deployment",
 						Name:     "my-app",
 					},
-					Percentage: lo.ToPtr(int32(20)),
+					Percentage: new(int32(20)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, deploy, cb)
@@ -210,7 +210,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "Deployment",
 						Name:     "nonexistent",
 					},
-					Replicas: lo.ToPtr(int32(3)),
+					Replicas: new(int32(3)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -230,7 +230,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.StatefulSetSpec{
-					Replicas: lo.ToPtr(int32(5)),
+					Replicas: new(int32(5)),
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "my-sts"}},
 					Template: v1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "my-sts"}},
@@ -259,7 +259,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "StatefulSet",
 						Name:     "my-sts",
 					},
-					Percentage: lo.ToPtr(int32(20)),
+					Percentage: new(int32(20)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, sts, cb)
@@ -286,7 +286,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "Job",
 						Name:     "my-job",
 					},
-					Percentage: lo.ToPtr(int32(20)),
+					Percentage: new(int32(20)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -305,7 +305,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "Deployment",
 						Name:     "my-deploy",
 					},
-					Percentage: lo.ToPtr(int32(20)),
+					Percentage: new(int32(20)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -347,7 +347,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "Deployment",
 						Name:     "nil-replicas-app",
 					},
-					Percentage: lo.ToPtr(int32(100)),
+					Percentage: new(int32(100)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, deploy, cb)
@@ -379,7 +379,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-fixed", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "pt-fixed"},
-						Replicas:       lo.ToPtr(int32(7)),
+						Replicas:       new(int32(7)),
 					},
 				},
 				int32(7)),
@@ -390,7 +390,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-cap", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "pt-cap"},
-						Replicas:       lo.ToPtr(int32(10)),
+						Replicas:       new(int32(10)),
 						Limits:         autoscalingv1beta1.Limits{v1.ResourceCPU: resource.MustParse("3")},
 					},
 				},
@@ -402,7 +402,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-loose", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "pt-loose"},
-						Replicas:       lo.ToPtr(int32(3)),
+						Replicas:       new(int32(3)),
 						Limits:         autoscalingv1beta1.Limits{v1.ResourceCPU: resource.MustParse("10")},
 					},
 				},
@@ -425,7 +425,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-pct-only", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: deploymentRef("d-pct-only"),
-						Percentage:  lo.ToPtr(int32(20)),
+						Percentage:  new(int32(20)),
 					},
 				},
 				int32(2)),
@@ -435,8 +435,8 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-repl", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: deploymentRef("d-repl"),
-						Replicas:    lo.ToPtr(int32(5)),
-						Percentage:  lo.ToPtr(int32(20)), // 20% of 10 = 2 => max(5, 2) = 5
+						Replicas:    new(int32(5)),
+						Percentage:  new(int32(20)), // 20% of 10 = 2 => max(5, 2) = 5
 					},
 				},
 				int32(5)),
@@ -446,8 +446,8 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-pct", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: deploymentRef("d-pct"),
-						Replicas:    lo.ToPtr(int32(5)),
-						Percentage:  lo.ToPtr(int32(80)), // 80% of 10 = 8 => max(5, 8) = 8
+						Replicas:    new(int32(5)),
+						Percentage:  new(int32(80)), // 80% of 10 = 8 => max(5, 8) = 8
 					},
 				},
 				int32(8)),
@@ -458,8 +458,8 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-scap", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: deploymentRef("d-cap"),
-						Replicas:    lo.ToPtr(int32(5)),
-						Percentage:  lo.ToPtr(int32(80)), // max(5, 8) = 8
+						Replicas:    new(int32(5)),
+						Percentage:  new(int32(80)), // max(5, 8) = 8
 						Limits:      autoscalingv1beta1.Limits{v1.ResourceCPU: resource.MustParse("4")},
 					},
 				},
@@ -471,7 +471,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "cb-min", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: deploymentRef("d-min"),
-						Percentage:  lo.ToPtr(int32(10)),
+						Percentage:  new(int32(10)),
 					},
 				},
 				int32(1)),
@@ -496,7 +496,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "watched-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -540,7 +540,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "trig-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "trig-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -558,7 +558,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "no-trig-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "does-not-exist"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -586,7 +586,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "del-trig-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "del-trig-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -617,7 +617,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "cache-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "cache-template"},
-					Replicas:       lo.ToPtr(int32(3)),
+					Replicas:       new(int32(3)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -640,7 +640,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "gone-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "gone-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -669,7 +669,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "del-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "del-template"},
-					Replicas:       lo.ToPtr(int32(3)),
+					Replicas:       new(int32(3)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
@@ -691,7 +691,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: "no-ref-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -711,7 +711,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "unrelated", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "different-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -727,7 +727,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "matching-buffer", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "map-template-1"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -745,14 +745,14 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "shared-a", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "shared-template"},
-					Replicas:       lo.ToPtr(int32(1)),
+					Replicas:       new(int32(1)),
 				},
 			}
 			cb2 := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: "shared-b", Namespace: "default"},
 				Spec: autoscalingv1beta1.CapacityBufferSpec{
 					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "shared-template"},
-					Replicas:       lo.ToPtr(int32(2)),
+					Replicas:       new(int32(2)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb1, cb2)
@@ -774,7 +774,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 						Kind:     "Deployment",
 						Name:     "some-deploy",
 					},
-					Percentage: lo.ToPtr(int32(10)),
+					Percentage: new(int32(10)),
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
@@ -789,32 +789,32 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			buffers := []*autoscalingv1beta1.CapacityBuffer{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "match", Namespace: "default"},
-					Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("app"), Replicas: lo.ToPtr(int32(1))},
+					Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("app"), Replicas: new(int32(1))},
 				},
 				{
 					// An empty APIGroup defaults to apps when resolved.
 					ObjectMeta: metav1.ObjectMeta{Name: "match-default-group", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: &autoscalingv1beta1.ScalableRef{Kind: autoscalingv1beta1.KindDeployment, Name: "app"},
-						Replicas:    lo.ToPtr(int32(1)),
+						Replicas:    new(int32(1)),
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "other-kind", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: autoscalingv1beta1.KindStatefulSet, Name: "app"},
-						Replicas:    lo.ToPtr(int32(1)),
+						Replicas:    new(int32(1)),
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "other-name", Namespace: "default"},
-					Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("other"), Replicas: lo.ToPtr(int32(1))},
+					Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("other"), Replicas: new(int32(1))},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-template", Namespace: "default"},
 					Spec: autoscalingv1beta1.CapacityBufferSpec{
 						PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "app"},
-						Replicas:       lo.ToPtr(int32(1)),
+						Replicas:       new(int32(1)),
 					},
 				},
 			}
@@ -829,7 +829,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectApplied(ctx, env.Client, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "scalable-other-ns"}})
 			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: "elsewhere", Namespace: "scalable-other-ns"},
-				Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("app"), Replicas: lo.ToPtr(int32(1))},
+				Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("app"), Replicas: new(int32(1))},
 			}
 			ExpectApplied(ctx, env.Client, cb)
 			deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"}}

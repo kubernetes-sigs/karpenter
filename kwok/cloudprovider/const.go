@@ -16,8 +16,20 @@ limitations under the License.
 
 package kwok
 
+import "sigs.k8s.io/karpenter/pkg/cloudprovider"
+
 const (
 	kwokProviderPrefix = "kwok://"
+
+	// CapacityTypeOnDemandAlt is an example of a provider-defined capacity type in the on-demand class: on-demand
+	// capacity bought another way, at a discount. A NodePool only launches it when it requires it.
+	CapacityTypeOnDemandAlt = "on-demand-alt"
+	onDemandAltDiscount     = 0.1
 )
+
+// CapacityTypes registers on-demand-alt in the on-demand class.
+var CapacityTypes = cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{
+	CapacityTypeOnDemandAlt: cloudprovider.CapacityTypeClassOnDemand,
+})
 
 var kwokPartitions = []string{"a"}

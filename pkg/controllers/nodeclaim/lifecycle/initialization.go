@@ -51,8 +51,6 @@ type Initialization struct {
 // c) all extended resources have been registered
 // d) all expected DRA drivers have published a complete resource pool (when DRA is enabled)
 // This method handles both nil nodepools and nodes without extended resources gracefully.
-//
-//nolint:gocyclo
 func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
@@ -217,7 +215,7 @@ func DRADriversPublished(nodeClaim *v1.NodeClaim, slices []resourcev1.ResourceSl
 		return "", true
 	}
 	driversWithCompletePool := completePoolDrivers(slices)
-	for _, driver := range strings.Split(annotation, ",") {
+	for driver := range strings.SplitSeq(annotation, ",") {
 		driver = strings.TrimSpace(driver)
 		if driver == "" {
 			continue

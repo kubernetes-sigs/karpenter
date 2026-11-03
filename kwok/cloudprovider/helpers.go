@@ -149,6 +149,7 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 	for i := range opts.Offerings {
 		opts.Offerings[i].Available = true
 	}
+	opts.Offerings = append(opts.Offerings, onDemandAltOfferings(opts.Offerings)...)
 
 	return opts
 }
@@ -211,4 +212,23 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 			},
 		},
 	}
+}
+
+// onDemandAltOfferings returns an on-demand-alt offering, at a discount, for each on-demand offering.
+func onDemandAltOfferings(offerings KWOKOfferings) KWOKOfferings {
+	return lo.FilterMap(offerings, func(o KWOKOffering, _ int) (KWOKOffering, bool) {
+		ct, ok := lo.Find(o.Requirements, func(req corev1.NodeSelectorRequirement) bool { return req.Key == v1.CapacityTypeLabelKey })
+		if !ok || !lo.Contains(ct.Values, v1.CapacityTypeOnDemand) {
+			return KWOKOffering{}, false
+		}
+		return KWOKOffering{
+			Offering: cloudprovider.Offering{Price: o.Price * (1 - onDemandAltDiscount), Available: o.Available},
+			Requirements: lo.Map(o.Requirements, func(req corev1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+				if req.Key == v1.CapacityTypeLabelKey {
+					return corev1.NodeSelectorRequirement{Key: req.Key, Operator: corev1.NodeSelectorOpIn, Values: []string{CapacityTypeOnDemandAlt}}
+				}
+				return *req.DeepCopy()
+			}),
+		}, true
+	})
 }

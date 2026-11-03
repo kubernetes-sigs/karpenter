@@ -108,7 +108,7 @@ func benchStateNodes(count int, nodePools []*v1.NodePool) []*state.StateNode {
 		corev1.ResourcePods:   resource.MustParse("110"),
 	}
 	sn := make([]*state.StateNode, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		nc := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{v1.NodePoolLabelKey: nodePools[i%len(nodePools)].Name},
@@ -134,7 +134,7 @@ func benchStateNodes(count int, nodePools []*v1.NodePool) []*state.StateNode {
 // introduced with https://github.com/kubernetes-sigs/karpenter/pull/2975
 func benchDaemonSetPods(count int) []*corev1.Pod {
 	pods := make([]*corev1.Pod, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		// keeps every pod compatible with the existing fake-it-0 nodes
 		instanceTypes := []string{"fake-it-0"}
 		if i > 0 {

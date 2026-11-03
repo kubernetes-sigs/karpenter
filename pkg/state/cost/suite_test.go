@@ -19,6 +19,7 @@ package cost_test
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -446,6 +447,46 @@ var _ = Describe("ClusterCost", func() {
 		})
 	})
 
+	Context("NodeClaimPriceProvider", func() {
+		const priceAnnotation = "karpenter.test.sh/launch-price"
+		BeforeEach(func() {
+			cloudprovider.SetNodeClaimPriceProvider(annotationPricer{key: priceAnnotation})
+			DeferCleanup(test.ResetNodeClaimPriceProvider)
+		})
+		It("should price NodeClaims with the pricer", func() {
+			annotated := createTestNodeClaim(testNodePool, testInstanceType.Name, onDemandOffering.CapacityType(), onDemandOffering.Zone())
+			annotated.Annotations = map[string]string{priceAnnotation: "0.75"}
+			unannotated := createTestNodeClaim(testNodePool, testInstanceType.Name, onDemandOffering.CapacityType(), onDemandOffering.Zone())
+			unannotated.Name = "test-nodeclaim-unannotated"
+
+			Expect(clusterCost.UpdateNodeClaim(ctx, annotated)).To(Succeed())
+			Expect(clusterCost.UpdateNodeClaim(ctx, unannotated)).To(Succeed())
+			Expect(clusterCost.GetNodepoolCost(testNodePool)).To(BeNumerically("~", 3.75, 0.001)) // 0.75 + 3.00
+		})
+		It("should reprice NodeClaims with the pricer when offerings change", func() {
+			annotated := createTestNodeClaim(testNodePool, testInstanceType.Name, onDemandOffering.CapacityType(), onDemandOffering.Zone())
+			annotated.Annotations = map[string]string{priceAnnotation: "0.75"}
+			unannotated := createTestNodeClaim(testNodePool, testInstanceType.Name, onDemandOffering.CapacityType(), onDemandOffering.Zone())
+			unannotated.Name = "test-nodeclaim-unannotated"
+			Expect(clusterCost.UpdateNodeClaim(ctx, annotated)).To(Succeed())
+			Expect(clusterCost.UpdateNodeClaim(ctx, unannotated)).To(Succeed())
+
+			onDemandOffering.Price = 4.00
+			clusterCost.UpdateOfferings(ctx, testNodePool, cloudProvider.InstanceTypes)
+			Expect(clusterCost.GetNodepoolCost(testNodePool)).To(BeNumerically("~", 4.75, 0.001)) // 0.75 + 4.00
+		})
+		It("should remove a NodeClaim's pricer price when it's deleted", func() {
+			annotated := createTestNodeClaim(testNodePool, testInstanceType.Name, onDemandOffering.CapacityType(), onDemandOffering.Zone())
+			annotated.Annotations = map[string]string{priceAnnotation: "0.75"}
+			unannotated := createTestNodeClaim(testNodePool, testInstanceType.Name, onDemandOffering.CapacityType(), onDemandOffering.Zone())
+			unannotated.Name = "test-nodeclaim-unannotated"
+			Expect(clusterCost.UpdateNodeClaim(ctx, annotated)).To(Succeed())
+			Expect(clusterCost.UpdateNodeClaim(ctx, unannotated)).To(Succeed())
+
+			Expect(clusterCost.DeleteNodeClaim(ctx, client.ObjectKeyFromObject(annotated))).To(Succeed())
+			Expect(clusterCost.GetNodepoolCost(testNodePool)).To(BeNumerically("~", 3.00, 0.001))
+		})
+	})
 	Context("Concurrency", func() {
 		It("should be thread-safe with concurrent UpdateNodeClaim calls", func() {
 			GinkgoHelper()
@@ -677,4 +718,17 @@ func RunDeleteNodeClaimTest(clusterCost *cost.ClusterCost, nodeClaim *v1.NodeCla
 		"NodePool cost should not increase when removing nodeclaims")
 	Expect(finalClusterCost).To(BeNumerically("<=", initialClusterCost),
 		"Cluster cost should not increase when removing nodeclaims")
+}
+
+// annotationPricer prices a NodeClaim by a price annotation, and otherwise by its offering.
+type annotationPricer struct {
+	cloudprovider.DefaultNodeClaimPriceProvider
+	key string
+}
+
+func (p annotationPricer) NodeClaimPrice(ctx context.Context, nodeClaim *v1.NodeClaim, instanceType *cloudprovider.InstanceType) (float64, bool) {
+	if price, err := strconv.ParseFloat(nodeClaim.Annotations[p.key], 64); err == nil {
+		return price, true
+	}
+	return p.DefaultNodeClaimPriceProvider.NodeClaimPrice(ctx, nodeClaim, instanceType)
 }

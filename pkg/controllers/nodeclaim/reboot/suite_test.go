@@ -189,7 +189,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 		})
 
 		It("issues a committed reboot even when node repair is disabled", func() {
-			repairDisabled := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+			repairDisabled := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(false)}}))
 			ExpectApplied(repairDisabled, env.Client, nodePool, nodeClaim, node)
 			stepPastDrainFloor()
 			ExpectObjectReconciled(repairDisabled, env.Client, rebootController, nodeClaim)
@@ -299,6 +299,33 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
 		})
 
+		It("doesn't drain DaemonSet pods", func() {
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "10m"})
+			ds := test.DaemonSet()
+			ExpectApplied(ctx, env.Client, ds)
+			dsPod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               ds.Name,
+				UID:                ds.UID,
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
+			}}}})
+			pod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, dsPod, pod)
+
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(queue.Has(pod)).To(BeTrue())
+			Expect(queue.Has(dsPod)).To(BeFalse())
+
+			ExpectDeleted(ctx, env.Client, pod)
+			stepPastDrainFloor()
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(cloudProvider.RebootCalls).To(HaveLen(1))
+			Expect(queue.Has(dsPod)).To(BeFalse())
+			Expect(ExpectExists(ctx, env.Client, dsPod).DeletionTimestamp.IsZero()).To(BeTrue())
+		})
+
 		It("leaves pods that can't be evicted on the node when a bounded drain expires", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "1m"})
 			labels := map[string]string{test.RandomName(): test.RandomName()}
@@ -314,7 +341,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 				Phase:                         corev1.PodRunning,
 				TerminationGracePeriodSeconds: lo.ToPtr[int64](30),
 			})
-			pdb := test.PodDisruptionBudget(test.PDBOptions{Labels: labels, MinAvailable: lo.ToPtr(intstr.FromInt32(1))})
+			pdb := test.PodDisruptionBudget(test.PDBOptions{Labels: labels, MinAvailable: new(intstr.FromInt32(1))})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pdbBlocked, doNotDisrupt, pdb)
 			pods := []*corev1.Pod{pdbBlocked, doNotDisrupt}
 

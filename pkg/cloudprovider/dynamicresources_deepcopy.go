@@ -18,23 +18,26 @@ package cloudprovider
 
 import (
 	resourcev1 "k8s.io/api/resource/v1"
+
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 func (in *DynamicResources) DeepCopyInto(out *DynamicResources) {
 	*out = *in
+	if in.Requirements != nil {
+		out.Requirements = make(scheduling.Requirements, len(in.Requirements))
+		for key, val := range in.Requirements {
+			if val != nil {
+				out.Requirements[key] = new(scheduling.Requirement)
+				val.DeepCopyInto(out.Requirements[key])
+			}
+		}
+	}
 	if in.ResourceSliceTemplates != nil {
 		out.ResourceSliceTemplates = make([]*ResourceSliceTemplate, len(in.ResourceSliceTemplates))
 		for i := range in.ResourceSliceTemplates {
 			if in.ResourceSliceTemplates[i] != nil {
 				out.ResourceSliceTemplates[i] = in.ResourceSliceTemplates[i].DeepCopy()
-			}
-		}
-	}
-	if in.AttributeBindings != nil {
-		out.AttributeBindings = make([]*AttributeBinding, len(in.AttributeBindings))
-		for i := range in.AttributeBindings {
-			if in.AttributeBindings[i] != nil {
-				out.AttributeBindings[i] = in.AttributeBindings[i].DeepCopy()
 			}
 		}
 	}

@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -42,6 +43,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	clientmetrics "k8s.io/client-go/tools/metrics"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -90,12 +92,36 @@ var (
 	)
 )
 
+// client-go request dimensions. These match the dimensions operatorpkg's
+// LatencyAdapter emits, derived from the request's URL template.
+var (
+	clientVerb        = opmetrics.Label{Name: "verb", Help: "The action of the Kubernetes API request, e.g. `GET`, `LIST`, `CREATE`, `UPDATE`."}
+	clientGroup       = opmetrics.Label{Name: "group", Help: "The API group of the request's target resource."}
+	clientVersion     = opmetrics.Label{Name: "version", Help: "The API version of the request's target resource."}
+	clientKind        = opmetrics.Label{Name: "kind", Help: "The kind of the request's target resource."}
+	clientSubresource = opmetrics.Label{Name: "subresource", Help: "The subresource of the request, if any."}
+)
+
+var (
+	ClientRateLimiterDuration = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Name:    "client_go_rate_limiter_duration_seconds",
+			Help:    "Time spent waiting on the client-side rate limiter before sending a Kubernetes API request. Broken down by verb, group, version, kind, and subresource.",
+			Buckets: []float64{0.005, 0.025, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0},
+		},
+		[]opmetrics.Label{clientVerb, clientGroup, clientVersion, clientKind, clientSubresource},
+		opmetrics.Alpha,
+	)
+)
+
 // Version is the karpenter app version injected during compilation
 // when using the Makefile
 var Version = "unspecified"
 
 func init() {
 	opmetrics.RegisterClientMetrics(crmetrics.Registry)
+	clientmetrics.RateLimiterLatency = &opmetrics.LatencyAdapter{Metric: ClientRateLimiterDuration}
 
 	BuildInfo.Set(1, map[string]string{
 		"version":   Version,
@@ -138,8 +164,8 @@ func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
 func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	opts := option.Resolve(o...)
 
-	// Root Context
-	ctx := context.Background()
+	// Root Context, canceled on SIGTERM/SIGINT so the manager stops and releases the leader lease
+	ctx := ctrl.SetupSignalHandler()
 
 	// Options
 	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
@@ -191,6 +217,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		LeaderElectionNamespace:       options.FromContext(ctx).LeaderElectionNamespace,
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,
+		GracefulShutdownTimeout:       new(15 * time.Second), // under the default 30s pod grace period, so the lease is released even if a runnable is slow to stop
 		LeaderElectionConfig:          leaderConfig,
 		LeaderElectionLabels:          opts.LeaderElectionLabels,
 		Metrics: server.Options{

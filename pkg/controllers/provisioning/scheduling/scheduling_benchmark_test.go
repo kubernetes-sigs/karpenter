@@ -279,7 +279,7 @@ func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
 	labels := map[string]string{
 		"app": "nginx",
 	}
-	for i := 0; i < count; i++ {
+	for range count {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -303,7 +303,7 @@ func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
 }
 func makePodAffinityPods(count int, key string) []*corev1.Pod {
 	var pods []*corev1.Pod
-	for i := 0; i < count; i++ {
+	for range count {
 		// We use self-affinity here because using affinity that relies on other pod
 		// domains doens't guarantee that all pods can schedule. In the case where you are not
 		// using self-affinity and the domain doesn't exist, scheduling will fail for all pods with
@@ -333,7 +333,7 @@ func makePodAffinityPods(count int, key string) []*corev1.Pod {
 
 func makeTopologySpreadPods(count int, key string) []*corev1.Pod {
 	var pods []*corev1.Pod
-	for i := 0; i < count; i++ {
+	for range count {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -362,7 +362,7 @@ func makeTopologySpreadPods(count int, key string) []*corev1.Pod {
 
 func makeGenericPods(count int) []*corev1.Pod {
 	var pods []*corev1.Pod
-	for i := 0; i < count; i++ {
+	for range count {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{

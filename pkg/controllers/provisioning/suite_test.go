@@ -227,7 +227,7 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 	It("should wait for the prediction store to hydrate before provisioning when the PredictionEnabled feature gate is enabled", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: new(true)}}))
 		pod := test.UnschedulablePod()
 		ExpectApplied(ctx, env.Client, test.NodePool(), pod)
 		prov.Trigger(pod.UID)

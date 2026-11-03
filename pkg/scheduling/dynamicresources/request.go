@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -125,8 +124,6 @@ type ClaimData struct {
 // ValidateClaimRequest parses a ResourceClaim, resolves its DeviceClass references, and builds
 // the constraint and request metadata needed for allocation. Returns an error if any request
 // is invalid (missing class, unsupported selector/constraint type, etc.).
-//
-//nolint:gocyclo
 func ValidateClaimRequest(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -299,7 +296,6 @@ func validateFirstAvailableRequest(
 	return parent, nil
 }
 
-//nolint:gocyclo
 func buildRequestData(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -450,7 +446,7 @@ func DeviceMatchesSelectors(
 			Driver:                   deviceID.Driver.Value(),
 			Attributes:               device.Attributes,
 			Capacity:                 device.Capacity,
-			AllowMultipleAllocations: lo.ToPtr(device.AllowMultipleAllocations),
+			AllowMultipleAllocations: new(device.AllowMultipleAllocations),
 		})
 		if err != nil {
 			return false, fmt.Errorf("CEL expression %q evaluation failed: %w", s.CEL.Expression, err)

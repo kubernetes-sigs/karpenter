@@ -59,7 +59,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 	}
 }
 
-//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	// If the pod doesn't have a node name, we don't know which node this pod refers to.
 	// or if this is a daemonset

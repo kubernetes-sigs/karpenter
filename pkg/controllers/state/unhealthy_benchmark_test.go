@@ -128,7 +128,7 @@ func benchmarkCluster(ctx context.Context, b *testing.B, provider *fake.CloudPro
 func benchmarkContext() context.Context {
 	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(io.Discard), zapcore.InfoLevel)
 	ctx := log.IntoContext(context.Background(), zapr.NewLogger(zap.New(core)))
-	return options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+	return options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}}))
 }
 
 func benchmarkMatcher(ctx context.Context, b *testing.B) (*fake.CloudProvider, *health.RepairPolicyMatcher) {

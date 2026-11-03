@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
-	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -59,10 +58,10 @@ func ReadyBuffer(name string, replicas int32) *autoscalingv1beta1.CapacityBuffer
 		},
 		Spec: autoscalingv1beta1.CapacityBufferSpec{
 			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
-			Replicas:       lo.ToPtr(replicas),
+			Replicas:       new(replicas),
 		},
 		Status: autoscalingv1beta1.CapacityBufferStatus{
-			Replicas:       lo.ToPtr(replicas),
+			Replicas:       new(replicas),
 			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
 			Conditions: []metav1.Condition{{
 				Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
@@ -85,10 +84,10 @@ func ReadyBufferInNamespace(name, namespace string, replicas int32) *autoscaling
 		},
 		Spec: autoscalingv1beta1.CapacityBufferSpec{
 			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
-			Replicas:       lo.ToPtr(replicas),
+			Replicas:       new(replicas),
 		},
 		Status: autoscalingv1beta1.CapacityBufferStatus{
-			Replicas:       lo.ToPtr(replicas),
+			Replicas:       new(replicas),
 			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
 			Conditions: []metav1.Condition{{
 				Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
@@ -115,10 +114,10 @@ func ReadyScalableRefBuffer(name string, replicas int32) *autoscalingv1beta1.Cap
 				Kind:     "Deployment",
 				Name:     name + "-deploy",
 			},
-			Percentage: lo.ToPtr(int32(20)),
+			Percentage: new(int32(20)),
 		},
 		Status: autoscalingv1beta1.CapacityBufferStatus{
-			Replicas: lo.ToPtr(replicas),
+			Replicas: new(replicas),
 			Conditions: []metav1.Condition{{
 				Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
 				Status: metav1.ConditionTrue,

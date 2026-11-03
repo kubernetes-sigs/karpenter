@@ -222,9 +222,9 @@ var _ = Describe("listBuffersReadyForProvisioning", func() {
 	It("should exclude buffers with neither PodTemplateRef nor ScalableRef", func() {
 		cb := &autoscalingv1beta1.CapacityBuffer{
 			ObjectMeta: metav1.ObjectMeta{Name: "orphan", Namespace: "default"},
-			Spec:       autoscalingv1beta1.CapacityBufferSpec{Replicas: lo.ToPtr(int32(2))},
+			Spec:       autoscalingv1beta1.CapacityBufferSpec{Replicas: new(int32(2))},
 			Status: autoscalingv1beta1.CapacityBufferStatus{
-				Replicas: lo.ToPtr(int32(2)),
+				Replicas: new(int32(2)),
 				Conditions: []metav1.Condition{{
 					Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
 					Status: metav1.ConditionTrue,

@@ -59,8 +59,6 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-//
-//nolint:gocyclo
 func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if e.IsConsolidated() {
 		return []Command{}, nil

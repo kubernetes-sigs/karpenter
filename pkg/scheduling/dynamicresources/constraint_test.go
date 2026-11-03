@@ -23,7 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
@@ -47,7 +46,7 @@ var _ = Describe("Constraints", func() {
 
 		deviceWithZone := func(name, zone string) cloudprovider.Device {
 			return device(name, map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-				attrZone: {StringValue: ptr.To(zone)},
+				attrZone: {StringValue: new(zone)},
 			})
 		}
 
@@ -402,7 +401,7 @@ var _ = Describe("Constraints", func() {
 		Describe("LookupAttribute", func() {
 			It("should find a fully qualified attribute", func() {
 				d := device("dev-a", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"nvidia.com/model": {StringValue: ptr.To("H100")},
+					"nvidia.com/model": {StringValue: new("H100")},
 				})
 				attr := dynamicresources.LookupAttribute(d, deviceID("nvidia.com", "pool", "dev"), "nvidia.com/model")
 				Expect(attr).ToNot(BeNil())
@@ -411,7 +410,7 @@ var _ = Describe("Constraints", func() {
 
 			It("should fall back to driver-qualified lookup", func() {
 				d := device("dev-a", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"model": {StringValue: ptr.To("H100")},
+					"model": {StringValue: new("H100")},
 				})
 				attr := dynamicresources.LookupAttribute(d, deviceID("nvidia.com", "pool", "dev"), "nvidia.com/model")
 				Expect(attr).ToNot(BeNil())
@@ -426,7 +425,7 @@ var _ = Describe("Constraints", func() {
 
 			It("should return nil when attribute name has no domain separator", func() {
 				d := device("dev-a", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"model": {StringValue: ptr.To("H100")},
+					"model": {StringValue: new("H100")},
 				})
 				// "memory" has no "/" — no fallback attempted, and direct lookup misses.
 				attr := dynamicresources.LookupAttribute(d, deviceID("nvidia.com", "pool", "dev"), "memory")
@@ -435,7 +434,7 @@ var _ = Describe("Constraints", func() {
 
 			It("should not fall back when domain prefix does not match driver", func() {
 				d := device("dev-a", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"model": {StringValue: ptr.To("H100")},
+					"model": {StringValue: new("H100")},
 				})
 				// Domain "other.com" != driver "nvidia.com" — fallback skipped.
 				attr := dynamicresources.LookupAttribute(d, deviceID("nvidia.com", "pool", "dev"), "other.com/model")
@@ -446,52 +445,52 @@ var _ = Describe("Constraints", func() {
 		Describe("AttributeValuesEqual", func() {
 			It("should compare string values", func() {
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{StringValue: ptr.To("a")},
-					&resourcev1.DeviceAttribute{StringValue: ptr.To("a")},
+					&resourcev1.DeviceAttribute{StringValue: new("a")},
+					&resourcev1.DeviceAttribute{StringValue: new("a")},
 				)).To(BeTrue())
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{StringValue: ptr.To("a")},
-					&resourcev1.DeviceAttribute{StringValue: ptr.To("b")},
+					&resourcev1.DeviceAttribute{StringValue: new("a")},
+					&resourcev1.DeviceAttribute{StringValue: new("b")},
 				)).To(BeFalse())
 			})
 
 			It("should compare int values", func() {
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{IntValue: ptr.To(int64(42))},
-					&resourcev1.DeviceAttribute{IntValue: ptr.To(int64(42))},
+					&resourcev1.DeviceAttribute{IntValue: new(int64(42))},
+					&resourcev1.DeviceAttribute{IntValue: new(int64(42))},
 				)).To(BeTrue())
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{IntValue: ptr.To(int64(42))},
-					&resourcev1.DeviceAttribute{IntValue: ptr.To(int64(43))},
+					&resourcev1.DeviceAttribute{IntValue: new(int64(42))},
+					&resourcev1.DeviceAttribute{IntValue: new(int64(43))},
 				)).To(BeFalse())
 			})
 
 			It("should compare bool values", func() {
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{BoolValue: ptr.To(true)},
-					&resourcev1.DeviceAttribute{BoolValue: ptr.To(true)},
+					&resourcev1.DeviceAttribute{BoolValue: new(true)},
+					&resourcev1.DeviceAttribute{BoolValue: new(true)},
 				)).To(BeTrue())
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{BoolValue: ptr.To(true)},
-					&resourcev1.DeviceAttribute{BoolValue: ptr.To(false)},
+					&resourcev1.DeviceAttribute{BoolValue: new(true)},
+					&resourcev1.DeviceAttribute{BoolValue: new(false)},
 				)).To(BeFalse())
 			})
 
 			It("should compare version values", func() {
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{VersionValue: ptr.To("1.2.3")},
-					&resourcev1.DeviceAttribute{VersionValue: ptr.To("1.2.3")},
+					&resourcev1.DeviceAttribute{VersionValue: new("1.2.3")},
+					&resourcev1.DeviceAttribute{VersionValue: new("1.2.3")},
 				)).To(BeTrue())
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{VersionValue: ptr.To("1.2.3")},
-					&resourcev1.DeviceAttribute{VersionValue: ptr.To("1.2.4")},
+					&resourcev1.DeviceAttribute{VersionValue: new("1.2.3")},
+					&resourcev1.DeviceAttribute{VersionValue: new("1.2.4")},
 				)).To(BeFalse())
 			})
 
 			It("should return false for mismatched types", func() {
 				Expect(dynamicresources.AttributeValuesEqual(
-					&resourcev1.DeviceAttribute{StringValue: ptr.To("a")},
-					&resourcev1.DeviceAttribute{IntValue: ptr.To(int64(1))},
+					&resourcev1.DeviceAttribute{StringValue: new("a")},
+					&resourcev1.DeviceAttribute{IntValue: new(int64(1))},
 				)).To(BeFalse())
 			})
 

@@ -23,7 +23,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -305,7 +304,7 @@ var _ = Describe("IsControlledBy", func() {
 	rsRef := func(controller bool) metav1.OwnerReference {
 		return metav1.OwnerReference{
 			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "rs", UID: "rs-uid",
-			Controller: lo.ToPtr(controller),
+			Controller: new(controller),
 		}
 	}
 
@@ -335,7 +334,7 @@ var _ = Describe("IsControlledBy", func() {
 	It("should return false when the controller is a different kind", func() {
 		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
 			APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: "sts-uid",
-			Controller: lo.ToPtr(true),
+			Controller: new(true),
 		}), replicaSet)).To(BeFalse())
 	})
 
@@ -344,7 +343,7 @@ var _ = Describe("IsControlledBy", func() {
 	It("should return false when the kind matches under a different APIVersion", func() {
 		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
 			APIVersion: "example.com/v1", Kind: "ReplicaSet", Name: "rs", UID: "rs-uid",
-			Controller: lo.ToPtr(true),
+			Controller: new(true),
 		}), replicaSet)).To(BeFalse())
 	})
 
@@ -356,11 +355,11 @@ var _ = Describe("IsControlledBy", func() {
 		}
 		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
 			APIVersion: "batch/v1", Kind: "Job", Name: "job", UID: "job-uid",
-			Controller: lo.ToPtr(true),
+			Controller: new(true),
 		}), gvks)).To(BeTrue())
 		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
 			APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: "sts-uid",
-			Controller: lo.ToPtr(true),
+			Controller: new(true),
 		}), gvks)).To(BeFalse())
 	})
 

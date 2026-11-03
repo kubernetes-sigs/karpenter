@@ -122,9 +122,6 @@ func makePod(name string, deletionCost string) *corev1.Pod {
 	return p
 }
 
-// int32Ptr returns a pointer to an int32 value.
-func int32Ptr(v int32) *int32 { return &v }
-
 // candidateNodes extracts the StateNode references from candidates for use as
 // the allNodes parameter to computeNodePoolTotals in tests.
 func candidateNodes(candidates []*Candidate) []*state.StateNode {
@@ -266,7 +263,7 @@ var _ = Describe("Balanced Scoring", func() {
 
 		It("should reject when candidate NodePool is missing from totals map", func() {
 			ctx := context.Background()
-			np := makeBalancedNodePool("pool-missing", int32Ptr(2))
+			np := makeBalancedNodePool("pool-missing", new(int32(2)))
 			it := makeInstanceType("m7i.xlarge", 4.84)
 			pod := makePod("pod", "")
 			candidates := []*Candidate{
@@ -285,7 +282,7 @@ var _ = Describe("Balanced Scoring", func() {
 
 		It("should approve a delete command for a single Balanced NodePool", func() {
 			ctx := context.Background()
-			np := makeBalancedNodePool("pool-single", int32Ptr(2))
+			np := makeBalancedNodePool("pool-single", new(int32(2)))
 			it := makeInstanceType("m7i.xlarge", 4.84)
 			pod := makePod("pod", "")
 
@@ -312,7 +309,7 @@ var _ = Describe("Balanced Scoring", func() {
 
 		It("should attribute savings proportionally in cross-NodePool scenarios", func() {
 			ctx := context.Background()
-			balancedNP := makeBalancedNodePool("pool-balanced", int32Ptr(2))
+			balancedNP := makeBalancedNodePool("pool-balanced", new(int32(2)))
 			emptyNP := makeNodePool("pool-empty", v1.ConsolidationPolicyWhenEmptyOrUnderutilized)
 			it := makeInstanceType("m7i.xlarge", 4.84)
 			pod := makePod("pod", "")
@@ -645,7 +642,7 @@ var _ = Describe("Balanced Scoring", func() {
 		It("should emit approved event for approved pool results", func() {
 			ctx := context.Background()
 			rec := &mockRecorder{}
-			np := makeBalancedNodePool("pool-emit-a", int32Ptr(2))
+			np := makeBalancedNodePool("pool-emit-a", new(int32(2)))
 			it := makeInstanceType("m7i.xlarge", 4.84)
 			pod := makePod("pod", "")
 			candidates := []*Candidate{
@@ -664,7 +661,7 @@ var _ = Describe("Balanced Scoring", func() {
 		It("should not emit events for rejected pool results", func() {
 			ctx := context.Background()
 			rec := &mockRecorder{}
-			np := makeBalancedNodePool("pool-emit-b", int32Ptr(1))
+			np := makeBalancedNodePool("pool-emit-b", new(int32(1)))
 			it := makeInstanceType("m7i.xlarge", 4.84)
 			pod := makePod("pod", "1000")
 			candidates := []*Candidate{

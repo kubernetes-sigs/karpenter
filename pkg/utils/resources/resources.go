@@ -17,6 +17,8 @@ limitations under the License.
 package resources
 
 import (
+	"maps"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	resourcehelper "k8s.io/component-helpers/resource"
@@ -150,9 +152,7 @@ func MinResources(resources ...v1.ResourceList) v1.ResourceList {
 	// Start with a copy of the first list's keys, but just copy the Quantity values
 	// Safe since we never mutate them
 	resourceList := make(v1.ResourceList, len(resources[0]))
-	for k, v := range resources[0] {
-		resourceList[k] = v
-	}
+	maps.Copy(resourceList, resources[0])
 
 	for _, rl := range resources[1:] {
 		for resourceName, quantity := range resourceList {

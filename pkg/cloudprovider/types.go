@@ -20,11 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unique"
 
@@ -183,23 +185,30 @@ type InstanceType struct {
 	// CSI driver name. Cloud providers that do not know a driver's limit ahead of time may omit it; limits reported
 	// by a node's CSINode take precedence once the node registers.
 	VolumeAttachmentLimits map[string]int
-	// DynamicResources contains DRA device metadata for this instance type.
-	// Cloud providers that do not support DRA may leave this as the zero value.
-	DynamicResources DynamicResources
+	// DynamicResources lists the DRA device sets an instance of this type may publish, one driver per set. Each set is
+	// published by the offerings compatible with its requirements. Cloud providers that do not support DRA may leave
+	// this empty.
+	DynamicResources []*DynamicResources
+	// AttributeBindings declares devices, from any of the instance type's DynamicResources sets, that will share a
+	// common attribute value at runtime, even though the concrete value is not known at simulation time.
+	AttributeBindings []*AttributeBinding
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead               *InstanceTypeOverhead
 	once                   sync.Once
 	allocatableOfferings   []AllocatableOfferings
 	capacityOverlayApplied bool
+
+	dynamicResourcesOnce      sync.Once
+	allDynamicResources       []*DynamicResources
+	availableDynamicResources []*DynamicResources
+	resolvedAttributeBindings []*AttributeBinding
 }
 
 type InstanceTypes []*InstanceType
 
 // Since we have a no copy the sync.Once field, we need to maintain a custom
 // DeepCopyInto function.
-//
-//nolint:gocyclo
 func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 	out.Name = in.Name
 	if in.Requirements != nil {
@@ -239,11 +248,24 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 	if in.VolumeAttachmentLimits != nil {
 		in, out := &in.VolumeAttachmentLimits, &out.VolumeAttachmentLimits
 		*out = make(map[string]int, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
+		maps.Copy(*out, *in)
+	}
+	if in.DynamicResources != nil {
+		out.DynamicResources = make([]*DynamicResources, len(in.DynamicResources))
+		for i := range in.DynamicResources {
+			if in.DynamicResources[i] != nil {
+				out.DynamicResources[i] = in.DynamicResources[i].DeepCopy()
+			}
 		}
 	}
-	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
+	if in.AttributeBindings != nil {
+		out.AttributeBindings = make([]*AttributeBinding, len(in.AttributeBindings))
+		for i := range in.AttributeBindings {
+			if in.AttributeBindings[i] != nil {
+				out.AttributeBindings[i] = in.AttributeBindings[i].DeepCopy()
+			}
+		}
+	}
 	if in.Overhead != nil {
 		in, out := &in.Overhead, &out.Overhead
 		*out = new(InstanceTypeOverhead)
@@ -387,6 +409,113 @@ func (i *InstanceType) AllocatableOfferingsList() []AllocatableOfferings {
 	return i.allocatableOfferings
 }
 
+// AllDynamicResources returns every DynamicResources set of the instance type, with each set's template pools
+// namespaced by the set's index (see TemplatePoolName). Namespacing keeps the sets' devices, counter budgets, and
+// attribute bindings distinct even when a cloud provider reuses pool and device names across sets. The result is
+// computed once per InstanceType, and the provider's templates aren't modified.
+func (i *InstanceType) AllDynamicResources() []*DynamicResources {
+	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
+	return i.allDynamicResources
+}
+
+// AvailableDynamicResources returns the subset of AllDynamicResources that can be a source of devices: sets with empty
+// requirements, and sets compatible with at least one available offering. The result is computed once, since offering
+// availability is fixed for the lifetime of an InstanceType (see AllocatableOfferingsList, which already caches
+// available offerings under i.once).
+func (i *InstanceType) AvailableDynamicResources() []*DynamicResources {
+	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
+	return i.availableDynamicResources
+}
+
+// ResolvedAttributeBindings returns the instance type's AttributeBindings rewritten to reference the namespaced
+// devices of AllDynamicResources. A bound device that appears in several sets is bound in every one of them, which is
+// sound because a binding must hold in every launch configuration in which the bound devices coexist. Devices that
+// appear in no set are kept unchanged; no template device carries their ID, so they never match. Bindings with fewer
+// than two distinct provider devices are dropped, as BuildAttributeBindings would ignore them before namespacing.
+func (i *InstanceType) ResolvedAttributeBindings() []*AttributeBinding {
+	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
+	return i.resolvedAttributeBindings
+}
+
+func (i *InstanceType) resolveDynamicResources() {
+	// namespaced maps each provider device ID to its namespaced copies, one per set that contains it.
+	namespaced := map[DeviceID][]DeviceID{}
+	i.allDynamicResources = make([]*DynamicResources, 0, len(i.DynamicResources))
+	for setIndex, dr := range i.DynamicResources {
+		set := &DynamicResources{
+			Requirements:           dr.Requirements,
+			ResourceSliceTemplates: make([]*ResourceSliceTemplate, 0, len(dr.ResourceSliceTemplates)),
+		}
+		for _, t := range dr.ResourceSliceTemplates {
+			// A shallow copy is enough: only the pool name changes, and devices and counters are shared read-only.
+			namespacedTemplate := *t
+			namespacedTemplate.Pool = ResourcePool{Name: unique.Make(TemplatePoolName(poolName(t.Pool), setIndex))}
+			set.ResourceSliceTemplates = append(set.ResourceSliceTemplates, &namespacedTemplate)
+			for _, d := range t.Devices {
+				id := DeviceID{Driver: t.Driver, Pool: t.Pool.Name, Device: d.Name}
+				namespaced[id] = append(namespaced[id], DeviceID{Driver: t.Driver, Pool: namespacedTemplate.Pool.Name, Device: d.Name})
+			}
+		}
+		i.allDynamicResources = append(i.allDynamicResources, set)
+	}
+	i.availableDynamicResources = lo.Filter(i.allDynamicResources, func(dr *DynamicResources, _ int) bool {
+		if len(dr.Requirements) == 0 {
+			return true
+		}
+		return lo.ContainsBy(i.Offerings, func(o *Offering) bool {
+			return o.Available && dr.Requirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+		})
+	})
+	i.resolvedAttributeBindings = make([]*AttributeBinding, 0, len(i.AttributeBindings))
+	for _, b := range i.AttributeBindings {
+		// A binding needs at least two distinct provider devices. Check before expanding: a one-device binding on a
+		// device reused across sets would otherwise expand into copies that look like a pair but can never coexist.
+		if len(lo.Uniq(b.Devices)) < 2 {
+			continue
+		}
+		i.resolvedAttributeBindings = append(i.resolvedAttributeBindings, &AttributeBinding{
+			Attribute: b.Attribute,
+			Devices: lo.FlatMap(b.Devices, func(id DeviceID, _ int) []DeviceID {
+				if ids, ok := namespaced[id]; ok {
+					return ids
+				}
+				return []DeviceID{id}
+			}),
+		})
+	}
+}
+
+// poolName returns the pool's name, or "" if it's unset; the zero unique.Handle can't be dereferenced.
+func poolName(pool ResourcePool) string {
+	if pool.Name == (unique.Handle[string]{}) {
+		return ""
+	}
+	return pool.Name.Value()
+}
+
+// templatePoolSetSeparator separates a template pool's name from the index of the DynamicResources set it belongs to.
+// It can't appear in a real pool name, which must consist of DNS subdomains separated by slashes.
+const templatePoolSetSeparator = "~"
+
+// TemplatePoolName returns the namespaced name of a template pool in the DynamicResources set at setIndex.
+func TemplatePoolName(pool string, setIndex int) string {
+	return pool + templatePoolSetSeparator + strconv.Itoa(setIndex)
+}
+
+// ParseTemplatePoolName splits a namespaced template pool name into the provider's pool name and the set index. It
+// returns false if the name isn't namespaced.
+func ParseTemplatePoolName(name string) (pool string, setIndex int, ok bool) {
+	i := strings.LastIndex(name, templatePoolSetSeparator)
+	if i < 0 {
+		return "", 0, false
+	}
+	setIndex, err := strconv.Atoi(name[i+len(templatePoolSetSeparator):])
+	if err != nil || setIndex < 0 {
+		return "", 0, false
+	}
+	return name[:i], setIndex, true
+}
+
 // Allocatable returns the base allocatable resources (no offering overrides applied).
 func (i *InstanceType) Allocatable() corev1.ResourceList {
 	i.once.Do(i.precompute)
@@ -394,23 +523,26 @@ func (i *InstanceType) Allocatable() corev1.ResourceList {
 }
 
 func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(its, func(i, j int) bool {
-		iPrice := math.MaxFloat64
-		jPrice := math.MaxFloat64
-
-		for _, of := range its[i].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
-				iPrice = of.Price
+	// Order instance types so that we get the cheapest instance types of the available offerings. Each instance type's
+	// cheapest compatible price is computed once up front rather than inside the comparator, which would otherwise
+	// re-evaluate offering compatibility O(n log n) times.
+	type priced struct {
+		it    *InstanceType
+		price float64
+	}
+	sorted := lo.Map(its, func(it *InstanceType, _ int) priced {
+		price := math.MaxFloat64
+		for _, of := range it.Offerings {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < price {
+				price = of.Price
 			}
 		}
-		for _, of := range its[j].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
-				jPrice = of.Price
-			}
-		}
-		return iPrice < jPrice
+		return priced{it: it, price: price}
 	})
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].price < sorted[j].price })
+	for i := range sorted {
+		its[i] = sorted[i].it
+	}
 	return its
 }
 
@@ -673,15 +805,10 @@ func (ofs Offerings) MostExpensive() *Offering {
 }
 
 // WorstLaunchPrice gets the worst-case launch price from the offerings that are offered on an instance type. Only
-// offerings for the capacity type we will launch with are considered. The following precedence order is used to
-// determine which capacity type is used: reserved, spot, on-demand.
+// offerings for the capacity type class we will launch with are considered, in CapacityTypeClassPrecedence order.
 func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
-	for _, ctReqs := range []scheduling.Requirements{
-		ReservedRequirement,
-		SpotRequirement,
-		OnDemandRequirement,
-	} {
-		if compatOfs := ofs.Compatible(reqs).Compatible(ctReqs); len(compatOfs) != 0 {
+	for _, class := range CapacityTypeClassPrecedence {
+		if compatOfs := ofs.Compatible(reqs).Compatible(CapacityTypeClassRequirements(class)); len(compatOfs) != 0 {
 			return compatOfs.MostExpensive().Price
 		}
 	}
@@ -875,4 +1002,56 @@ type DeviceID struct {
 
 func (id DeviceID) String() string {
 	return fmt.Sprintf("%s/%s/%s", id.Driver.Value(), id.Pool.Value(), id.Device.Value())
+}
+
+// NodeClaimPriceProvider prices launched NodeClaims for disruption and cost tracking. A provider whose launch price
+// can't be derived from a single offering can record the price at launch and return it here.
+type NodeClaimPriceProvider interface {
+	// NodeClaimPrice returns a launched NodeClaim's hourly price, and false if it's unknown. instanceType is the
+	// NodeClaim's current InstanceType for its NodePool, or nil. Cluster cost tracking calls it with a nil instanceType
+	// to ask for a price the NodeClaim carries itself, and prices NodeClaims without one by their offering.
+	NodeClaimPrice(ctx context.Context, nodeClaim *v1.NodeClaim, instanceType *InstanceType) (float64, bool)
+}
+
+// DefaultNodeClaimPriceProvider prices a NodeClaim by its instance type's offering in the NodeClaim's zone and
+// capacity type.
+type DefaultNodeClaimPriceProvider struct{}
+
+func (DefaultNodeClaimPriceProvider) NodeClaimPrice(_ context.Context, nodeClaim *v1.NodeClaim, instanceType *InstanceType) (float64, bool) {
+	if nodeClaim == nil || instanceType == nil {
+		return 0, false
+	}
+	return instanceType.OfferingPrice(nodeClaim.Labels[corev1.LabelTopologyZone], nodeClaim.Labels[v1.CapacityTypeLabelKey])
+}
+
+type nodeClaimPriceProviderHolder struct{ NodeClaimPriceProvider }
+
+var nodeClaimPriceProvider atomic.Pointer[nodeClaimPriceProviderHolder]
+
+func init() {
+	SetNodeClaimPriceProvider(DefaultNodeClaimPriceProvider{})
+}
+
+// SetNodeClaimPriceProvider registers how launched NodeClaims are priced. It must be called at startup, before
+// controllers run. A nil provider restores DefaultNodeClaimPriceProvider.
+func SetNodeClaimPriceProvider(provider NodeClaimPriceProvider) {
+	if provider == nil {
+		provider = DefaultNodeClaimPriceProvider{}
+	}
+	nodeClaimPriceProvider.Store(&nodeClaimPriceProviderHolder{provider})
+}
+
+// GetNodeClaimPriceProvider returns the registered NodeClaimPriceProvider.
+func GetNodeClaimPriceProvider() NodeClaimPriceProvider {
+	return nodeClaimPriceProvider.Load().NodeClaimPriceProvider
+}
+
+// PriceNodeClaim prices a NodeClaim with the registered NodeClaimPriceProvider. NaN, infinite and negative prices are
+// treated as unknown.
+func PriceNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim, instanceType *InstanceType) (float64, bool) {
+	price, ok := GetNodeClaimPriceProvider().NodeClaimPrice(ctx, nodeClaim, instanceType)
+	if !ok || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+		return 0, false
+	}
+	return price, true
 }

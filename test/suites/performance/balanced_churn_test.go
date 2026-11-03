@@ -32,7 +32,7 @@ import (
 )
 
 func scaleAndSettle(env *common.Environment, dep *appsv1.Deployment, targetReplicas int32, timeout time.Duration) {
-	dep.Spec.Replicas = lo.ToPtr(targetReplicas)
+	dep.Spec.Replicas = new(targetReplicas)
 	env.ExpectUpdated(dep)
 	sel := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	env.EventuallyExpectHealthyPodCountWithTimeout(timeout, sel, int(targetReplicas))
