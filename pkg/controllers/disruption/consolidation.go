@@ -253,10 +253,10 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	return cmd, nil
 }
 
-// hasSpotOffering returns true if the replacement has an available Spot offering.
+// hasSpotOffering returns true if the replacement has a launchable Spot offering.
 func hasSpotOffering(nodeClaim *pscheduling.NodeClaim) bool {
 	return lo.ContainsBy(nodeClaim.InstanceTypeOptions, func(it *cloudprovider.InstanceType) bool {
-		return it.Offerings.Available().Compatible(nodeClaim.Requirements).HasCompatible(cloudprovider.CapacityTypeClassRequirements(cloudprovider.CapacityTypeClassSpot))
+		return it.Offerings.Launchable().Compatible(nodeClaim.Requirements).HasCompatible(cloudprovider.CapacityTypeClassRequirements(cloudprovider.CapacityTypeClassSpot))
 	})
 }
 

@@ -1059,6 +1059,72 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		DescribeTable("only requires Spot for an on-demand replacement when a Spot offering is available", func(spotAvailable bool) {
+			offerings := func(price float64) []cloudprovider.Offering {
+				return []cloudprovider.Offering{
+					{
+						Available:    true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
+						Price:        price,
+					},
+					{
+						Available:    spotAvailable,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+						Price:        price / 2,
+					},
+				}
+			}
+			currentInstance := fake.NewInstanceType("current", fake.WithOfferings(offerings(1.5)...))
+			replacementInstance := fake.NewInstanceType("replacement", fake.WithOfferings(offerings(1.0)...))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{currentInstance, replacementInstance}
+			ExpectSingletonReconciled(ctx, pricingController)
+
+			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: currentInstance.Name,
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "test-zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ctReq := cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey)
+			Expect(ctReq.Has(v1.CapacityTypeSpot)).To(Equal(spotAvailable))
+			Expect(ctReq.Has(v1.CapacityTypeOnDemand)).To(Equal(!spotAvailable))
+		},
+			Entry("when a Spot offering is available", true),
+			Entry("when no Spot offering is available", false),
+		)
 		It("should price candidates with the NodeClaimPriceProvider", func() {
 			cloudprovider.SetNodeClaimPriceProvider(fixedPricer(0.001))
 			DeferCleanup(test.ResetNodeClaimPriceProvider)
