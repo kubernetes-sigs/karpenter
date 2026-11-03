@@ -540,6 +540,17 @@ var _ = Describe("Reboot Lifecycle", func() {
 			ExpectMetricHistogramSampleCountValue("karpenter_nodes_reboot_recovery_duration_seconds", 1, map[string]string{})
 		})
 
+		It("succeeds when the node recovered within the window but is first seen just after it", func() {
+			// The node became Ready just before the window ended, and the next poll lands just after it.
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(env.Clock.Now().Add(19*time.Minute + 55*time.Second))}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+		})
+
 		It("fails with recovery_timeout when the observation window elapses without recovery", func() {
 			env.Clock.Step(21 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
