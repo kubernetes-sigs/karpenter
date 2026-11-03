@@ -198,6 +198,21 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
 		})
 
+		It("emits an event at each reboot transition", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			node = ExpectExists(ctx, env.Client, node)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+
+			// The reboot RFC says this controller emits these events.
+			reasons := lo.Map(recorder.Events(), func(e events.Event, _ int) string { return e.Reason })
+			Expect(reasons).To(ContainElements(v1.RebootReasonRequested, v1.RebootReasonIssued, v1.RebootReasonSucceeded))
+		})
+
 		It("re-issues on a subsequent reboot of the same NodeClaim (no stale-state false success)", func() {
 			// Episode 1: issue and succeed.
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
