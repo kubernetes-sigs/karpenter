@@ -198,7 +198,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 		if podData.ResourceClaimErr != nil {
 			return nil, nil, nil, nil, podData.ResourceClaimErr
 		}
-		result, err := allocator.Allocate(ctx, &draNodeClaim{nc: n}, podData.ResourceClaims)
+		result, err := allocator.Allocate(ctx, &draNodeClaim{nc: n, requirements: nodeClaimRequirements}, podData.ResourceClaims)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("allocating dynamic resources, %w", err)
 		}

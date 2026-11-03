@@ -153,18 +153,12 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		if !reqs.IsCompatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 			return false
 		}
-		if !i.Offerings.Available().HasCompatible(reqs) {
-			return false
-		}
-		if !resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable()) {
-			return false
-		}
-		return true
+		return len(fittingOfferings(i, reqs, nodeClaim.Spec.Resources.Requests)) != 0
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
-		iOfferings := instanceTypes[i].Offerings.Available().Compatible(reqs)
-		jOfferings := instanceTypes[j].Offerings.Available().Compatible(reqs)
+		iOfferings := fittingOfferings(instanceTypes[i], reqs, nodeClaim.Spec.Resources.Requests)
+		jOfferings := fittingOfferings(instanceTypes[j], reqs, nodeClaim.Spec.Resources.Requests)
 		return iOfferings.Cheapest().Price < jOfferings.Cheapest().Price
 	})
 	instanceType := instanceTypes[0]
@@ -177,7 +171,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 	}
 	// Find offering, prioritizing reserved instances
 	var offering *cloudprovider.Offering
-	offerings := instanceType.Offerings.Available().Compatible(reqs)
+	offerings := fittingOfferings(instanceType, reqs, nodeClaim.Spec.Resources.Requests)
 	lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
 	for _, o := range offerings {
 		// Only launch into a reserved offering that still has capacity. A full reservation stays Available (health) but
@@ -214,6 +208,20 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 	}
 	c.CreatedNodeClaims[created.Status.ProviderID] = created
 	return created, nil
+}
+
+// fittingOfferings returns the instance type's available offerings that are compatible with the requirements and
+// belong to an allocatable group the requests fit in. Offerings with a CapacityOverride or OverheadOverride form their
+// own groups, so the offering a NodeClaim launches into must be chosen by its group's allocatable, not the base one.
+func fittingOfferings(instanceType *cloudprovider.InstanceType, reqs scheduling.Requirements, requests corev1.ResourceList) cloudprovider.Offerings {
+	var offerings cloudprovider.Offerings
+	for _, group := range instanceType.AllocatableOfferingsList() {
+		if !resources.Fits(requests, group.Allocatable) {
+			continue
+		}
+		offerings = append(offerings, group.Offerings.Compatible(reqs)...)
+	}
+	return offerings
 }
 
 func (c *CloudProvider) Get(_ context.Context, id string) (*v1.NodeClaim, error) {
