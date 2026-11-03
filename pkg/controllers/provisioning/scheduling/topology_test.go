@@ -2267,7 +2267,7 @@ var _ = Describe("Topology", func() {
 				WhenUnsatisfiable:  corev1.DoNotSchedule,
 				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:            2,
-				MinDomains:         lo.ToPtr(int32(3)),
+				MinDomains:         new(int32(3)),
 				NodeTaintsPolicy:   lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
