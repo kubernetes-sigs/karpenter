@@ -185,15 +185,24 @@ type InstanceType struct {
 	// CSI driver name. Cloud providers that do not know a driver's limit ahead of time may omit it; limits reported
 	// by a node's CSINode take precedence once the node registers.
 	VolumeAttachmentLimits map[string]int
-	// DynamicResources contains DRA device metadata for this instance type.
-	// Cloud providers that do not support DRA may leave this as the zero value.
-	DynamicResources DynamicResources
+	// DynamicResources lists the DRA device sets an instance of this type may publish, one driver per set. Each set is
+	// published by the offerings compatible with its requirements. Cloud providers that do not support DRA may leave
+	// this empty.
+	DynamicResources []*DynamicResources
+	// AttributeBindings declares devices, from any of the instance type's DynamicResources sets, that will share a
+	// common attribute value at runtime, even though the concrete value is not known at simulation time.
+	AttributeBindings []*AttributeBinding
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead               *InstanceTypeOverhead
 	once                   sync.Once
 	allocatableOfferings   []AllocatableOfferings
 	capacityOverlayApplied bool
+
+	dynamicResourcesOnce      sync.Once
+	allDynamicResources       []*DynamicResources
+	availableDynamicResources []*DynamicResources
+	resolvedAttributeBindings []*AttributeBinding
 }
 
 type InstanceTypes []*InstanceType
@@ -241,7 +250,22 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 		*out = make(map[string]int, len(*in))
 		maps.Copy(*out, *in)
 	}
-	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
+	if in.DynamicResources != nil {
+		out.DynamicResources = make([]*DynamicResources, len(in.DynamicResources))
+		for i := range in.DynamicResources {
+			if in.DynamicResources[i] != nil {
+				out.DynamicResources[i] = in.DynamicResources[i].DeepCopy()
+			}
+		}
+	}
+	if in.AttributeBindings != nil {
+		out.AttributeBindings = make([]*AttributeBinding, len(in.AttributeBindings))
+		for i := range in.AttributeBindings {
+			if in.AttributeBindings[i] != nil {
+				out.AttributeBindings[i] = in.AttributeBindings[i].DeepCopy()
+			}
+		}
+	}
 	if in.Overhead != nil {
 		in, out := &in.Overhead, &out.Overhead
 		*out = new(InstanceTypeOverhead)
@@ -383,6 +407,113 @@ func (i *InstanceType) IsCapacityOverlayApplied() bool {
 func (i *InstanceType) AllocatableOfferingsList() []AllocatableOfferings {
 	i.once.Do(i.precompute)
 	return i.allocatableOfferings
+}
+
+// AllDynamicResources returns every DynamicResources set of the instance type, with each set's template pools
+// namespaced by the set's index (see TemplatePoolName). Namespacing keeps the sets' devices, counter budgets, and
+// attribute bindings distinct even when a cloud provider reuses pool and device names across sets. The result is
+// computed once per InstanceType, and the provider's templates aren't modified.
+func (i *InstanceType) AllDynamicResources() []*DynamicResources {
+	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
+	return i.allDynamicResources
+}
+
+// AvailableDynamicResources returns the subset of AllDynamicResources that can be a source of devices: sets with empty
+// requirements, and sets compatible with at least one available offering. The result is computed once, since offering
+// availability is fixed for the lifetime of an InstanceType (see AllocatableOfferingsList, which already caches
+// available offerings under i.once).
+func (i *InstanceType) AvailableDynamicResources() []*DynamicResources {
+	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
+	return i.availableDynamicResources
+}
+
+// ResolvedAttributeBindings returns the instance type's AttributeBindings rewritten to reference the namespaced
+// devices of AllDynamicResources. A bound device that appears in several sets is bound in every one of them, which is
+// sound because a binding must hold in every launch configuration in which the bound devices coexist. Devices that
+// appear in no set are kept unchanged; no template device carries their ID, so they never match. Bindings with fewer
+// than two distinct provider devices are dropped, as BuildAttributeBindings would ignore them before namespacing.
+func (i *InstanceType) ResolvedAttributeBindings() []*AttributeBinding {
+	i.dynamicResourcesOnce.Do(i.resolveDynamicResources)
+	return i.resolvedAttributeBindings
+}
+
+func (i *InstanceType) resolveDynamicResources() {
+	// namespaced maps each provider device ID to its namespaced copies, one per set that contains it.
+	namespaced := map[DeviceID][]DeviceID{}
+	i.allDynamicResources = make([]*DynamicResources, 0, len(i.DynamicResources))
+	for setIndex, dr := range i.DynamicResources {
+		set := &DynamicResources{
+			Requirements:           dr.Requirements,
+			ResourceSliceTemplates: make([]*ResourceSliceTemplate, 0, len(dr.ResourceSliceTemplates)),
+		}
+		for _, t := range dr.ResourceSliceTemplates {
+			// A shallow copy is enough: only the pool name changes, and devices and counters are shared read-only.
+			namespacedTemplate := *t
+			namespacedTemplate.Pool = ResourcePool{Name: unique.Make(TemplatePoolName(poolName(t.Pool), setIndex))}
+			set.ResourceSliceTemplates = append(set.ResourceSliceTemplates, &namespacedTemplate)
+			for _, d := range t.Devices {
+				id := DeviceID{Driver: t.Driver, Pool: t.Pool.Name, Device: d.Name}
+				namespaced[id] = append(namespaced[id], DeviceID{Driver: t.Driver, Pool: namespacedTemplate.Pool.Name, Device: d.Name})
+			}
+		}
+		i.allDynamicResources = append(i.allDynamicResources, set)
+	}
+	i.availableDynamicResources = lo.Filter(i.allDynamicResources, func(dr *DynamicResources, _ int) bool {
+		if len(dr.Requirements) == 0 {
+			return true
+		}
+		return lo.ContainsBy(i.Offerings, func(o *Offering) bool {
+			return o.Available && dr.Requirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+		})
+	})
+	i.resolvedAttributeBindings = make([]*AttributeBinding, 0, len(i.AttributeBindings))
+	for _, b := range i.AttributeBindings {
+		// A binding needs at least two distinct provider devices. Check before expanding: a one-device binding on a
+		// device reused across sets would otherwise expand into copies that look like a pair but can never coexist.
+		if len(lo.Uniq(b.Devices)) < 2 {
+			continue
+		}
+		i.resolvedAttributeBindings = append(i.resolvedAttributeBindings, &AttributeBinding{
+			Attribute: b.Attribute,
+			Devices: lo.FlatMap(b.Devices, func(id DeviceID, _ int) []DeviceID {
+				if ids, ok := namespaced[id]; ok {
+					return ids
+				}
+				return []DeviceID{id}
+			}),
+		})
+	}
+}
+
+// poolName returns the pool's name, or "" if it's unset; the zero unique.Handle can't be dereferenced.
+func poolName(pool ResourcePool) string {
+	if pool.Name == (unique.Handle[string]{}) {
+		return ""
+	}
+	return pool.Name.Value()
+}
+
+// templatePoolSetSeparator separates a template pool's name from the index of the DynamicResources set it belongs to.
+// It can't appear in a real pool name, which must consist of DNS subdomains separated by slashes.
+const templatePoolSetSeparator = "~"
+
+// TemplatePoolName returns the namespaced name of a template pool in the DynamicResources set at setIndex.
+func TemplatePoolName(pool string, setIndex int) string {
+	return pool + templatePoolSetSeparator + strconv.Itoa(setIndex)
+}
+
+// ParseTemplatePoolName splits a namespaced template pool name into the provider's pool name and the set index. It
+// returns false if the name isn't namespaced.
+func ParseTemplatePoolName(name string) (pool string, setIndex int, ok bool) {
+	i := strings.LastIndex(name, templatePoolSetSeparator)
+	if i < 0 {
+		return "", 0, false
+	}
+	setIndex, err := strconv.Atoi(name[i+len(templatePoolSetSeparator):])
+	if err != nil || setIndex < 0 {
+		return "", 0, false
+	}
+	return name[:i], setIndex, true
 }
 
 // Allocatable returns the base allocatable resources (no offering overrides applied).
