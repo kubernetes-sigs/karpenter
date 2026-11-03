@@ -19,11 +19,13 @@ package node_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -147,6 +149,102 @@ var _ = Describe("Node Metrics", func() {
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
 		}
+	})
+	It("should emit the seconds until expiry and forced disruption metrics for nodeclaims", func() {
+		nodeClaim, managedNode := test.NodeClaimAndNode(v1.NodeClaim{
+			Spec: v1.NodeClaimSpec{
+				ExpireAfter:            v1.MustParseNillableDuration("1h"),
+				TerminationGracePeriod: &metav1.Duration{Duration: 30 * time.Minute},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, managedNode, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{managedNode}, []*v1.NodeClaim{nodeClaim})
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_expiry", map[string]string{
+			"node_name": managedNode.GetName(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeTrue())
+		Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", time.Until(nodeClaim.CreationTimestamp.Add(time.Hour)).Seconds(), 5))
+
+		metric, found = FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_forced_disruption", map[string]string{
+			"node_name": managedNode.GetName(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeTrue())
+		Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", time.Until(nodeClaim.CreationTimestamp.Add(90*time.Minute)).Seconds(), 5))
+	})
+	It("should not emit the forced disruption metric when terminationGracePeriod is unset", func() {
+		nodeClaim, managedNode := test.NodeClaimAndNode(v1.NodeClaim{
+			Spec: v1.NodeClaimSpec{
+				ExpireAfter: v1.MustParseNillableDuration("1h"),
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, managedNode, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{managedNode}, []*v1.NodeClaim{nodeClaim})
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		_, found := FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_expiry", map[string]string{
+			"node_name": managedNode.GetName(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_forced_disruption", map[string]string{
+			"node_name": managedNode.GetName(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should not emit expiry metrics when expireAfter is Never", func() {
+		nodeClaim, managedNode := test.NodeClaimAndNode(v1.NodeClaim{
+			Spec: v1.NodeClaimSpec{
+				ExpireAfter: v1.MustParseNillableDuration("Never"),
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, managedNode, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{managedNode}, []*v1.NodeClaim{nodeClaim})
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		_, found := FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_expiry", map[string]string{
+			"node_name": managedNode.GetName(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_forced_disruption", map[string]string{
+			"node_name": managedNode.GetName(),
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should remove the expiry metric gauges when the nodeclaim is deleted", func() {
+		nodeClaim, managedNode := test.NodeClaimAndNode(v1.NodeClaim{
+			Spec: v1.NodeClaimSpec{
+				ExpireAfter: v1.MustParseNillableDuration("1h"),
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, managedNode, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{managedNode}, []*v1.NodeClaim{nodeClaim})
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		_, found := FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_expiry", map[string]string{
+			"node_name": managedNode.GetName(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeTrue())
+
+		ExpectDeleted(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		_, found = FindMetricWithLabelValues("karpenter_nodeclaims_seconds_until_expiry", map[string]string{
+			"node_name": managedNode.GetName(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeFalse())
 	})
 	It("should remove the node metric gauge when the node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node)
