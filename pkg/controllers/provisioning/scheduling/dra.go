@@ -83,6 +83,8 @@ type draExistingNode struct {
 	// instanceType is the resolved cloud provider instance type for the node, or nil if it could not be resolved
 	// (e.g. an unmanaged node, or an instance type no longer offered by the NodePool).
 	instanceType *cloudprovider.InstanceType
+	// hasPublishedSlices is set for a rebooting node whose published slices remain the source of truth.
+	hasPublishedSlices bool
 }
 
 func (d *draExistingNode) ID() dynamicresources.NodeClaimID {
@@ -111,7 +113,7 @@ func (d *draExistingNode) InstanceTypes() []dynamicresources.InstanceTypeID {
 
 func (d *draExistingNode) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	// Initialized nodes have their devices published in-cluster; uninitialized nodes are represented by templates.
-	if d.en.Initialized() || d.instanceType == nil {
+	if d.en.Initialized() || d.hasPublishedSlices || d.instanceType == nil {
 		return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{}
 	}
 	return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{

@@ -64,6 +64,8 @@ type Allocator struct {
 	// is treated as unallocated and re-run through the DFS, so its device — already freed from the allocated-device seed
 	// set for the same reason — is re-allocated rather than treated as committed in place.
 	deletingPodUIDs sets.Set[types.UID]
+	// nodesWithSlices are the nodes that in-cluster ResourceSlices pin themselves to via spec.nodeName.
+	nodesWithSlices sets.Set[string]
 }
 
 // ResourceClaimAllocationMetadataForClaim returns a copy of the allocator's internal ResourceClaim allocation metadata.
@@ -147,6 +149,8 @@ type AllocatedDeviceState struct {
 	ExclusiveDevices sets.Set[cloudprovider.DeviceID]
 	// ConsumedCapacity maps multi-allocatable devices to their aggregated consumed capacity.
 	ConsumedCapacity map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+	// RebootReleasableDevices maps exclusive devices held only by pods leaving a rebooting node to that node's name.
+	RebootReleasableDevices map[cloudprovider.DeviceID]string
 }
 
 // NewAllocator constructs an Allocator for a single scheduling loop.
@@ -170,6 +174,12 @@ func NewAllocator(
 		poolCache:               make(map[NodeClaimID][]*Pool),
 		claimAllocationMetadata: make(map[ResourceClaimID]*ResourceClaimAllocationMetadata),
 		deletingPodUIDs:         deletingPodUIDs,
+		nodesWithSlices:         sets.New[string](),
+	}
+	for _, s := range inClusterSlices {
+		if name := s.NodeName(); name != "" {
+			a.nodesWithSlices.Insert(name)
+		}
 	}
 	// Pre-initialize shared counter budgets for all pools. This ensures InitRemainingCounters is
 	// never called during parallel Allocate() calls, keeping the tracker read-only under concurrency.
@@ -177,6 +187,11 @@ func NewAllocator(
 		a.allocationTracker.InitRemainingCounters(pool)
 	}
 	return a
+}
+
+// HasNodeSlices reports whether any in-cluster ResourceSlice is pinned to the named node.
+func (a *Allocator) HasNodeSlices(nodeName string) bool {
+	return a.nodesWithSlices.Has(nodeName)
 }
 
 // AllocationResult contains the output of a successful Allocate() call.
