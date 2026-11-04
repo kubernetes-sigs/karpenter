@@ -65,6 +65,8 @@ const (
 
 type NodeDrainError struct {
 	error
+	// Undeleted counts the pods the drain still has to remove that haven't been deleted yet.
+	Undeleted int
 }
 
 func NewNodeDrainError(err error) *NodeDrainError {
@@ -97,7 +99,6 @@ type Queue struct {
 	source chan event.TypedGenericEvent[*corev1.Pod]
 	// items maps each enqueued pod to its drain deadline. The reconciler decides per reconcile whether to evict or delete
 	// by the deadline, from that deadline plus the pod's own grace period; a nil deadline means "always evict".
-	// A timeout deadline only ever evicts, and drops the pod from the queue once it passes.
 	items map[QueueKey]queueItem
 
 	clock      clock.Clock
@@ -152,15 +153,11 @@ func (q *Queue) Add(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
 	q.add(queueItem{deadline: nodeTerminationTime}, pods...)
 }
 
-// AddWithTimeout enqueues pods for eviction until deadline. Pods are never deleted, and a pod still on the node
-// once the deadline passes is dropped from the queue and left in place.
-func (q *Queue) AddWithTimeout(deadline time.Time, pods ...*corev1.Pod) {
-	q.add(queueItem{deadline: &deadline, timeout: true}, pods...)
-}
-
 type queueItem struct {
 	deadline *time.Time
-	timeout  bool
+	// fenced marks a pod enqueued only by fenced drains, which already chose it for their fence, so the queue doesn't
+	// recheck its tolerations.
+	fenced bool
 }
 
 func (q *Queue) add(item queueItem, pods ...*corev1.Pod) {
@@ -177,16 +174,13 @@ func (q *Queue) add(item queueItem, pods ...*corev1.Pod) {
 	}
 }
 
-// merge combines a pod's queued item with a new one. A deadline that deletes replaces a timeout and is never replaced
-// by one; items of the same kind keep the earlier deadline.
+// merge combines a pod's queued item with a new one, keeping the earlier deadline. A pod stays fenced only while
+// every drain that enqueued it is fenced, so an unfenced drain's evictability check still applies.
 func merge(existing queueItem, enqueued bool, item queueItem) queueItem {
 	if !enqueued {
 		return item
 	}
-	if existing.timeout != item.timeout {
-		return lo.Ternary(item.timeout, existing, item)
-	}
-	return queueItem{deadline: earlier(existing.deadline, item.deadline), timeout: item.timeout}
+	return queueItem{deadline: earlier(existing.deadline, item.deadline), fenced: existing.fenced && item.fenced}
 }
 
 // earlier returns the earlier of a and b, treating nil as "no deadline" (+∞).
@@ -226,11 +220,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 
-	if item.timeout && q.clock.Now().After(*item.deadline) {
-		q.complete(pod)
-		return reconcile.Result{}, nil
-	}
-	if !item.timeout && needsDeleteByDeadline(pod, item.deadline, q.clock) {
+	if needsDeleteByDeadline(pod, item.deadline, q.clock) {
 		return q.deleteByDeadline(ctx, pod, item.deadline)
 	}
 	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
@@ -241,8 +231,13 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	}
 	// Active but not evictable (do-not-disrupt). Stay enqueued under the queue's exponential backoff.
 	// The next reconcile picks the right path when the
-	// annotation clears or the deadline crosses needsDeleteByDeadline's threshold.
-	if !podutils.IsEvictable(pod, q.clock, q.recorder) {
+	// annotation clears or the deadline crosses needsDeleteByDeadline's threshold. A fenced drain already chose which
+	// pods to enqueue, so their tolerations aren't rechecked.
+	if item.fenced {
+		if podutils.IsDoNotDisruptActive(pod, q.clock, q.recorder) {
+			return reconcile.Result{Requeue: true}, nil
+		}
+	} else if !podutils.IsEvictable(pod, q.clock, q.recorder) {
 		return reconcile.Result{Requeue: true}, nil
 	}
 	return q.evict(ctx, pod)

@@ -63,6 +63,8 @@ type Topology struct {
 	excludedPods sets.Set[string]
 	cluster      *state.Cluster
 	stateNodes   []*state.StateNode
+	// departing are the pods leaving a returning node, which comes back without them.
+	departing sets.Set[types.UID]
 }
 
 func NewTopology(
@@ -84,6 +86,10 @@ func NewTopology(
 		topologyGroups:        map[uint64]*TopologyGroup{},
 		inverseTopologyGroups: map[uint64]*TopologyGroup{},
 		excludedPods:          sets.New[string](),
+		departing:             sets.New[types.UID](),
+	}
+	for _, n := range stateNodes {
+		t.departing.Insert(lo.Values(n.RebootDepartingPods())...)
 	}
 
 	// these are the pods that we intend to schedule, so if they are currently in the cluster we shouldn't count them for
@@ -333,6 +339,10 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *corev1.Po
 	// value.  The problem with them comes from the relaxation process, the pod
 	// we are relaxing is not the pod with the anti-affinity term.
 	for _, term := range pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+		// The pod's hostname domain is a returning node that comes back without it; its wider domains still hold it.
+		if term.TopologyKey == corev1.LabelHostname && t.departing.Has(pod.UID) {
+			continue
+		}
 		namespaces, err := t.buildNamespaceList(ctx, pod.Namespace, term.Namespaces, term.NamespaceSelector)
 		if err != nil {
 			return err

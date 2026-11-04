@@ -188,6 +188,8 @@ type StateNode struct {
 	podRequests        map[types.NamespacedName]corev1.ResourceList
 	podLimits          map[types.NamespacedName]corev1.ResourceList
 	podDisruptionCosts map[types.NamespacedName]float64
+	// terminatingPods are the UIDs of the pods with a deletion timestamp that a rebooting node won't have when it returns.
+	terminatingPods map[types.NamespacedName]types.UID
 
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
@@ -208,6 +210,7 @@ func NewNode() *StateNode {
 		podRequests:        map[types.NamespacedName]corev1.ResourceList{},
 		podLimits:          map[types.NamespacedName]corev1.ResourceList{},
 		podDisruptionCosts: map[types.NamespacedName]float64{},
+		terminatingPods:    map[types.NamespacedName]types.UID{},
 		hostPortUsage:      scheduling.NewHostPortUsage(),
 		volumeUsage:        scheduling.NewVolumeUsage(),
 	}
@@ -222,6 +225,7 @@ func (in *StateNode) ShallowCopy() *StateNode {
 		podRequests:         in.podRequests,
 		podLimits:           in.podLimits,
 		podDisruptionCosts:  in.podDisruptionCosts,
+		terminatingPods:     in.terminatingPods,
 		hostPortUsage:       in.hostPortUsage,
 		volumeUsage:         in.volumeUsage,
 		markedForDeletion:   in.markedForDeletion,
@@ -395,7 +399,7 @@ func (in *StateNode) RebootInProgress() bool {
 	if in.NodeClaim == nil {
 		return false
 	}
-	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+	cond := in.rebootingCondition()
 	return cond != nil && cond.IsTrue()
 }
 
@@ -408,8 +412,19 @@ func (in *StateNode) RebootReinitializing() bool {
 	if in.NodeClaim == nil || in.Initialized() {
 		return false
 	}
-	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+	cond := in.rebootingCondition()
 	return cond != nil && cond.IsFalse() && cond.Reason == v1.RebootReasonSucceeded
+}
+
+// rebootingCondition reads the NodeClaim's Rebooting condition without StatusConditions(), which allocates on every
+// call; this runs in scheduling hot paths like node sorting.
+func (in *StateNode) rebootingCondition() *status.Condition {
+	for i := range in.NodeClaim.Status.Conditions {
+		if in.NodeClaim.Status.Conditions[i].Type == v1.ConditionTypeRebooting {
+			return &in.NodeClaim.Status.Conditions[i]
+		}
+	}
+	return nil
 }
 
 func (in *StateNode) Taints() []corev1.Taint {
@@ -499,9 +514,35 @@ func (in *StateNode) Allocatable() corev1.ResourceList {
 	return in.Node.Status.Allocatable
 }
 
-// Available is allocatable minus anything allocated to pods.
+// RebootReturning returns true from when a reboot is committed until the node re-initializes after it succeeds. Over
+// that span the node's capacity is coming back, so it's modeled as it will be once it has.
+func (in *StateNode) RebootReturning() bool {
+	return in.RebootInProgress() || in.RebootReinitializing()
+}
+
+// Available is allocatable minus anything allocated to pods. A returning node is modeled as it will be once it has,
+// without the terminating pods it's coming back without, so provisioning doesn't launch capacity for the pods that go
+// back to it. Disruption deliberately doesn't plan onto a returning node (see disruption.SimulateScheduling): its
+// capacity doesn't exist yet.
 func (in *StateNode) Available() corev1.ResourceList {
-	return resources.Subtract(in.Allocatable(), in.PodRequests())
+	if !in.RebootReturning() {
+		return resources.Subtract(in.Allocatable(), in.PodRequests())
+	}
+	var requests corev1.ResourceList
+	for podKey, podRequests := range in.podRequests {
+		if _, ok := in.terminatingPods[podKey]; !ok {
+			requests = resources.MergeInto(requests, podRequests)
+		}
+	}
+	return resources.Subtract(in.Allocatable(), requests)
+}
+
+// RebootDepartingPods returns the terminating pods a rebooting node won't have when it returns, keyed to their UIDs.
+func (in *StateNode) RebootDepartingPods() map[types.NamespacedName]types.UID {
+	if !in.RebootReturning() {
+		return nil
+	}
+	return in.terminatingPods
 }
 
 func (in *StateNode) DaemonSetRequests() corev1.ResourceList {
@@ -593,6 +634,14 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 			delete(in.podDisruptionCosts, podKey)
 		}
 	}
+	if podutils.IsTerminating(pod) && !podutils.IsOwnedByDaemonSet(pod) && !podutils.IsOwnedByNode(pod) {
+		if in.terminatingPods == nil {
+			in.terminatingPods = map[types.NamespacedName]types.UID{}
+		}
+		in.terminatingPods[podKey] = pod.UID
+	} else {
+		delete(in.terminatingPods, podKey)
+	}
 	in.hostPortUsage.Add(pod, hostPorts)
 	in.volumeUsage.Add(pod, volumes)
 	return nil
@@ -606,6 +655,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 	delete(in.daemonSetRequests, podKey)
 	delete(in.daemonSetLimits, podKey)
 	delete(in.podDisruptionCosts, podKey)
+	delete(in.terminatingPods, podKey)
 }
 
 func nominationWindow(ctx context.Context) time.Duration {

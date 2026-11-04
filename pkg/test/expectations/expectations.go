@@ -240,6 +240,20 @@ func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.
 	return err
 }
 
+// ExpectDeleting expects each object to be deleted: gone, or still terminating with a deletion timestamp (e.g. a pod
+// bound to a node with no kubelet to finish it).
+func ExpectDeleting(ctx context.Context, c client.Client, objects ...client.Object) {
+	GinkgoHelper()
+	for _, object := range objects {
+		current := object.DeepCopyObject().(client.Object)
+		if err := c.Get(ctx, client.ObjectKeyFromObject(object), current); err != nil {
+			Expect(errors.IsNotFound(err)).To(BeTrue(), "getting %s", client.ObjectKeyFromObject(object))
+			continue
+		}
+		Expect(current.GetDeletionTimestamp().IsZero()).To(BeFalse(), "%s has no deletion timestamp", client.ObjectKeyFromObject(object))
+	}
+}
+
 // ExpectDeletionTimestampSetWithOffset ensures that the deletion timestamp is set on the objects by adding a finalizer
 // and then deleting the object immediately after. This holds the object until the finalizer is patched out in the DeferCleanup
 func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -790,6 +804,38 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, clk c
 		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
+}
+
+// ExpectRebooting puts a node where the reboot controller does for the given Rebooting reason: Rebooting=True with the
+// scheduling fence on the Node, and from RebootIssued on, initialization reset. nodeClaim and node are updated in place.
+func ExpectRebooting(ctx context.Context, c client.Client, clk clock.Clock, reason string, nodeClaim *v1.NodeClaim, node *corev1.Node) {
+	GinkgoHelper()
+	Expect(c.Get(ctx, client.ObjectKeyFromObject(nodeClaim), nodeClaim)).To(Succeed())
+	Expect(c.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+	nodeClaim.StatusConditions(status.WithClock(clk)).SetTrueWithReason(v1.ConditionTypeRebooting, reason, "rebooting")
+	if !lo.ContainsBy(node.Spec.Taints, func(t corev1.Taint) bool { return t.MatchTaint(&v1.RebootingNoScheduleTaint) }) {
+		node.Spec.Taints = append(node.Spec.Taints, v1.RebootingNoScheduleTaint)
+	}
+	if reason == v1.RebootReasonIssued {
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootIssuedAtAnnotationKey: clk.Now().UTC().Format(time.RFC3339Nano)})
+		nodeClaim.StatusConditions(status.WithClock(clk)).SetUnknownWithReason(v1.ConditionTypeInitialized, v1.RebootReasonRebooting, "node is rebooting")
+		delete(node.Labels, v1.NodeInitializedLabelKey)
+	}
+	ExpectApplied(ctx, c, nodeClaim, node)
+}
+
+// ExpectRebootSucceeded puts a node where the reboot controller leaves it on success: Rebooting=False/RebootSucceeded
+// with the scheduling fence removed, still uninitialized until initialization re-runs. nodeClaim and node are updated
+// in place.
+func ExpectRebootSucceeded(ctx context.Context, c client.Client, clk clock.Clock, nodeClaim *v1.NodeClaim, node *corev1.Node) {
+	GinkgoHelper()
+	Expect(c.Get(ctx, client.ObjectKeyFromObject(nodeClaim), nodeClaim)).To(Succeed())
+	Expect(c.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+	nodeClaim.StatusConditions(status.WithClock(clk)).SetFalse(v1.ConditionTypeRebooting, v1.RebootReasonSucceeded, "node rebooted and rejoined the cluster")
+	nodeClaim.StatusConditions(status.WithClock(clk)).SetUnknownWithReason(v1.ConditionTypeInitialized, v1.RebootReasonRebooting, "node is rebooting")
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.RebootingNoScheduleTaint) })
+	delete(node.Labels, v1.NodeInitializedLabelKey)
+	ExpectApplied(ctx, c, nodeClaim, node)
 }
 
 func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
