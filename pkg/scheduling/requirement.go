@@ -47,7 +47,6 @@ type Requirement struct {
 
 // NewRequirementWithFlexibility constructs new requirement from the combination of key, values, minValues and the operator that
 // connects the keys and values. GT and LT operators are canonicalized to GTE and LTE respectively.
-// nolint:gocyclo
 func NewRequirementWithFlexibility(
 	key string,
 	operator corev1.NodeSelectorOperator,
@@ -185,7 +184,6 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirementWithMi
 }
 
 // Intersection constraints the Requirement from the incoming requirements
-// nolint:gocyclo
 func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	// Complement
 	complement := r.complement && requirement.complement
@@ -228,7 +226,6 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	}
 }
 
-// nolint:gocyclo
 // HasIntersection is a more efficient implementation of Intersection
 // It validates whether there is an intersection between the two requirements without actually creating the sets
 // This prevents the garbage collector from having to spend cycles cleaning up all of these created set objects

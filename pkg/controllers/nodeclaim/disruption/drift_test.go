@@ -32,6 +32,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	cloudprovideroverlay "sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
@@ -614,5 +615,78 @@ var _ = Describe("Drift", func() {
 			Entry("should drift when a matching instance type exists but the only offering is spot", true, v1.CapacityTypeSpot),
 			Entry("should drift when a matching instance type exists but there are no compatible offerings", true),
 		)
+	})
+	// Requirement-scoped DynamicResources: driver-mode labels are offering-level keys. A mode label on a NodeClaim means
+	// the configuration it was launched in, and a missing label means the configuration is unknown.
+	Context("Driver-mode labels", func() {
+		var modeIT *cloudprovider.InstanceType
+		BeforeEach(func() {
+			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey) })
+			modeIT = fake.DriverModeInstanceType("mode-it", 1, nil)
+			cp.InstanceTypes = []*cloudprovider.InstanceType{modeIT}
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				corev1.LabelInstanceTypeStable: modeIT.Name,
+				corev1.LabelTopologyZone:       "test-zone-1",
+				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+			})
+		})
+		expectDrifted := func(drifted bool) {
+			GinkgoHelper()
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			env.Clock.Step(time.Hour * 2)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			if drifted {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+			} else {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
+			}
+		}
+
+		It("should not drift a NodeClaim labeled with a mode its instance type offers", func() {
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				fake.DriverModeGPULabelKey: fake.DriverModeDRA,
+				fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin,
+			})
+			expectDrifted(false)
+		})
+		It("should not drift a NodeClaim without mode labels", func() {
+			expectDrifted(false)
+		})
+		It("should not drift a labeled NodeClaim when its instance type's offerings omit the mode keys", func() {
+			// e.g. after the provider stops offering a mode dimension (a gate turned off)
+			cp.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType(modeIT.Name)}
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				fake.DriverModeGPULabelKey: fake.DriverModeDRA,
+				fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin,
+			})
+			expectDrifted(false)
+		})
+		It("should drift a labeled NodeClaim when its instance type's offerings declare the mode keys DoesNotExist", func() {
+			// This is why providers omit mode keys on offerings where there's no choice, rather than declaring DoesNotExist.
+			dneIT := fake.NewInstanceType(modeIT.Name)
+			for _, o := range dneIT.Offerings {
+				o.Requirements.Add(scheduling.NewRequirement(fake.DriverModeGPULabelKey, corev1.NodeSelectorOpDoesNotExist))
+			}
+			cp.InstanceTypes = []*cloudprovider.InstanceType{dneIT}
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{fake.DriverModeGPULabelKey: fake.DriverModeDRA})
+			expectDrifted(true)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.InstanceTypeNotFound)))
+		})
+		It("should drift a NodeClaim without mode labels when its NodePool pins a mode", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: fake.DriverModeGPULabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{fake.DriverModeDRA}},
+			}
+			expectDrifted(true)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
+		})
+		It("should not drift a NodeClaim labeled with the mode its NodePool pins", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: fake.DriverModeGPULabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{fake.DriverModeDRA}},
+			}
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{fake.DriverModeGPULabelKey: fake.DriverModeDRA})
+			expectDrifted(false)
+		})
 	})
 })

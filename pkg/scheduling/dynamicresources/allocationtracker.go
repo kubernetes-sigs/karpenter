@@ -122,7 +122,6 @@ type InflightAllocationMetadata struct {
 	InstanceTypes sets.Set[InstanceTypeID]
 }
 
-// nolint:gocyclo
 func (at *AllocationTracker) Commit(alloc *allocation) {
 	for it, deviceIDs := range alloc.deviceIDsByIT {
 		for _, id := range deviceIDs {

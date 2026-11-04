@@ -147,7 +147,6 @@ func (c *Candidate) IsEmpty() bool {
 	return c.RescheduleDisruptionCost <= disruptionutils.PerNodeBaseDisruptionCost
 }
 
-//nolint:gocyclo // Candidate validation is clearer as one linear workflow.
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
 	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
 ) (*Candidate, error) {

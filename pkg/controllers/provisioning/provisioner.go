@@ -243,7 +243,6 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 
 // consolidationWarnings potentially writes logs warning about possible unexpected interactions
 // between scheduling constraints and consolidation
-// nolint:gocyclo
 func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.Pod) {
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
 	// unexpectedly with consolidation, so we warn once per hour when we see these pods.
@@ -278,7 +277,6 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
-//nolint:gocyclo
 func (p *Provisioner) NewScheduler(
 	ctx context.Context,
 	pods []*corev1.Pod,
@@ -347,7 +345,9 @@ func (p *Provisioner) NewScheduler(
 	scheduler.NewDefaultTopologySpreadInjector(p.kubeClient).Inject(ctx, pods)
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
+	stopTopologyTimer := metrics.Measure(scheduler.TopologyBuildDurationSeconds, map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
+	stopTopologyTimer()
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
