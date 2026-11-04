@@ -48,6 +48,7 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -186,7 +187,9 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
 //     uselessly.
 //
-// A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, unchanged.
+// A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, and blockedMsg
+// is then the Blocked event's message; it is empty in every other case. If pass 2 ran, the message also names the pods
+// that stop terminate-first.
 func SimulateSchedulingWithReservedFallback(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -197,19 +200,20 @@ func SimulateSchedulingWithReservedFallback(
 	candidate *Candidate,
 	terminateFirstEnabled bool,
 	simulationOpts SimulationOptions,
-) (results scheduling.Results, terminateFirst bool, err error) {
+) (results scheduling.Results, terminateFirst bool, blockedMsg string, err error) {
 	// Pass 1: replace-first feasibility.
 	results, err = SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder, nil, simulationOpts, candidate)
 	if err != nil || results.AllNonPendingPodsScheduled() {
-		return results, false, err
+		return results, false, "", err
 	}
+	blockedMsg = pretty.Sentence(results.NonPendingPodSchedulingErrors())
 
 	// The gate is caller-supplied so each method controls terminate-first independently (drift: TerminateFirstDrift,
 	// repair: TerminateFirstRepair). Only a reserved candidate is eligible: its slot is finite and exclusive, so a
 	// replacement can't be staged until the old node frees it — on-demand/spot can just add a node (replace-first).
 	reservationID := candidate.Labels()[cloudprovider.ReservationIDLabel]
 	if !terminateFirstEnabled || candidate.capacityType != v1.CapacityTypeReserved || reservationID == "" {
-		return results, false, nil
+		return results, false, blockedMsg, nil
 	}
 
 	// Pass 2: terminate-first feasibility — credit the candidate's reservation slot back and require every pod to place
@@ -217,15 +221,17 @@ func SimulateSchedulingWithReservedFallback(
 	tfResults, err := SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder,
 		[]scheduling.Options{scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity(reservationID, 1)}, simulationOpts, candidate)
 	if err != nil {
-		return results, false, err
+		return results, false, "", err
 	}
 	if tfResults.AllNonPendingPodsScheduled() {
 		// Return the credit-back Results, not pass 1's: this is the accurate post-termination picture (reactive
 		// provisioning runs strict with the freed slot available), so the caller nominates the existing nodes that
 		// absorb the freed pods without spuriously reporting the reserved-bound pods as unschedulable.
-		return tfResults, true, nil
+		return tfResults, true, "", nil
 	}
-	return results, false, nil
+	// Pass 1's errors only say why the node can't be replaced first, so also name the pods that stop terminate-first.
+	blockedMsg = strings.TrimSpace(blockedMsg) + ". If the node is terminated first, " + strings.TrimSpace(tfResults.NonPendingPodSchedulingErrors())
+	return results, false, blockedMsg, nil
 }
 
 // UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
