@@ -299,6 +299,16 @@ func (c *Controller) clearIssuanceStarted(uid types.UID) {
 }
 
 func (c *Controller) transitionToIssued(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) (reconcile.Result, error) {
+	// Initialized may already be Unknown, so its transition time can't mark issuance.
+	if _, ok := nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey]; !ok {
+		stored := nodeClaim.DeepCopy()
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+			v1.RebootIssuedAtAnnotationKey: c.clock.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 	stored := nodeClaim.DeepCopy()
 	// Preserve the fault message while advancing to Issued.
 	cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
@@ -376,9 +386,12 @@ func (c *Controller) setTerminal(ctx context.Context, nodeClaim *v1.NodeClaim, r
 	// Clear episode-scoped state so a later reboot starts clean.
 	c.clearIssuanceStarted(nodeClaim.UID)
 	// Use optimistic locking to avoid double-counting terminal metrics from stale reconciles.
-	if _, hadPreBoot := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]; hadPreBoot {
+	_, hadPreBoot := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]
+	_, hadIssuedAt := nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey]
+	if hadPreBoot || hadIssuedAt {
 		stored := nodeClaim.DeepCopy()
 		delete(nodeClaim.Annotations, v1.RebootPreBootIDAnnotationKey)
+		delete(nodeClaim.Annotations, v1.RebootIssuedAtAnnotationKey)
 		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return err
 		}
@@ -437,8 +450,13 @@ func rebootTerminationGracePeriod(nodeClaim *v1.NodeClaim) (*time.Duration, erro
 	return &d, nil
 }
 
-// Derives reboot issuance time from Initialized transitioning to Unknown.
+// Reads reboot issuance time from its annotation, falling back to Initialized transitioning to Unknown.
 func (c *Controller) issuedAt(nodeClaim *v1.NodeClaim) (time.Time, bool) {
+	if v, ok := nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey]; ok {
+		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			return t, true
+		}
+	}
 	cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 	if cond == nil || cond.Status != metav1.ConditionUnknown {
 		return time.Time{}, false
