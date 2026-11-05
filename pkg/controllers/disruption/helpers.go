@@ -447,8 +447,9 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 
 // staticReservations reports whether a static NodePool's replacement can only land in full capacity reservations, so
 // pre-spinning it would fail to launch until a reserved node frees its slot, and which compatible reservations are still
-// offered (Available, even if full). A compatible non-reserved offering, even an unavailable one, means the replacement
-// doesn't depend on a reservation slot, so the NodePool waits for that capacity rather than terminating first. A static
+// offered (Available, even if full). A compatible non-reserved offering, even a transiently unavailable one, means the
+// replacement doesn't depend on a reservation slot, so the NodePool waits for that capacity rather than terminating
+// first. An Incompatible non-reserved offering can never launch, so it doesn't count. A static
 // replacement is the bare NodePool template, so this is an offering lookup rather than a scheduling simulation.
 // GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements.
 func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudProvider, np *v1.NodePool, nct *scheduling.NodeClaimTemplate) (bool, sets.Set[string], error) {
@@ -462,6 +463,10 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 			continue
 		}
 		for _, o := range it.Offerings.Compatible(nct.Requirements) {
+			// An Incompatible non-reserved offering can never launch, so it isn't a fallback worth waiting for.
+			if o.CapacityType() != v1.CapacityTypeReserved && o.Incompatible {
+				continue
+			}
 			if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
 				return false, nil, nil
 			}

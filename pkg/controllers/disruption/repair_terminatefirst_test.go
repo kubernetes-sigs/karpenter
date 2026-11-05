@@ -632,6 +632,21 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 		})
 
+		// On-demand offerings that can never launch aren't a fallback to wait for, so the NodePool terminates first.
+		It("should terminate-first when the template's on-demand offerings are Incompatible", func() {
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available = false
+				o.Incompatible = true
+			}
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(0))
+		})
+
 		// One NodePool's lookup failure must not stop repair for the rest of the cluster.
 		It("should still repair other candidates when a static NodePool's instance types can't be resolved", func() {
 			withReservation(0)

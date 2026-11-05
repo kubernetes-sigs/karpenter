@@ -287,6 +287,27 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 			})
 
+			// On-demand offerings that can never launch aren't a fallback to wait for, so the full reservation is the only
+			// way in and the NodePool terminates first.
+			It("issues a delete-only command when the template's on-demand offerings are Incompatible", func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
+				for _, o := range mostExpensiveInstance.Offerings {
+					o.Available = false
+					o.Incompatible = true
+				}
+				withReservation(0)
+				nodePool.Spec.Template.Spec.Requirements[1].Values = []string{v1.CapacityTypeReserved, v1.CapacityTypeOnDemand}
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, staticDriftController)
+
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+				Expect(cmds[0].Replacements).To(HaveLen(0))
+			})
+
 			// The fake's offerings carry no instance-type label, as on AWS, so only filtering instance types by the template
 			// keeps a reservation outside the template from counting as capacity for the replacement.
 			It("treats the reservations as full when only an instance type outside the template has capacity", func() {
