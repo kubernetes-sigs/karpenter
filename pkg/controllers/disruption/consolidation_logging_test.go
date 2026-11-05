@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -94,6 +95,74 @@ func TestGetValidationFailureReason(t *testing.T) {
 				t.Errorf("getValidationFailureReason() = %v, want %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestValidationFailureReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: "",
+		},
+		{
+			name:     "non-validation error",
+			err:      errors.New("some other error"),
+			expected: "",
+		},
+		{
+			name:     "untagged validation error",
+			err:      NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+			expected: "",
+		},
+		{
+			name:     "tagged churn error",
+			err:      withFailureReason(NewChurnValidationError(errors.New("candidates are no longer valid")), ValidationFailureReasonChurn),
+			expected: ValidationFailureReasonChurn,
+		},
+		{
+			name:     "tagged budget error",
+			err:      withFailureReason(NewBudgetValidationError(errors.New("a candidate was nominated during validation")), ValidationFailureReasonNominated),
+			expected: ValidationFailureReasonNominated,
+		},
+		{
+			name:     "tagged generic validation error",
+			err:      withFailureReason(NewValidationError(errors.New("no candidates")), ValidationFailureReasonChurn),
+			expected: ValidationFailureReasonChurn,
+		},
+		{
+			name: "wrapped tagged scheduling error",
+			err: fmt.Errorf("validating command, %w", withFailureReason(
+				NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+				ValidationFailureReasonInstanceTypesNotSubset,
+			)),
+			expected: ValidationFailureReasonInstanceTypesNotSubset,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if result := validationFailureReason(tt.err); result != tt.expected {
+				t.Errorf("validationFailureReason() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWithFailureReasonPreservesCategory(t *testing.T) {
+	err := fmt.Errorf("validating command, %w", withFailureReason(
+		NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+		ValidationFailureReasonMultipleNodeClaims,
+	))
+	if !IsValidationError(err) {
+		t.Errorf("IsValidationError() = false, want true")
+	}
+	if reason := getValidationFailureReason(err); reason != "scheduling" {
+		t.Errorf("getValidationFailureReason() = %q, want %q", reason, "scheduling")
 	}
 }
 
