@@ -234,6 +234,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 				&coordinationv1.Lease{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
 				},
+				// Services are only read for their spec.selector (to deduce default topology spread selectors), so
+				// drop managedFields before they're stored. This is roughly a quarter to a third of each cached Service.
+				&corev1.Service{}: {
+					Transform: cache.TransformStripManagedFields(),
+				},
 			},
 		},
 		Controller: ctrlconfig.Controller{
