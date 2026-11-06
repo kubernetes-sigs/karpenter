@@ -128,9 +128,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		node = test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 
-		Expect(lo.Contains(node.OwnerReferences, metav1.OwnerReference{
+		Expect(node.OwnerReferences).To(ContainElement(metav1.OwnerReference{
 			APIVersion:         lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).GroupVersion().String(),
-			Kind:               lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).String(),
+			Kind:               lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).Kind,
 			Name:               nodeClaim.Name,
 			UID:                nodeClaim.UID,
 			BlockOwnerDeletion: new(true),

@@ -169,7 +169,7 @@ var _ = Describe("Queue", func() {
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			replacementNodeClaim := &v1.NodeClaim{}
-			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim)).To(Succeed())
 			replacementNodeClaim, _ = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim)
 
 			cluster.UpdateNodeClaim(replacementNodeClaim)
@@ -270,7 +270,7 @@ var _ = Describe("Queue", func() {
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			replacementNodeClaim := &v1.NodeClaim{}
-			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim)).To(Succeed())
 			replacementNodeClaim, replacementNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
@@ -323,10 +323,10 @@ var _ = Describe("Queue", func() {
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			replacementNodeClaim1 := &v1.NodeClaim{}
-			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim1))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim1)).To(Succeed())
 			replacementNodeClaim1, replacementNode1 := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim1)
 			replacementNodeClaim2 := &v1.NodeClaim{}
-			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[1].Name}, replacementNodeClaim2))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[1].Name}, replacementNodeClaim2)).To(Succeed())
 			replacementNodeClaim2, replacementNode2 := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim2)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
@@ -413,9 +413,9 @@ var _ = Describe("Queue", func() {
 			Expect(queue.StartCommand(ctx, cmd2)).To(BeNil())
 
 			replacementNodeClaim1 := &v1.NodeClaim{}
-			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim1))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim1)).To(Succeed())
 			replacementNodeClaim2 := &v1.NodeClaim{}
-			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd2.Replacements[0].Name}, replacementNodeClaim2))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd2.Replacements[0].Name}, replacementNodeClaim2)).To(Succeed())
 
 			replacementNodeClaim1, replacementNode1 := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim1)
 			replacementNodeClaim2, replacementNode2 := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim2)

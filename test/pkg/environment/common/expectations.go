@@ -81,7 +81,7 @@ func (env *Environment) ExpectDeleted(objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
 		Eventually(func(g Gomega) {
-			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationForeground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
+			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationBackground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
 }
@@ -1409,7 +1409,9 @@ func (env *Environment) ExpectPodMetrics() (res []PrometheusMetric) {
 	localPort := rand.IntnRange(1025, 49151)
 	env.ExpectPodPortForwarded(ctx, env.ExpectActiveKarpenterPod(), 8080, localPort)
 
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", localPort))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/metrics", localPort), nil)
+	Expect(err).ToNot(HaveOccurred())
+	resp, err := http.DefaultClient.Do(req)
 	Expect(err).ToNot(HaveOccurred())
 	reader := bufio.NewReader(resp.Body)
 	defer resp.Body.Close()
@@ -1476,9 +1478,10 @@ func (env *Environment) ExpectPodPortForwarded(ctx context.Context, pod *corev1.
 		close(stop)
 	}()
 	go func() {
+		defer GinkgoRecover()
 		fw, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", localPort, podPort)}, stop, ready, io.Discard, io.Discard)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(fw.ForwardPorts())
+		Expect(fw.ForwardPorts()).To(Succeed())
 	}()
 	<-ready
 }
