@@ -2742,6 +2742,59 @@ var _ = Describe("NodePoolState Tracking", func() {
 				Expect(deleting).To(Equal(0))
 				Expect(pendingdisruption).To(Equal(2))
 			})
+
+			It("should not revert a NodeClaim from PendingDisruption back to Active on an unrelated informer reconcile", func() {
+				cluster.NodePoolState.MarkNodeClaimPendingDisruption(nodePool.Name, nodeClaim.Name)
+				running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(pendingdisruption).To(Equal(1))
+
+				// Simulate the NodeClaim informer reconciling a status update on the NodeClaim (e.g. the
+				// Disrupting status condition patch) while it's still PendingDisruption and not yet
+				// MarkForDeletion'd. This should not move it back into Active.
+				nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, "Drifted", "Drifted")
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting, pendingdisruption = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(pendingdisruption).To(Equal(1))
+
+				// Once the disruption controller abandons the command and clears the DisruptionReason
+				// condition (state.ClearNodeClaimsCondition), the next informer reconcile should recover
+				// the NodeClaim back to Active rather than leaving it stuck as PendingDisruption forever.
+				_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDisruptionReason)
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting, pendingdisruption = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(pendingdisruption).To(Equal(0))
+			})
+
+			It("should move a NodeClaim to Deleting rather than PendingDisruption when both markedForDeletion and DisruptionReason are set", func() {
+				cluster.NodePoolState.MarkNodeClaimPendingDisruption(nodePool.Name, nodeClaim.Name)
+				running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(pendingdisruption).To(Equal(1))
+
+				// The deletion branch in UpdateNodeClaim must be checked before the DisruptionReason
+				// condition, so a NodeClaim that's both marked for deletion and still carrying the
+				// condition lands in Deleting, not stuck in PendingDisruption.
+				nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, "Drifted", "Drifted")
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting, pendingdisruption = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+				Expect(pendingdisruption).To(Equal(0))
+			})
 		})
 
 		Context("DeleteNodeClaim", func() {
