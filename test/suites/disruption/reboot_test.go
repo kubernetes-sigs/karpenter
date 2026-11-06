@@ -218,4 +218,86 @@ var _ = Describe("Reboot", func() {
 		}).WithPolling(time.Second).Should(Succeed())
 		env.ExpectNodeClaimCount("==", 10)
 	})
+
+	It("should hold the disruption budget until a rebooted node re-initializes", func() {
+		// A reboot clears initialization, and a startup taint that comes back with the boot keeps the node uninitialized
+		// after the reboot succeeds. PreferNoSchedule keeps the taint from blocking the pods.
+		startupTaint := corev1.Taint{Key: "example.com/reboot-startup-taint", Effect: corev1.TaintEffectPreferNoSchedule}
+		setStartupTaint := func(node *corev1.Node, present bool) {
+			GinkgoHelper()
+			Eventually(func(g Gomega) {
+				n := &corev1.Node{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(node), n)).To(Succeed())
+				stored := n.DeepCopy()
+				n.Spec.Taints = lo.Reject(n.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&startupTaint) })
+				if present {
+					n.Spec.Taints = append(n.Spec.Taints, startupTaint)
+				}
+				g.Expect(env.Client.Patch(env, n, client.StrategicMergeFrom(stored))).To(Succeed())
+			}).Should(Succeed())
+		}
+		nodePool.Spec.Template.Spec.StartupTaints = []corev1.Taint{startupTaint}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+		dep.Spec.Replicas = lo.ToPtr[int32](3)
+		dep.Spec.Template.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+				TopologyKey:   corev1.LabelHostname,
+				LabelSelector: dep.Spec.Selector,
+			}},
+		}}
+		env.ExpectCreated(nodeClass, nodePool, dep)
+		nodes := env.EventuallyExpectCreatedNodeCount("==", 3)
+		for _, node := range nodes {
+			setStartupTaint(node, false)
+		}
+		env.EventuallyExpectInitializedNodeCount("==", 3)
+		env.EventuallyExpectHealthyPodCount(selector, 3)
+		nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+		nodeClaimFor := func(node *corev1.Node) *v1.NodeClaim {
+			GinkgoHelper()
+			nc, ok := lo.Find(nodeClaims, func(nc *v1.NodeClaim) bool { return nc.Status.NodeName == node.Name })
+			Expect(ok).To(BeTrue(), "no NodeClaim for node %s", node.Name)
+			return nc
+		}
+		first, second := nodes[0], nodes[1]
+
+		// Reboot the first node, and bring its startup taint back while the reboot is in flight.
+		env.ExpectRebootFaultInjected(first)
+		Eventually(func(g Gomega) {
+			g.Expect(rebooting(g, nodeClaimFor(first)).StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeTrue())
+		}).Should(Succeed())
+		setStartupTaint(first, true)
+		env.ExpectRebootFaultCleared(first)
+		Eventually(func(g Gomega) {
+			cond := rebooting(g, nodeClaimFor(first)).StatusConditions().Get(v1.ConditionTypeRebooting)
+			g.Expect(cond.IsFalse()).To(BeTrue())
+			g.Expect(cond.Reason).To(Equal(v1.RebootReasonSucceeded))
+		}).Should(Succeed())
+
+		// The first node rebooted but hasn't re-initialized, so it still holds the budget of 1 and the second node's
+		// reboot waits, well past repair's toleration of the fault.
+		env.ExpectRebootFaultInjected(second)
+		Consistently(func(g Gomega) {
+			n := &corev1.Node{}
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(first), n)).To(Succeed())
+			g.Expect(n.Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+			g.Expect(rebooting(g, nodeClaimFor(second)).StatusConditions().Get(v1.ConditionTypeRebooting)).To(BeNil())
+		}, 2*time.Minute).Should(Succeed())
+
+		// Once the first node re-initializes, the budget frees up and the second node reboots.
+		setStartupTaint(first, false)
+		Eventually(func(g Gomega) {
+			n := &corev1.Node{}
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(first), n)).To(Succeed())
+			g.Expect(n.Labels).To(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
+		}).Should(Succeed())
+		Eventually(func(g Gomega) {
+			g.Expect(rebooting(g, nodeClaimFor(second)).StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeTrue())
+		}).Should(Succeed())
+		env.ExpectRebootFaultCleared(second)
+		Eventually(func(g Gomega) {
+			g.Expect(rebooting(g, nodeClaimFor(second)).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+		}).Should(Succeed())
+		env.ExpectNodeClaimCount("==", 3)
+	})
 })
