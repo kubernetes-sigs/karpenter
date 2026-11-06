@@ -71,7 +71,7 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 		}
 		return nil, fmt.Errorf("resolving node class from nodeclaim, %w", err)
 	}
-	if status := nodeClass.StatusConditions().Get(status.ConditionReady); status.IsFalse() {
+	if status := nodeClass.StatusConditions(status.WithObservedOnly()).Get(status.ConditionReady); status.IsFalse() {
 		return nil, cloudprovider.NewNodeClassNotReadyError(stderrors.New(status.Message))
 	}
 	// Kick-off a goroutine to allow us to asynchronously register nodes

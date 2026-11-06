@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
+	"github.com/awslabs/operatorpkg/status"
 
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
@@ -81,7 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// Only consider NodeClaims that are Registered since we don't want to fully rely on the CloudProvider
 	// API to trigger deletion of the Node. Instead, we'll wait for our registration timeout to trigger
 	nodeClaims = lo.Filter(nodeClaims, func(n *v1.NodeClaim, _ int) bool {
-		return n.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() &&
+		return n.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRegistered).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})

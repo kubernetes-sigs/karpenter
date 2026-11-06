@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/status"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -38,7 +39,7 @@ func (n *NodeShape) Check(_ context.Context, node *corev1.Node, nodeClaim *v1.No
 		return nil, nil
 	}
 	// and NodeClaims that haven't initialized yet
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue() {
+	if !nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInitialized).IsTrue() {
 		return nil, nil
 	}
 	var issues []Issue

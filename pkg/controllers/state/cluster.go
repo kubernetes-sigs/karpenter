@@ -27,6 +27,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -543,7 +544,7 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 			}
 			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
 			// then mark the time when we thought it can schedule to now.
-			if nodePoolName != "" && nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+			if nodePoolName != "" && nodePool.StatusConditions(status.WithObservedOnly()).IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
 				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
 			} else {
 				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an

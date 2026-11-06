@@ -63,11 +63,11 @@ var LaunchTimeout = time.Minute * 5
 
 //nolint:gocyclo
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
+	registered := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	launched := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched)
+	launched := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeLaunched)
 	if launched == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
@@ -131,7 +131,7 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 		if l.npState.DryRun(nodePool.UID, false).Status() == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
 			// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
 			// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
-			if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
+			if launchCondition := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
 				nodePool.StatusConditions(status.WithClock(l.clock)).SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "RegistrationFailed", "Failed to register node")
 			} else {
 				nodePool.StatusConditions(status.WithClock(l.clock)).SetFalse(v1.ConditionTypeNodeRegistrationHealthy, launchCondition.Reason, launchCondition.Message)

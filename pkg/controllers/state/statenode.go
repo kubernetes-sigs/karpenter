@@ -240,7 +240,7 @@ func (in *StateNode) GetRepairResult(now time.Time) health.RepairResult {
 	}
 	var rebootFinishedAt time.Time
 	if in.NodeClaim != nil {
-		if rebooting := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting); rebooting != nil && rebooting.IsFalse() {
+		if rebooting := in.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting); rebooting != nil && rebooting.IsFalse() {
 			rebootFinishedAt = rebooting.LastTransitionTime.Time
 		}
 	}
@@ -399,7 +399,7 @@ func (in *StateNode) RebootInProgress() bool {
 	if in.NodeClaim == nil {
 		return false
 	}
-	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+	cond := in.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting)
 	return cond != nil && cond.IsTrue()
 }
 
@@ -542,7 +542,7 @@ func (in *StateNode) MarkedForDeletion() bool {
 }
 
 func (in *StateNode) Deleted() bool {
-	return (in.NodeClaim != nil && (!in.NodeClaim.DeletionTimestamp.IsZero() || in.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue())) ||
+	return (in.NodeClaim != nil && (!in.NodeClaim.DeletionTimestamp.IsZero() || in.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInstanceTerminating).IsTrue())) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 

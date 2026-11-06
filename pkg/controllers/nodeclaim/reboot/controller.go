@@ -109,7 +109,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+	cond := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting)
 	// Only active reboots are reconciled here.
 	if cond == nil || !cond.IsTrue() {
 		return reconcile.Result{}, nil
@@ -437,7 +437,7 @@ func rebootTerminationGracePeriod(nodeClaim *v1.NodeClaim) (*time.Duration, erro
 
 // Derives reboot issuance time from Initialized transitioning to Unknown.
 func (c *Controller) issuedAt(nodeClaim *v1.NodeClaim) (time.Time, bool) {
-	cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
+	cond := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInitialized)
 	if cond == nil || cond.Status != metav1.ConditionUnknown {
 		return time.Time{}, false
 	}
@@ -454,7 +454,7 @@ func (c *Controller) issuanceStartedAt(nodeClaim *v1.NodeClaim) (time.Time, bool
 
 // Returns the deadline for the current reboot phase, if bounded.
 func (c *Controller) rebootDeadline(nodeClaim *v1.NodeClaim) (time.Time, bool) {
-	if nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason == v1.RebootReasonIssued {
+	if nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting).Reason == v1.RebootReasonIssued {
 		// Recovery is bounded from the durable issuance transition.
 		if issuedAt, ok := c.issuedAt(nodeClaim); ok {
 			return issuedAt.Add(observationWindow), true
@@ -475,7 +475,7 @@ func (c *Controller) pastRebootDeadline(nodeClaim *v1.NodeClaim) bool {
 
 // Maps a phase timeout to its terminal result.
 func deadlineResult(nodeClaim *v1.NodeClaim) (result, msg string) {
-	if nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason == v1.RebootReasonIssued {
+	if nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting).Reason == v1.RebootReasonIssued {
 		return resultRecoveryTimeout, "node did not recover within the observation window"
 	}
 	return resultProviderError, "reboot was not issued within the issuance timeout"
@@ -483,7 +483,7 @@ func deadlineResult(nodeClaim *v1.NodeClaim) (result, msg string) {
 
 // Returns when the current reboot episode was requested.
 func rebootRequestedAt(nodeClaim *v1.NodeClaim) time.Time {
-	return nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).LastTransitionTime.Time
+	return nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting).LastTransitionTime.Time
 }
 
 // Returns a stable per-episode idempotency key for provider reboot calls.

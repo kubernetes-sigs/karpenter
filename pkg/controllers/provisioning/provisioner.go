@@ -294,7 +294,7 @@ func (p *Provisioner) NewScheduler(
 		if nodepoolutils.IsStatic(np) {
 			return false
 		}
-		if !np.StatusConditions().IsTrue(status.ConditionReady) {
+		if !np.StatusConditions(status.WithObservedOnly()).IsTrue(status.ConditionReady) {
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
 			return false
 		}

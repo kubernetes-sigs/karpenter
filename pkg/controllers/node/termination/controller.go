@@ -166,7 +166,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 			return reconcile.Result{}, fmt.Errorf("updating nodeclaim, %w", err)
 		}
 		// We only increment the drained metric after we have ensured that we have patched the status condition onto the NodeClaim
-		if !stored.StatusConditions().IsTrue(v1.ConditionTypeDrained) && nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeDrained) {
+		if !stored.StatusConditions(status.WithObservedOnly()).IsTrue(v1.ConditionTypeDrained) && nodeClaim.StatusConditions(status.WithObservedOnly()).IsTrue(v1.ConditionTypeDrained) {
 			// We'll only increment this metric if there is a NodeClaim present for the node, but this prevents us from double
 			// counting over multiple reconciles.
 			NodesDrainedTotal.Inc(map[string]string{
