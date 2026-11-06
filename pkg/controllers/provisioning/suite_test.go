@@ -2033,6 +2033,41 @@ var _ = Describe("Provisioning", func() {
 			ExpectMetricGaugeValue(pscheduling.IgnoredPodCount, 1, nil)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
+		It("should not schedule a pod whose volume topology lookup fails", func() {
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{
+				StorageClassName: "",
+				Zones:            []string{"test-zone-1"},
+			})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: new(""),
+				VolumeName:       persistentVolume.Name,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolume, persistentVolumeClaim)
+			// The first Get of the volume is the topology lookup in NewScheduler, so only that lookup fails
+			kubeClient := &failFirstPersistentVolumeGet{Client: env.Client, name: persistentVolume.Name}
+			failingProv := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client), predictionStore)
+			podB := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "b"}},
+			})
+			podA := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "b"}},
+					TopologyKey:   corev1.LabelHostname,
+				}},
+			})
+			ExpectApplied(ctx, env.Client, podA, podB)
+			pods := []*corev1.Pod{podA, podB}
+			s, err := failingProv.NewScheduler(ctx, pods, nil, nil)
+			Expect(err).ToNot(HaveOccurred())
+			results, err := s.Solve(ctx, pods)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(results.PodErrors).To(HaveKey(podA))
+			Expect(results.PodErrors).ToNot(HaveKey(podB))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Pods).To(ConsistOf(podB))
+		})
 		It("should schedule with an empty storage class if the pvc is bound", func() {
 			storageClass := ""
 			volumeName := "test-volume"
@@ -3564,4 +3599,19 @@ func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources
 		}),
 	))
 	return instanceTypes
+}
+
+// failFirstPersistentVolumeGet fails the first Get of the named PersistentVolume, as a transient API error would
+type failFirstPersistentVolumeGet struct {
+	client.Client
+	name   string
+	failed bool
+}
+
+func (c *failFirstPersistentVolumeGet) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.PersistentVolume); ok && key.Name == c.name && !c.failed {
+		c.failed = true
+		return fmt.Errorf("transient error")
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
 }
