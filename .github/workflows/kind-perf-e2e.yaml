@@ -8,11 +8,80 @@ on:
     types:
       - completed
   workflow_dispatch:
+    inputs:
+      iterations:
+        type: string
+        required: false
+        description: "Samples per test. Overrides PERF_ITERATIONS for one run."
+permissions:
+  contents: read
+env:
+  PERF_ITERATIONS: "1"
 jobs:
-  kind-perf-e2e:
+  plan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # download-artifact reads an artifact of the triggering run
+    outputs:
+      iterations: ${{ steps.plan.outputs.iterations }}
+      indices: ${{ steps.plan.outputs.indices }}
+      git_ref: ${{ steps.ref.outputs.git_ref }}
+    steps:
+    - name: Download the ApprovalComment metadata
+      if: github.event_name == 'workflow_run'
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        name: artifacts
+        path: /tmp/approval
+        run-id: ${{ github.event.workflow_run.id }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Resolve the commit under test
+      id: ref
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "$EVENT_NAME" != "workflow_run" ]]; then
+          echo "git_ref=" >> "$GITHUB_OUTPUT"
+          echo "$EVENT_NAME: leaving the ref at the checkout default"
+          exit 0
+        fi
+        meta=/tmp/approval/metadata.txt
+        if [[ ! -f "$meta" ]]; then
+          echo "::error title=ApprovalComment metadata missing::no $meta, so there is no commit to measure" >&2
+          exit 1
+        fi
+        sha="$(tail -n 1 "$meta")"
+        if ! [[ "$sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+          echo "::error title=Unusable review commit::'$sha' is not a 40-character SHA" >&2
+          exit 1
+        fi
+        echo "git_ref=$sha" >> "$GITHUB_OUTPUT"
+        echo "measuring $sha"
+    - name: plan the sample matrix
+      id: plan
+      env:
+        REQUESTED: ${{ inputs.iterations }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        n="${REQUESTED:-$PERF_ITERATIONS}"
+        if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
+          echo "iterations must be a positive integer, got '$n'" >&2
+          exit 1
+        fi
+        {
+          echo "iterations=$n"
+          echo "indices=$(jq -nc --argjson n "$n" '[range(1; $n + 1)]')"
+        } >> "$GITHUB_OUTPUT"
+  kind-perf-e2e:
+    needs: plan
     permissions:
       issues: write
+      contents: read # a called workflow's jobs cannot exceed the caller's grant
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +106,48 @@ jobs:
             focus: "Balanced Churn Chain"
           - name: "Balanced Heterogeneous NodePools"
             focus: "Balanced Heterogeneous NodePools"
+        iteration: ${{ fromJSON(needs.plan.outputs.indices) }}
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performance
       focus: ${{ matrix.test.focus }}
       test_name: ${{ matrix.test.name }}
+      iteration: ${{ matrix.iteration }}
+      git_ref: ${{ needs.plan.outputs.git_ref }}
+  perf-aggregate:
+    needs: [plan, kind-perf-e2e]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    name: aggregate ${{ needs.plan.outputs.iterations }} sample(s) per test
+    env:
+      OUTPUT_DIR: ${{ github.workspace }}/perf-batch
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version-file: go.mod
+        check-latest: true
+        cache: false
+    - name: Download this run's samples
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      continue-on-error: true
+      with:
+        pattern: performance-results-*-${{ github.run_id }}
+        path: ${{ env.OUTPUT_DIR }}
+    - name: Aggregate the batch
+      env:
+        ITERATIONS: ${{ needs.plan.outputs.iterations }}
+        COMMIT: ${{ needs.plan.outputs.git_ref || github.sha }}
+      shell: bash
+      run: go run ./.github/scripts/perf-aggregate
+    - name: Upload the batch summary
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: performance-batch-summary-${{ github.run_id }}
+        path: ${{ env.OUTPUT_DIR }}/aggregated_summary.json
+        retention-days: 30
+        if-no-files-found: ignore
