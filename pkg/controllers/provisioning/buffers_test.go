@@ -181,6 +181,15 @@ var _ = Describe("computeProvisioningCondition", func() {
 		Expect(cond).ToNot(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+		Expect(cond.Message).To(Equal("1/3 on existing capacity, 2 require new capacity, 0 failed"))
+	})
+
+	It("should count the failed virtual pods in the RequiresNewCapacity message", func() {
+		cb := test.ReadyBuffer("web", 10)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 4, failed: 6, desiredReplicas: 10})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+		Expect(cond.Message).To(Equal("4/10 on existing capacity, 0 require new capacity, 6 failed"))
 	})
 
 	It("should return False/NotReadyForProvisioning when buffer is not ready", func() {

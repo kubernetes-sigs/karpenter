@@ -175,7 +175,7 @@ func computeProvisioningCondition(cb *autoscalingv1beta1.CapacityBuffer, s *buff
 			Type:               autoscalingv1beta1.ProvisioningCondition,
 			Status:             metav1.ConditionFalse,
 			Reason:             "RequiresNewCapacity",
-			Message:            fmt.Sprintf("%d/%d virtual pods required new capacity, %d failed", s.requiresNewClaim, s.desiredReplicas, s.failed),
+			Message:            fmt.Sprintf("%d/%d on existing capacity, %d require new capacity, %d failed", s.existing, s.desiredReplicas, s.requiresNewClaim, s.failed),
 			ObservedGeneration: cb.Generation,
 			LastTransitionTime: now,
 		}
