@@ -231,7 +231,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			}}, nil
 		}
 		// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
-		results, terminateFirst, blockedMsg, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate,
+		results, terminateFirst, secondPassErr, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate,
 			terminateFirstEnabled, SimulationOptions{IncludeBlockedCandidatePods: true})
 		if err != nil {
 			if errors.Is(err, errCandidateDeleting) {
@@ -249,7 +249,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {
-			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, blockedMsg)...)
+			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, blockedMessage(results, secondPassErr))...)
 			continue
 		}
 		return []Command{{
