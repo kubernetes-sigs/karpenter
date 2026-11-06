@@ -607,6 +607,30 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(1))
 		})
 
+		// An offering is unavailable after a launch failure, such as an insufficient capacity error, and comes back on its
+		// own. A launch failure must never flip a NodePool to terminate-first, wherever the fallback is.
+		It("does NOT terminate-first when the on-demand fallback on another instance type is only temporarily unavailable", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			// The reserved instance type is only sold through the reservation. The other instance type's offerings are
+			// unavailable, as after an insufficient capacity error.
+			mostExpensiveInstance.Offerings = nil
+			for _, o := range leastExpensiveInstance.Offerings {
+				o.Available = false
+			}
+			setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand) // full but healthy, on-demand fallback allowed
+			nodePool.Spec.Template.Spec.Requirements[0].Values = append(nodePool.Spec.Template.Spec.Requirements[0].Values, leastExpensiveInstance.Name)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			// Drift can't stage a replacement until the fallback is available again, so it's Blocked.
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		})
+
 		It("replaces-first when the reservation still has a spare slot", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(5, true, v1.CapacityTypeReserved) // spare reservation capacity -> can grow in place
@@ -655,6 +679,29 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 			Expect(cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
+		})
+
+		It("weighted: does NOT terminate-first when the lower-weight on-demand NodePool is only temporarily unavailable", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			// Mark the on-demand and spot offerings unavailable, as after an insufficient capacity error.
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available = false
+			}
+			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
+			od := setupODFallbackNodePool()
+			od.Spec.Template.Spec.Requirements = append(od.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+				Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, od, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			// Drift can't stage a replacement until the fallback is available again, so it's Blocked.
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
 		})
 
 		It("weighted: an unavailable reserved NodePool replaces-first onto a lower-weight on-demand NodePool", func() {
