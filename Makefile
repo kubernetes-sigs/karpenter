@@ -196,8 +196,8 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 		fi;}
 	go tool -modfile=go.tools.mod actionlint -oneline
 
-download: ## Recursively "go mod download" on all directories where go.mod exists
-	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
+download: ## Download module dependencies
+	go mod download
 
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
