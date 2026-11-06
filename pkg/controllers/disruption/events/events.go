@@ -78,21 +78,26 @@ func WaitingOnReadiness(nodeClaim *v1.NodeClaim) events.Event {
 	}
 }
 
-func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
+// Terminating says why a node is disrupted and, when terminateFirstExplanation is set, why it goes before its replacement.
+func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason, terminateFirstExplanation string) []events.Event {
+	detail := cases.Title(language.Und, cases.NoLower).String(reason)
+	if terminateFirstExplanation != "" {
+		detail += ", terminating it before its replacement because " + terminateFirstExplanation
+	}
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           corev1.EventTypeNormal,
 			Reason:         events.DisruptionTerminating,
-			Message:        fmt.Sprintf("Disrupting Node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
-			DedupeValues:   []string{string(node.UID), reason},
+			Message:        fmt.Sprintf("Disrupting Node: %s", detail),
+			DedupeValues:   []string{string(node.UID), reason, terminateFirstExplanation},
 		},
 		{
 			InvolvedObject: nodeClaim,
 			Type:           corev1.EventTypeNormal,
 			Reason:         events.DisruptionTerminating,
-			Message:        fmt.Sprintf("Disrupting NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
-			DedupeValues:   []string{string(nodeClaim.UID), reason},
+			Message:        fmt.Sprintf("Disrupting NodeClaim: %s", detail),
+			DedupeValues:   []string{string(nodeClaim.UID), reason, terminateFirstExplanation},
 		},
 	}
 }

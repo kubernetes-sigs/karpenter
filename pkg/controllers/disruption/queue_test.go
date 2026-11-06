@@ -286,7 +286,7 @@ var _ = Describe("Queue", func() {
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 
-			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, string(cmd.Reason()))
+			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, string(cmd.Reason()), "")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
 
@@ -368,7 +368,7 @@ var _ = Describe("Queue", func() {
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 
-			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, string(cmd.Reason()))
+			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, string(cmd.Reason()), "")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
 
@@ -376,6 +376,32 @@ var _ = Describe("Queue", func() {
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
 		})
+		DescribeTable("should publish the termination event",
+			func(reason disruption.TerminateFirstReason, suffix string) {
+				ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+				stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+				cmd := &disruption.Command{
+					Method:               disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+					CreationTimestamp:    env.Clock.Now(),
+					ID:                   uuid.New(),
+					Results:              scheduling.Results{},
+					Candidates:           []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+					TerminateFirstReason: reason,
+				}
+				Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+				ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+				Expect(recorder.DetectedEvent("Disrupting Node: Drifted" + suffix)).To(BeTrue())
+				Expect(recorder.DetectedEvent("Disrupting NodeClaim: Drifted" + suffix)).To(BeTrue())
+			},
+			Entry("for a node that doesn't go before its replacement", disruption.TerminateFirstReason(""), ""),
+			Entry("for a node that goes before its replacement because its capacity reservation is full", disruption.TerminateFirstNoReservedCapacity,
+				", terminating it before its replacement because its capacity reservation is full"),
+			Entry("for a node that goes before its replacement because its NodePool is at its node limit", disruption.TerminateFirstStaticAtLimit,
+				", terminating it before its replacement because its NodePool is at its node limit"),
+		)
 		It("should finish two commands in order as replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
