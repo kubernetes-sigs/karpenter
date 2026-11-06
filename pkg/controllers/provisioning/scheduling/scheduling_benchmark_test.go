@@ -108,6 +108,50 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 	benchmarkScheduler(b, makePreferencePods(4000), scheduling.IgnorePreferences)
 }
 
+// The EqualWeightNodePools benchmarks schedule against several NodePools of equal weight sharing the same instance
+// types. With PriceTieBreak disabled the scheduler stops at the first NodePool that fits; with it enabled every
+// equal-weight NodePool is evaluated to compare launch prices.
+func BenchmarkSchedulingEqualWeightNodePools2(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 2, false)
+}
+func BenchmarkSchedulingEqualWeightNodePools5(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 5, false)
+}
+func BenchmarkSchedulingEqualWeightNodePools10(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, false)
+}
+func BenchmarkSchedulingEqualWeightNodePools2PriceTieBreak(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 2, true)
+}
+func BenchmarkSchedulingEqualWeightNodePools5PriceTieBreak(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 5, true)
+}
+func BenchmarkSchedulingEqualWeightNodePools10PriceTieBreak(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, true)
+}
+
+// The OneWorker variants schedule with a single worker, as Karpenter does when its controller requests 1 CPU or less
+// (the worker count is ceil(CPU requests / 1000m)). Without parallel workers, the scheduler evaluates templates one at
+// a time with PriceTieBreak disabled as well.
+func BenchmarkSchedulingEqualWeightNodePools2OneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 2, false, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools5OneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 5, false, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools10OneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, false, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools2PriceTieBreakOneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 2, true, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools5PriceTieBreakOneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 5, true, scheduling.NumConcurrentReconciles(1))
+}
+func BenchmarkSchedulingEqualWeightNodePools10PriceTieBreakOneWorker(b *testing.B) {
+	benchmarkSchedulerWithNodePools(b, makeDiversePods(2000), 10, true, scheduling.NumConcurrentReconciles(1))
+}
+
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile
@@ -160,8 +204,14 @@ func TestSchedulingProfile(t *testing.T) {
 }
 
 func benchmarkScheduler(b *testing.B, pods []*corev1.Pod, opts ...scheduling.Options) {
-	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
-	scheduler, err := setupScheduler(ctx, pods, append(opts, scheduling.NumConcurrentReconciles(5))...)
+	benchmarkSchedulerWithNodePools(b, pods, 1, false, opts...)
+}
+
+func benchmarkSchedulerWithNodePools(b *testing.B, pods []*corev1.Pod, nodePoolCount int, priceTieBreak bool, opts ...scheduling.Options) {
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"),
+		test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PriceTieBreak: lo.ToPtr(priceTieBreak)}}))
+	// Callers may override the worker count, so it goes first
+	scheduler, err := setupScheduler(ctx, pods, nodePoolCount, append([]scheduling.Options{scheduling.NumConcurrentReconciles(5)}, opts...)...)
 	if err != nil {
 		b.Fatalf("creating scheduler, %s", err)
 	}
@@ -214,14 +264,17 @@ func benchmarkScheduler(b *testing.B, pods []*corev1.Pod, opts ...scheduling.Opt
 	b.ReportMetric(float64(nodesInRound1), "nodes")
 }
 
-func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
-	nodePool := test.NodePool(v1.NodePool{
-		Spec: v1.NodePoolSpec{
-			Limits: v1.Limits{
-				corev1.ResourceCPU:    resource.MustParse("10000000"),
-				corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+func setupScheduler(ctx context.Context, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+	// NodePools of equal weight, all offering the same instance types
+	nodePools := lo.Times(nodePoolCount, func(_ int) *v1.NodePool {
+		return test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Limits: v1.Limits{
+					corev1.ResourceCPU:    resource.MustParse("10000000"),
+					corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+				},
 			},
-		},
+		})
 	})
 
 	// Apply limits to both of the NodePools
@@ -232,9 +285,10 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 	client := fakecr.NewFakeClient()
 	clock := &clock.RealClock{}
 	cluster = state.NewCluster(clock, client, cloudProvider)
-	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
-		nodePool.Name: instanceTypes,
-	}, pods, opts...)
+	instanceTypesByNodePool := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, []*cloudprovider.InstanceType) {
+		return np.Name, instanceTypes
+	})
+	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, nodePools, instanceTypesByNodePool, pods, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating topology, %w", err)
 	}
@@ -242,11 +296,11 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 	return scheduling.NewScheduler(
 		ctx,
 		client,
-		[]*v1.NodePool{nodePool},
+		nodePools,
 		cluster,
 		nil,
 		topology,
-		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes},
+		instanceTypesByNodePool,
 		nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		clock,
