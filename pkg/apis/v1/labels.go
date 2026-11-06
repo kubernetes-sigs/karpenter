@@ -59,6 +59,7 @@ const (
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
 	RebootPreBootIDAnnotationKey               = apis.Group + "/reboot-pre-boot-id"
+	RebootIssuedAtAnnotationKey                = apis.Group + "/reboot-issued-at"
 	RebootTerminationGracePeriodAnnotationKey  = apis.Group + "/reboot-termination-grace-period"
 	DRADriversAnnotationKey                    = apis.Group + "/requested-dra-drivers"
 	DisruptionCostAnnotationKey                = apis.Group + "/disruption-cost"
@@ -133,6 +134,15 @@ var (
 		Stage:        docs.Alpha,
 		InternalOnly: true,
 	}
+	RebootIssuedAtAnnotation = wellknown.Annotation{
+		Name:    RebootIssuedAtAnnotationKey,
+		Example: "2026-11-05T02:26:51.650Z",
+		UsedOn:  []runtime.Object{&NodeClaim{}},
+		Help: "Karpenter sets this to the time it issued a reboot and bounds recovery from it. Removed when the " +
+			"reboot completes.",
+		Stage:        docs.Alpha,
+		InternalOnly: true,
+	}
 	RebootPreBootIDAnnotation = wellknown.Annotation{
 		Name:    RebootPreBootIDAnnotationKey,
 		Example: "2b6c2f9e-3a8d-4f4e-9c1a-7d5e8b0f6a12",
@@ -183,6 +193,7 @@ var KarpenterAnnotations = []wellknown.Annotation{
 	NodeClaimTerminationTimestampAnnotation,
 	NodeClaimMinValuesRelaxedAnnotation,
 	RebootPreBootIDAnnotation,
+	RebootIssuedAtAnnotation,
 	RebootTerminationGracePeriodAnnotation,
 	DRADriversAnnotation,
 	DisruptionCostAnnotation,
