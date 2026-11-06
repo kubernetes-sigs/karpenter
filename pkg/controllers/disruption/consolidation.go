@@ -61,6 +61,8 @@ type consolidation struct {
 	// evaluator is initialized non-nil at construction. SetNodePoolTotals
 	// replaces it with a balancedEvaluator carrying the new totals.
 	evaluator Evaluator
+	// report is what the method reports about its current evaluation, taken by disrupt() after each one
+	report evaluationReport
 }
 
 // NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.

@@ -51,6 +51,7 @@ func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodO
 // ComputeCommand generates a disruption command given candidates
 func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if s.IsConsolidated() {
+		s.report.skipped = true
 		return []Command{}, nil
 	}
 	candidates = s.SortCandidates(ctx, candidates)
@@ -64,6 +65,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
 			ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: s.ConsolidationType()})
+			s.report.timedOut = true
 			log.FromContext(ctx).V(1).Info("abandoning single-node consolidation due to timeout", "candidates_evaluated", i)
 
 			s.PreviouslyUnseenNodePools = unseenNodePools
@@ -87,6 +89,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		}
 
 		// compute a possible consolidation option
+		s.report.evaluated++
 		cmd, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed computing consolidation")
@@ -103,6 +106,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 			if IsValidationError(err) {
 				reason := getValidationFailureReason(err)
 				cmd.EmitRejectedEvents(s.recorder, reason)
+				s.report.validationFailed = true
 				return []Command{}, nil
 			}
 			return []Command{}, fmt.Errorf("validating consolidation, %w", err)
