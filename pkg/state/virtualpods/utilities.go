@@ -101,7 +101,7 @@ func BuildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodTemp
 					autoscalingv1beta1.BufferNameAnnotation:      cb.Name,
 					autoscalingv1beta1.BufferNamespaceAnnotation: cb.Namespace,
 				},
-				CreationTimestamp: metav1.NewTime(time.Now()),
+				CreationTimestamp: metav1.NewTime(time.Now()), //nolint:forbidigo // placeholder pod; BuildVirtualPods has no clock to thread
 			},
 			Spec: strippedSpec,
 			Status: corev1.PodStatus{
