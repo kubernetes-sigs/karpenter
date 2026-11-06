@@ -2228,6 +2228,32 @@ var _ = Describe("Topology", func() {
 			}
 			Expect(len(nodeNames)).To(Equal(1))
 		})
+		It("should bootstrap self pod affinity (zone) into a single zone", func() {
+			// Each pod is its own affinity group and the shared host port forces one NodeClaim per pod, so every
+			// NodeClaim comes from a bootstrap. Domain choice follows map order, so use enough pods to catch two zones.
+			var pods []*corev1.Pod
+			for i := range 10 {
+				affLabels := map[string]string{"security": fmt.Sprintf("s%d", i)}
+				pods = append(pods, test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
+					PodRequirements: []corev1.PodAffinityTerm{{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: affLabels},
+						TopologyKey:   corev1.LabelTopologyZone,
+					}},
+					HostPorts: []int32{80},
+				}))
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(cloudProvider.CreateCalls).To(HaveLen(len(pods)))
+			for _, nc := range cloudProvider.CreateCalls {
+				zone, ok := lo.Find(nc.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool {
+					return r.Key == corev1.LabelTopologyZone
+				})
+				Expect(ok).To(BeTrue())
+				Expect(zone.Values).To(HaveLen(1))
+			}
+		})
 		It("should allow two nodes to be created when two pods with matching affinities have incompatible selectors", func() {
 			affLabels := map[string]string{"security": "s1"}
 			// the pod needs to provide it's own zonal affinity, but we further limit it to only being on test-zone-2
