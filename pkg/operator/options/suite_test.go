@@ -363,6 +363,7 @@ var _ = Describe("Options", func() {
 			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
 			Entry("when NodeOverlay is overridden", "NodeOverlay"),
 			Entry("when StaticCapacity is overridden", "StaticCapacity"),
+			Entry("when StaticCapacityAvailabilityCheck is overridden", options.StaticCapacityAvailabilityCheckFeatureGate.Name),
 			Entry("when CapacityBuffer is overridden", "CapacityBuffer"),
 			Entry("when TerminateFirstDrift is overridden", "TerminateFirstDrift"),
 			Entry("when TerminateFirstRepair is overridden", "TerminateFirstRepair"),
@@ -377,6 +378,26 @@ var _ = Describe("Options", func() {
 		},
 		Entry("implicit false", "", false),
 	)
+
+	Context("StaticCapacityAvailabilityCheck", func() {
+		DescribeTable("should parse the availability check without enabling static capacity", func(value string, enabled bool) {
+			Expect(opts.Parse(fs, "--feature-gates", value)).To(Succeed())
+			Expect(opts.FeatureGates.StaticCapacityAvailabilityCheck).To(Equal(enabled))
+			Expect(opts.FeatureGates.StaticCapacity).To(BeFalse())
+		},
+			Entry("default off", "", false),
+			Entry("explicitly disabled", options.StaticCapacityAvailabilityCheckFeatureGate.Name+"=false", false),
+			Entry("explicitly enabled", options.StaticCapacityAvailabilityCheckFeatureGate.Name+"=true", true),
+		)
+		It("should be set through FEATURE_GATES", func() {
+			os.Setenv("FEATURE_GATES", options.StaticCapacityAvailabilityCheckFeatureGate.Name+"=true")
+			fs = &options.FlagSet{FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError)}
+			opts = &options.Options{}
+			opts.AddFlags(fs)
+			Expect(opts.Parse(fs)).To(Succeed())
+			Expect(opts.FeatureGates.StaticCapacityAvailabilityCheck).To(BeTrue())
+		})
+	})
 
 	Context("LegacyNodeRepair", func() {
 		It("should default to false", func() {
@@ -598,6 +619,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
 	Expect(optsA.FeatureGates.NodeOverlay).To(Equal(optsB.FeatureGates.NodeOverlay))
 	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
+	Expect(optsA.FeatureGates.StaticCapacityAvailabilityCheck).To(Equal(optsB.FeatureGates.StaticCapacityAvailabilityCheck))
 	Expect(optsA.FeatureGates.CapacityBuffer).To(Equal(optsB.FeatureGates.CapacityBuffer))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
 	Expect(optsA.FeatureGates.TerminateFirstDrift).To(Equal(optsB.FeatureGates.TerminateFirstDrift))

@@ -49,6 +49,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -98,17 +99,19 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, np)
-	if err != nil {
-		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
-	}
-	requirements := scheduling.NewNodeClaimTemplate(np).Requirements
-	if !lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.Requirements.Intersects(requirements) == nil && it.Offerings.Launchable().HasCompatible(requirements)
-	}) {
-		// Availability cache changes do not enqueue NodePools, so retry without creating claims that cannot launch.
-		log.FromContext(ctx).V(1).Info("no compatible available offerings")
-		return reconcile.Result{RequeueAfter: time.Minute}, nil
+	if options.FromContext(ctx).FeatureGates.StaticCapacityAvailabilityCheck {
+		instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, np)
+		if err != nil {
+			return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
+		}
+		requirements := scheduling.NewNodeClaimTemplate(np).Requirements
+		if !lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool {
+			return it.Requirements.Intersects(requirements) == nil && it.Offerings.Launchable().HasCompatible(requirements)
+		}) {
+			// Availability cache changes do not enqueue NodePools, so retry without creating claims that cannot launch.
+			log.FromContext(ctx).V(1).Info("no compatible available offerings")
+			return reconcile.Result{RequeueAfter: time.Minute}, nil
+		}
 	}
 
 	limit, ok := np.Spec.Limits[resources.Node]
@@ -131,7 +134,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		})
 	}
 
-	_, err = c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
+	_, err := c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("creating nodeclaims, %w", err)
 	}

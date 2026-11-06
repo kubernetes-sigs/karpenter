@@ -155,6 +155,9 @@ settings:
   # -- Feature Gate configuration values. Feature Gates will follow the same graduation process and requirements as feature gates
   # in Kubernetes. More information here https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/#feature-gates-for-alpha-or-beta-features
   featureGates:
+    # -- staticCapacityAvailabilityCheck is ALPHA and is disabled by default.
+    # Checks for compatible launchable offerings before creating static NodeClaims, adding instance-type lookups during static scale-up. Requires staticCapacity.
+    staticCapacityAvailabilityCheck: false
     # -- spotToSpotConsolidation is ALPHA and is disabled by default.
     # Setting this to true will enable spot replacement consolidation for both single and multi-node consolidation.
     spotToSpotConsolidation: false
@@ -169,4 +172,3 @@ settings:
     # -- predictionEnabled is ALPHA and is disabled by default.
     # Setting this to true will enable Karpenter to size nodes using VPA predictions during provisioning and disruption.
     predictionEnabled: false
-

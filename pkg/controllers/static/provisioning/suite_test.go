@@ -59,6 +59,16 @@ type failingClient struct {
 	client.Client
 }
 
+type lookupCountingCloudProvider struct {
+	*fake.CloudProvider
+	lookups int
+}
+
+func (c *lookupCountingCloudProvider) GetInstanceTypes(ctx context.Context, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	c.lookups++
+	return c.CloudProvider.GetInstanceTypes(ctx, np)
+}
+
 func (f *failingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
 	if _, ok := obj.(*v1.NodeClaim); ok {
 		return fmt.Errorf("simulated error creating nodeclaims")
@@ -100,7 +110,9 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	ctx = options.ToContext(ctx, test.Options())
+	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{
+		StaticCapacityAvailabilityCheck: new(true),
+	}}))
 	cloudProvider.Reset()
 	cluster.Reset()
 
@@ -123,6 +135,28 @@ var _ = AfterEach(func() {
 
 var _ = Describe("Static Provisioning Controller", func() {
 	Context("Reconcile", func() {
+		DescribeTable("should skip instance type lookups when the availability check is disabled", func(enabled *bool) {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{
+				StaticCapacityAvailabilityCheck: enabled,
+			}}))
+			Expect(options.FromContext(ctx).FeatureGates.StaticCapacityAvailabilityCheck).To(BeFalse())
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(1))
+			cloudProvider.ErrorsForNodePool[nodePool.Name] = fmt.Errorf("lookup must not be called")
+			provider := &lookupCountingCloudProvider{CloudProvider: cloudProvider}
+			uncheckedController := static.NewController(env.Client, cluster, events.NewRecorder(&record.FakeRecorder{}), provider, prov, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client))
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result := ExpectObjectReconciled(ctx, env.Client, uncheckedController, nodePool)
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+			Expect(provider.lookups).To(BeZero())
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(1))
+		},
+			Entry("default off", (*bool)(nil)),
+			Entry("explicitly disabled", new(false)),
+		)
 		DescribeTable("should wait for compatible available offerings", func(key, value string, templateLabel bool, expectedClaims int) {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = new(int64(1))
