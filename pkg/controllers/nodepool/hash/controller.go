@@ -19,6 +19,7 @@ package hash
 import (
 	"context"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -111,7 +112,7 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1.NodePool) e
 
 			// Any NodeClaim that is already drifted will remain drifted if the karpenter.sh/nodepool-hash-version doesn't match
 			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
-			if nc.StatusConditions().Get(v1.ConditionTypeDrifted) == nil {
+			if nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDrifted) == nil {
 				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
 					v1.NodePoolHashAnnotationKey: np.Hash(),
 				})

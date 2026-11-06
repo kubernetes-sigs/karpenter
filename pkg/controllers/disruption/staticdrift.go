@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -54,7 +55,7 @@ func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisione
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *StaticDrift) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	return c.OwnedByStaticNodePool() && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
+	return c.OwnedByStaticNodePool() && c.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
 func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
@@ -148,7 +149,7 @@ func (d *StaticDrift) unreplaceableCommands(ctx context.Context, np *v1.NodePool
 	reason TerminateFirstReason, blockedReason string) []Command {
 	// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand the workload
 	// with no replacement.
-	terminateFirst := options.FromContext(ctx).FeatureGates.TerminateFirstDrift && np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
+	terminateFirst := options.FromContext(ctx).FeatureGates.TerminateFirstDrift && np.StatusConditions(status.WithObservedOnly()).Root().IsTrue() && np.DeletionTimestamp.IsZero()
 	var cmds []Command
 	for _, c := range candidates {
 		if terminateFirst && canTerminateFirst(c) {
