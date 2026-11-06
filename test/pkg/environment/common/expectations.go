@@ -194,8 +194,8 @@ func (env *Environment) ExpectCreatedOrUpdated(objects ...client.Object) {
 	}
 }
 
-// ExpectRepairFaultInjected makes a node repair-eligible by injecting env.RepairCondition(), backdated past any
-// RepairPolicy toleration so repair can act on it immediately.
+// ExpectRepairFaultInjected makes a node repair-eligible by injecting env.RepairCondition(). Repair counts the fault
+// from the node's creation at the earliest, so it's eligible once the node is older than its RepairPolicy's toleration.
 func (env *Environment) ExpectRepairFaultInjected(node *corev1.Node) {
 	GinkgoHelper()
 	cond, ok := env.RepairCondition()
@@ -237,9 +237,9 @@ func (env *Environment) expectNodeConditionsPatched(name string, mutate func(*co
 	}).WithTimeout(time.Second * 10).Should(Succeed())
 }
 
-// ExpectRebootFaultInjected makes repair reboot a node by injecting env.RebootCondition(). Unlike a repair fault, it's
-// backdated only 11 minutes: past a reboot policy's toleration, but before a longer-toleration replace policy on the
-// same condition is also eligible, since repair takes the most disruptive eligible action.
+// ExpectRebootFaultInjected makes repair reboot a node by injecting env.RebootCondition(). Repair counts it from the
+// node's creation or its last reboot, whichever is later. It's backdated only 11 minutes so a replace policy for it
+// that waits longer than that isn't eligible too, since repair takes the most disruptive eligible action.
 func (env *Environment) ExpectRebootFaultInjected(node *corev1.Node) {
 	GinkgoHelper()
 	cond, ok := env.RebootCondition()

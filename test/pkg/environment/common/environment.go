@@ -206,9 +206,9 @@ func (env *Environment) RepairCondition() (corev1.NodeCondition, bool) {
 }
 
 // RebootCondition returns the node condition reboot specs inject to make repair reboot a node: --reboot-condition if
-// set, otherwise KWOK's simulated condition. A provider's policies must reboot it once it's about 11 minutes old (see
-// ExpectRebootFaultInjected) with no replace policy on the same condition eligible yet, and nothing on the node may
-// reset it. ok is false when the provider has none configured.
+// set, otherwise KWOK's simulated condition. A provider's reboot policy for it must wait less than any replace policy
+// for the same condition (see ExpectRebootFaultInjected), and nothing on the node may reset it. ok is false when the
+// provider has none configured.
 func (env *Environment) RebootCondition() (corev1.NodeCondition, bool) {
 	if value := lo.FromPtr(rebootCondition); value != "" {
 		return parseCondition("reboot-condition", value), true
