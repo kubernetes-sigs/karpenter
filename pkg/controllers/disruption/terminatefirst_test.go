@@ -657,6 +657,48 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
 		})
 
+		// The freed slot is one node, and these pods can't share a node. Once one pod takes the slot, the reservation is full
+		// again, so the other pod should fall through to the lower-weight on-demand NodePool.
+		It("weighted: terminates first when a surplus flexible pod can fall through to a lower-weight on-demand NodePool", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
+			od := setupODFallbackNodePool()
+			ExpectApplied(ctx, env.Client, nodePool, od, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+			// The pods can't share a node.
+			newPod := func(cpu string, nodeSelector map[string]string) *corev1.Pod {
+				return test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"tf-spread": "x"},
+						OwnerReferences: []metav1.OwnerReference{{
+							APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+						}},
+					},
+					NodeSelector:         nodeSelector,
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu)}},
+					PodAntiRequirements: []corev1.PodAffinityTerm{{
+						TopologyKey:   corev1.LabelHostname,
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tf-spread": "x"}},
+					}},
+				})
+			}
+			// The larger pod, pinned to reserved capacity, schedules first and takes the freed slot.
+			for _, pod := range []*corev1.Pod{newPod("2", map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}), newPod("1", nil)} {
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+			}
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+		})
+
 		It("weighted: an unavailable reserved NodePool replaces-first onto a lower-weight on-demand NodePool", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, false, v1.CapacityTypeReserved) // full AND unavailable (Available=false)
