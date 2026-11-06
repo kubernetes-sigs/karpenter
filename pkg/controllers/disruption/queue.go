@@ -274,31 +274,29 @@ func recordCandidateDisrupted(cmd *Command, candidate *Candidate) {
 	if cmd.ConsolidationType() != "" {
 		consolidationPolicy = pretty.ToSnakeCase(string(candidate.NodePool.Spec.Disruption.ConsolidationPolicy))
 	}
+	// Repair's drain bound, when set, replaces the NodeClaim's terminationGracePeriod, so it decides the mode.
+	terminationMode := nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim)
+	if tgp := candidate.TerminationGracePeriod; tgp != nil {
+		terminationMode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
+	}
 	labels := map[string]string{
 		metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
 		metrics.NodePoolLabel:            candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel:        candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		metrics.ConsolidationPolicyLabel: consolidationPolicy,
-		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim),
+		metrics.TerminationModeLabel:     terminationMode,
 	}
 	metrics.NodeClaimsDisruptedTotal.Inc(labels)
 	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(candidate.reschedulablePods)), labels)
 	// Repair records the policy result on the candidate; emit the per-condition/per-image unhealthy-disrupted metric
 	// when the disruption is carried out, not at command production, so an abandoned command doesn't over-count.
 	if condition := candidate.RepairPolicyResult.Condition; cmd.Reason() == v1.DisruptionReasonUnhealthy && condition != "" {
-		// Termination mode reflects the drain bound repair actually applied (candidate.TerminationGracePeriod),
-		// not the NodeClaim's own Spec.TGP — a forceful (0) or bounded policy overrides it. nil means repair
-		// inherited the NodeClaim's mode.
-		mode := nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim)
-		if tgp := candidate.TerminationGracePeriod; tgp != nil {
-			mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
-		}
 		NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
 			conditionLabel:               pretty.ToSnakeCase(string(condition)),
 			metrics.NodePoolLabel:        candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel:    candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
 			imageIDLabel:                 candidate.NodeClaim.Status.ImageID,
-			metrics.TerminationModeLabel: mode,
+			metrics.TerminationModeLabel: terminationMode,
 		})
 	}
 }
