@@ -652,7 +652,7 @@ var _ = Describe("Topology", func() {
 			Expect(nodes.Items).To(HaveLen(4))
 		})
 		It("should reuse an in-flight nodeclaim when the first node affinity term doesn't match", func() {
-			// Issue #2123
+			// Issue #2123 (closed as not planned but actually fixed in PR #2126)
 			testNodePool := test.NodePool(v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test",
@@ -750,8 +750,12 @@ var _ = Describe("Topology", func() {
 			}
 			nodeClaims := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(nodeClaims).To(HaveLen(1))
-			newNodeClaims := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			Expect(newNodeClaims).To(HaveLen(0))
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.NewNodeClaims).To(BeEmpty())
+			Expect(results.PodErrors).To(BeEmpty())
+			Expect(results.ExistingNodeToPodMapping()).To(HaveKeyWithValue(
+				nodeClaims[0].Name, ConsistOf(HaveField("UID", pod.UID)),
+			))
 		})
 	})
 
