@@ -40,9 +40,9 @@ var Result = opmetrics.Label{
 	Help: "The terminal outcome of the reboot.",
 	Values: []opmetrics.Value{
 		{Name: resultSucceeded, Help: "The node rebooted and rejoined the cluster (bootID changed + Ready)."},
-		{Name: resultProviderError, Help: "The cloud provider rejected the reboot with a terminal error."},
+		{Name: resultProviderError, Help: "The cloud provider rejected the reboot with a terminal error, or the reboot was not issued within the issuance timeout."},
 		{Name: resultRecoveryTimeout, Help: "The node did not prove a new boot and rejoin within the observation window."},
-		{Name: resultInvalidRequest, Help: "The committed reboot request was invalid (missing, malformed, or negative drain grace period)."},
+		{Name: resultInvalidRequest, Help: "The committed reboot request was invalid (malformed or negative drain grace period)."},
 	},
 }
 
@@ -56,7 +56,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "reboots_total",
-			Help:      "Number of node reboots carried out by Karpenter, labeled by terminal result (succeeded, provider_error, recovery_timeout).",
+			Help:      "Number of node reboots that reached a terminal result, including failed and invalid ones, labeled by result (succeeded, provider_error, recovery_timeout, invalid_request).",
 		},
 		[]opmetrics.Label{Result},
 		opmetrics.Beta,
