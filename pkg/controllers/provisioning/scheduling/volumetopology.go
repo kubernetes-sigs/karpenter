@@ -115,7 +115,7 @@ func mergeCompatibleVolumeRequirementAlternatives(alternatives, volAlts []schedu
 }
 
 func mergeAllVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requirements) []scheduling.Requirements {
-	var mergedAlternatives []scheduling.Requirements
+	mergedAlternatives := make([]scheduling.Requirements, 0, len(alternatives)*len(volAlts))
 	for _, existing := range alternatives {
 		for _, volReq := range volAlts {
 			mergedAlternatives = append(mergedAlternatives, mergeVolumeRequirements(existing, volReq))

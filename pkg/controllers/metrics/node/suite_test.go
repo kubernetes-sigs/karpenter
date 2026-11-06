@@ -19,6 +19,7 @@ package node_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -65,7 +66,7 @@ var _ = BeforeSuite(func() {
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
-	metricsStateController = node.NewController(cluster)
+	metricsStateController = node.NewController(env.Clock, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -130,6 +131,7 @@ var _ = Describe("Node Metrics", func() {
 	It("should update the node lifetime and cluster utilization metrics", func() {
 
 		ExpectApplied(ctx, env.Client, node)
+		env.Clock.SetTime(node.CreationTimestamp.Add(time.Minute))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectSingletonReconciled(ctx, metricsStateController)
 
@@ -138,7 +140,7 @@ var _ = Describe("Node Metrics", func() {
 			"managed":   "false",
 		})
 		Expect(found).To(BeTrue())
-		Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 0))
+		Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 60))
 
 		for resourceName := range resources {
 			metric, found := FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{

@@ -54,7 +54,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment()
 	cloudProvider = fake.NewCloudProvider()
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
-	podController = pod.NewController(env.Client, cluster)
+	podController = pod.NewController(env.Clock, env.Client, cluster)
 })
 
 var _ = AfterEach(func() {
