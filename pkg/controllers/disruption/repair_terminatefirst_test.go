@@ -454,6 +454,57 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(lo.Map(cmds[0].Results.NewNodeClaims[0].Pods, func(p *corev1.Pod, _ int) string { return p.Name })).To(ConsistOf(pod.Name))
 	})
 
+	It("should name the pod that stops terminate-first in the Blocked event", func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))
+		reservationID := "r-" + mostExpensiveInstance.Name
+		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+		mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+			Price:               mostExpensiveOffering.Price / 1_000_000.0,
+			Available:           true, // full but healthy
+			ReservationCapacity: 0,
+			Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}),
+		})
+		ExpectSingletonReconciled(ctx, pricingController)
+
+		nodePool := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: new(int32(100)), Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+			Requirements: []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved}},
+			},
+		}}}})
+		odNodePool := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: new(int32(1)), Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+			Requirements: []v1.NodeSelectorRequirementWithMinValues{
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}},
+			},
+		}}}})
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+			v1.NodePoolLabelKey:              nodePool.Name,
+			corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+			v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+			corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+			cloudprovider.ReservationIDLabel: reservationID,
+		}}, Status: v1.NodeClaimStatus{
+			ProviderID:  test.RandomProviderID(),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100")},
+		}})
+		ExpectApplied(ctx, env.Client, nodePool, odNodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		reservedOnly, flexible := bindReservedOnlyAndFlexiblePods(node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		markUnhealthy(node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		Expect(queue.GetCommands()).To(HaveLen(0))
+		expectBlockedOnTerminateFirst(reservedOnly, flexible)
+	})
+
 	// A static NodePool with no node limit has unbounded headroom (nodeLimit defaults to MaxInt64), so repair always
 	// replaces-first — gate on or off. Guards against a mutation that treats the no-limit default as 0, which would make
 	// every unlimited static pool look at-limit (always terminate-first with the gate on, always Blocked with it off).

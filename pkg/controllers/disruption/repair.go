@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -232,7 +231,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			}}, nil
 		}
 		// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
-		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate,
+		results, terminateFirst, secondPassErr, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate,
 			terminateFirstEnabled, SimulationOptions{IncludeBlockedCandidatePods: true})
 		if err != nil {
 			if errors.Is(err, errCandidateDeleting) {
@@ -250,7 +249,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {
-			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
+			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, blockedMessage(results, secondPassErr))...)
 			continue
 		}
 		return []Command{{
