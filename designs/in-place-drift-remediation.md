@@ -100,6 +100,7 @@ sequenceDiagram
 ### Observability
 
 - `Rebooting` condition with `DisruptionReason=Drifted` for the in-place lifecycle. The existing reboot events and metrics cover it.
+- A `reason` label (`Drifted`, `Unhealthy`) on `karpenter_nodes_reboots_total`, `karpenter_nodes_reboot_duration_seconds` and `karpenter_nodes_reboot_recovery_duration_seconds`, so operators can see how long in-place drift takes apart from repair reboots. Providers keep only their own operation outcome metrics.
 - An event on every `Replace` decision for a NodeClaim whose provider supports in-place remediation.
 
 ### Edge Cases
