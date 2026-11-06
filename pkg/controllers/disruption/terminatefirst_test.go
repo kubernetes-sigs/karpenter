@@ -142,6 +142,23 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
+		It("bounds the drain of a terminate-first static drift when the NodeClaim has no terminationGracePeriod", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true)}}))
+			nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("1")}
+			nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer") // keep the NodeClaim after Delete so we can read its deadline
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			Expect(nodeClaim.Spec.TerminationGracePeriod).To(BeNil())
+
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).Annotations).To(HaveKey(v1.NodeClaimTerminationTimestampAnnotationKey))
+		})
+
 		It("blocks instead of terminating first when the static NodePool at its node limit is NotReady", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true)}}))
 			nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("1")}
@@ -511,6 +528,25 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
 			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved)).To(BeTrue())
 			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
+		})
+
+		It("bounds the drain of a terminate-first drift when the NodeClaim has no terminationGracePeriod", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved)
+			nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer") // keep the NodeClaim after Delete so we can read its deadline
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+			Expect(nodeClaim.Spec.TerminationGracePeriod).To(BeNil())
+
+			ExpectSingletonReconciled(ctx, driftController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).Annotations).To(HaveKey(v1.NodeClaimTerminationTimestampAnnotationKey))
 		})
 
 		It("does NOT terminate-first when more reschedulable pods need the reservation than the freed slot can hold", func() {
