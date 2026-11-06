@@ -21,6 +21,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -142,10 +143,10 @@ func IsUnderConsolidateAfter(nodePool *v1.NodePool, nodeClaim *v1.NodeClaim, c c
 	if nodePool == nil || nodeClaim == nil || nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil || lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration) == 0 {
 		return false
 	}
-	if !nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeInitialized) {
+	if !nodeClaim.StatusConditions(status.WithObservedOnly()).IsTrue(v1.ConditionTypeInitialized) {
 		return false
 	}
-	initialized := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
+	initialized := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInitialized)
 
 	// If the lastPodEvent is zero, use the time that the nodeclaim was initialized, as that's when Karpenter recognizes that pods could have started scheduling
 	timeToCheck := lo.Ternary(!nodeClaim.Status.LastPodEventTime.IsZero(), nodeClaim.Status.LastPodEventTime.Time, initialized.LastTransitionTime.Time)
