@@ -19,12 +19,13 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -47,7 +48,22 @@ const (
 type Drift struct {
 	clock                          clock.Clock
 	cloudProvider                  cloudprovider.CloudProvider
-	instanceTypeNotFoundCheckCache *cache.Cache
+	instanceTypeNotFoundCheckCache atomic.Pointer[cache.Expiring]
+}
+
+// instanceTypeNotFoundCheckTTL is how long a successful instance type check is remembered for a NodeClaim.
+const instanceTypeNotFoundCheckTTL = 30 * time.Minute
+
+func newDrift(clk clock.Clock, cloudProvider cloudprovider.CloudProvider) *Drift {
+	d := &Drift{clock: clk, cloudProvider: cloudProvider}
+	d.resetInstanceTypeNotFoundCheckCache()
+	return d
+}
+
+// resetInstanceTypeNotFoundCheckCache drops every remembered check by atomically swapping in an empty cache, so it is
+// safe to call while reconciles are running.
+func (d *Drift) resetInstanceTypeNotFoundCheckCache() {
+	d.instanceTypeNotFoundCheckCache.Store(cache.NewExpiringWithClock(d.clock))
 }
 
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -94,7 +110,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}
 	// To reduce the amount of GetInstanceTypes() calls that we make per-NodeClaim, only check this for a NodeClaim once every 30m and don't start checking it until 1h after creation
 	// It's alright to be more delayed with instance type drift since this is a cloudprovider-generated set of options rather than a user-defined field
-	if _, ok := d.instanceTypeNotFoundCheckCache.Get(string(nodeClaim.UID)); !ok && d.clock.Since(nodeClaim.CreationTimestamp.Time) > time.Hour {
+	if _, ok := d.instanceTypeNotFoundCheckCache.Load().Get(string(nodeClaim.UID)); !ok && d.clock.Since(nodeClaim.CreationTimestamp.Time) > time.Hour {
 		// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
 		its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
@@ -105,7 +121,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		}
 		// Only add a cache entry once we've validated that an instance type exists. We only cache a successful check rather
 		// that the result to ensure we respond quickly to transient abnormalities in the GetInstanceTypes response.
-		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
+		d.instanceTypeNotFoundCheckCache.Load().Set(string(nodeClaim.UID), nil, instanceTypeNotFoundCheckTTL)
 	}
 	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
