@@ -30,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -186,6 +187,25 @@ var _ = Describe("Reboot Lifecycle", func() {
 			node = ExpectExists(ctx, env.Client, node)
 			Expect(hasRebootTaint(node)).To(BeTrue())
 			Expect(node.Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+		})
+
+		It("starts the observation window at issuance for a NodeClaim that never initialized", func() {
+			// The NodeClaim became uninitialized longer ago than the observation window.
+			nodeClaim.StatusConditions(status.WithClock(clock.NewFakeClock(env.Clock.Now().Add(-30 * time.Minute)))).SetUnknown(v1.ConditionTypeInitialized)
+			delete(node.Labels, v1.NodeInitializedLabelKey)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(cloudProvider.RebootCalls).To(HaveLen(1))
+
+			// The reboot was issued 15s ago, so its window is still open.
+			env.Clock.Step(15 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
+
+			// The window still ends 20 minutes after the reboot was issued.
+			env.Clock.Step(21 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			expectReplaced(nodeClaim, "recovery_timeout")
 		})
 
 		It("issues a committed reboot even when node repair is disabled", func() {
