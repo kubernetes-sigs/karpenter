@@ -124,7 +124,7 @@ type Budget struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	// +listType=set
-	Reasons []DisruptionReason `json:"reasons,omitempty"`
+	Reasons []DisruptionReason `json:"reasons,omitempty"` //nolint:kubeapilinter // empty means all reasons; MinItems would reject existing objects
 	//nolint:kubeapilinter
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
@@ -217,16 +217,18 @@ type NodeClaimTemplate struct {
 // users are not able to set resource requests in the NodePool.
 type NodeClaimTemplateSpec struct {
 	// taints will be applied to the NodeClaim's node.
+	// +kubebuilder:validation:MaxItems=100
 	// +optional
 	// +listType=atomic
-	Taints []v1.Taint `json:"taints,omitempty"`
+	Taints []v1.Taint `json:"taints,omitempty"` //nolint:kubeapilinter // empty is valid and equivalent to unset; MinItems would reject existing objects
 	// startupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
 	// within a short period of time, typically by a DaemonSet that tolerates the taint. These are commonly used by
 	// daemonsets to allow initialization and enforce startup ordering.  StartupTaints are ignored for provisioning
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
+	// +kubebuilder:validation:MaxItems=100
 	// +optional
 	// +listType=atomic
-	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
+	StartupTaints []v1.Taint `json:"startupTaints,omitempty"` //nolint:kubeapilinter // empty is valid and equivalent to unset; MinItems would reject existing objects
 	// Requirements are layered with GetLabels and applied to every node.
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
@@ -297,7 +299,7 @@ type ObjectMeta struct {
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
 	// +optional
 	// +mapType=atomic
-	Labels map[string]string `json:"labels,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"` //nolint:kubeapilinter // mirrors metav1.ObjectMeta, where an empty map is valid
 
 	// annotations is an unstructured key value map stored with a resource that may be
 	// set by external tools to store and retrieve arbitrary metadata. They are not
@@ -305,7 +307,7 @@ type ObjectMeta struct {
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations
 	// +optional
 	// +mapType=granular
-	Annotations map[string]string `json:"annotations,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"` //nolint:kubeapilinter // mirrors metav1.ObjectMeta, where an empty map is valid
 }
 
 // NodePool is the Schema for the NodePools API
