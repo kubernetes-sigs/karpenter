@@ -286,6 +286,27 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 			})
 
+			// An on-demand offering that will never be available (the type isn't sold on-demand in the zone) is no fallback, so
+			// the NodePool should terminate first rather than wait for it. Core can't tell it from an offering that's unavailable
+			// only for now (after an insufficient capacity error): both are just Available=false. So this spec has the same
+			// setup as the one above but expects the opposite, and fails until core can tell the two apart. Once it can (e.g.
+			// from a provider signal), this setup should mark the offering as permanently unavailable.
+			It("terminates first when the template's only on-demand offering will never be available", func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				// mostExpensiveOffering is the type's only on-demand offering. It isn't sold, so it will never be available.
+				mostExpensiveOffering.Available = false
+				withReservation(0)
+				nodePool.Spec.Template.Spec.Requirements[1].Values = []string{v1.CapacityTypeReserved, v1.CapacityTypeOnDemand}
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, staticDriftController)
+
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			})
+
 			// The fake's offerings carry no instance-type label, as on AWS, so only filtering instance types by the template
 			// keeps a reservation outside the template from counting as capacity for the replacement.
 			It("treats the reservations as full when only an instance type outside the template has capacity", func() {
