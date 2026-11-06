@@ -48,6 +48,7 @@ type OptionsFields struct {
 	MinValuesPolicy                  *options.MinValuesPolicy
 	BatchMaxDuration                 *time.Duration
 	BatchIdleDuration                *time.Duration
+	RegistrationTimeout              *time.Duration
 	IgnoreDRARequests                *bool
 	LegacyNodeRepair                 *bool
 	FeatureGates                     FeatureGates
@@ -92,6 +93,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		LogErrorOutputPaths:              lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
 		BatchMaxDuration:                 lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:                lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
+		RegistrationTimeout:              lo.FromPtrOr(opts.RegistrationTimeout, 15*time.Minute),
 		PreferencePolicy:                 lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
 		MinValuesPolicy:                  lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
