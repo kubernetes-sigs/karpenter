@@ -252,8 +252,15 @@ var _ = Describe("Repair", func() {
 			metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
 		})
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
-			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:          strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
+		})
+		// The node has no pods, so this adds 0, but it still records the mode.
+		ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 0, map[string]string{
+			metrics.ReasonLabel:          strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
 		})
 		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
 			"condition":                  "bad_node",

@@ -163,19 +163,19 @@ var (
 	}
 	TerminationMode = opmetrics.Label{
 		Name: TerminationModeLabel,
-		Help: "The termination mode used to disrupt the node.",
+		Help: "The termination mode used to disrupt the node. It depends on the terminationGracePeriod that applies: the NodeClaim's, or a shorter one from a repair policy.",
 		Values: []opmetrics.Value{
 			{
 				Name: TerminationModeGraceful,
-				Help: "The NodeClaim has no terminationGracePeriod, so termination respects blocking pod PDBs and the do-not-disrupt annotation.",
+				Help: "No terminationGracePeriod applies, so the drain respects blocking pod PDBs and the do-not-disrupt annotation.",
 			},
 			{
 				Name: TerminationModeEventual,
-				Help: "The NodeClaim has a positive terminationGracePeriod, so termination is bounded by it and overrides blocking pod PDBs and the do-not-disrupt annotation.",
+				Help: "A positive terminationGracePeriod applies, so the drain respects blocking pod PDBs and the do-not-disrupt annotation only until that period ends.",
 			},
 			{
 				Name: TerminationModeForceful,
-				Help: "The NodeClaim has a zero (non-positive) terminationGracePeriod, so it is terminated immediately.",
+				Help: "A zero terminationGracePeriod applies, so the node is terminated or rebooted without waiting for pods to drain.",
 			},
 		},
 	}
