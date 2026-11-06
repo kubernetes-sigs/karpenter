@@ -22,8 +22,10 @@ import (
 	"math"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -47,6 +49,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -73,6 +76,7 @@ func (c *Controller) Name() string {
 	return "static.provisioning"
 }
 
+//nolint:gocyclo // Keep the preflight before reservations alongside the existing provisioning guards.
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -93,6 +97,21 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	// If there are drifting NodeClaims we need to count them as Active as disruption controller is in the process of creating replacements
 	if int64(runningNodeClaims)+int64(nodesPendingDisruptionCount) >= desiredReplicas {
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
+	}
+
+	if options.FromContext(ctx).FeatureGates.StaticCapacityAvailabilityCheck {
+		instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, np)
+		if err != nil {
+			return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
+		}
+		requirements := scheduling.NewNodeClaimTemplate(np).Requirements
+		if !lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool {
+			return it.Requirements.Intersects(requirements) == nil && it.Offerings.Launchable().HasCompatible(requirements)
+		}) {
+			// Availability cache changes do not enqueue NodePools, so retry without creating claims that cannot launch.
+			log.FromContext(ctx).V(1).Info("no compatible available offerings")
+			return reconcile.Result{RequeueAfter: time.Minute}, nil
+		}
 	}
 
 	limit, ok := np.Spec.Limits[resources.Node]
