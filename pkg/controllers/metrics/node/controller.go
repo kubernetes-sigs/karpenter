@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -39,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -66,6 +68,9 @@ var (
 	SystemOverhead      opmetrics.GaugeMetric
 	Lifetime            opmetrics.GaugeMetric
 	ClusterUtilization  opmetrics.GaugeMetric
+
+	TimeUntilExpiration        opmetrics.GaugeMetric
+	TimeUntilForcedTermination opmetrics.GaugeMetric
 )
 
 // Initialize metrics at runtime to ensure cloud provider's well-known labels are properly
@@ -148,6 +153,28 @@ func initializeMetrics() {
 		nodeLabelNames(),
 		opmetrics.Alpha,
 	)
+	TimeUntilExpiration = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "time_until_expiration_seconds",
+			Help:      "Seconds until the node reaches its expireAfter deadline and Karpenter begins draining it, negative once that deadline has passed. Only emitted when expireAfter is configured.",
+		},
+		nodeLabelNames(),
+		opmetrics.Alpha,
+	)
+	TimeUntilForcedTermination = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "time_until_forced_termination_seconds",
+			Help:      "Seconds until the remaining pods on the node are deleted regardless of PDBs, negative once that deadline has passed. Exact once termination has begun; before then it is an upper bound predicted from expireAfter, since an earlier disruption would start the grace period sooner. Only emitted when terminationGracePeriod is configured.",
+		},
+		nodeLabelNames(),
+		opmetrics.Alpha,
+	)
 	ClusterUtilization = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -183,13 +210,15 @@ func nodeLabelNames() []opmetrics.Label {
 }
 
 type Controller struct {
+	clock       clock.Clock
 	cluster     *state.Cluster
 	metricStore *metrics.Store
 }
 
-func NewController(cluster *state.Cluster) *Controller {
+func NewController(clk clock.Clock, cluster *state.Cluster) *Controller {
 	initializeMetrics()
 	return &Controller{
+		clock:       clk,
 		cluster:     cluster,
 		metricStore: metrics.NewStore(),
 	}
@@ -204,7 +233,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	// Build per-node metrics
 	metricsMap := lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
-		return client.ObjectKeyFromObject(n.Node).String(), buildMetrics(n)
+		return client.ObjectKeyFromObject(n.Node).String(), c.buildMetrics(n)
 	})
 
 	// Build cluster level metric
@@ -263,7 +292,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 	return res
 }
 
-func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
+func (c *Controller) buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
 		TotalPodRequests:    n.PodRequests(),
@@ -280,12 +309,26 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 			})
 		}
 	}
-	return append(res,
-		&metrics.StoreMetric{
-			GaugeMetric: Lifetime,
-			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+	res = append(res, &metrics.StoreMetric{
+		GaugeMetric: Lifetime,
+		Value:       c.clock.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+		Labels:      getNodeLabels(n),
+	})
+	if expirationTime, ok := nodeclaimutils.ExpirationTime(n.NodeClaim); ok {
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: TimeUntilExpiration,
+			Value:       expirationTime.Sub(c.clock.Now()).Seconds(),
 			Labels:      getNodeLabels(n),
 		})
+	}
+	if forcedTerminationTime, ok := nodeclaimutils.ForcedTerminationTime(n.NodeClaim); ok {
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: TimeUntilForcedTermination,
+			Value:       forcedTerminationTime.Sub(c.clock.Now()).Seconds(),
+			Labels:      getNodeLabels(n),
+		})
+	}
+	return res
 }
 
 func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
