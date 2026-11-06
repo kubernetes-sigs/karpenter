@@ -19,9 +19,7 @@ package scheduling_test
 import (
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
-	"k8s.io/apimachinery/pkg/util/sets"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test/schedulingproperties"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -39,10 +37,7 @@ var _ = Describe("Scheduling Properties", func() {
 			Launch:        launcher.Create,
 			// Real providers restrict their own label domain, which also covers the NodeClass label that core stamps.
 			RestrictedLabelDomains: []string{nodeClass.Group},
-			// Karpenter rejects pods selecting the NodeClass label when the provider restricts its domain, even though it
-			// stamps that label on every node. See #3422.
-			KnownDeviations: sets.New(v1.NodeClassLabelKey(nodeClass)),
-			Checks:          300,
+			Checks:                 300,
 		}
 	})
 	It("should place pods that a launchable node satisfies", func() {
