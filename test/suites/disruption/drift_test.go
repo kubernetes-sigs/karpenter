@@ -417,7 +417,7 @@ var _ = Describe("Drift", Ordered, func() {
 			g.Expect(nodePool.Annotations).To(HaveKeyWithValue(v1.NodePoolHashVersionAnnotationKey, v1.NodePoolHashVersion))
 			g.Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, expectedHash))
 			g.Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodePoolHashVersionAnnotationKey, v1.NodePoolHashVersion))
-		})
+		}).Should(Succeed())
 	})
 	Context("Failure", func() {
 		It("should not disrupt a drifted node if the replacement node never registers", func() {

@@ -155,7 +155,7 @@ var _ = Describe("Termination", func() {
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Root().IsTrue())
+		Expect(nodeClaim.StatusConditions().Root().IsTrue()).To(BeTrue())
 
 		// Start deleting the NodeClaim and update the status condition
 		// We need to ensure that the root condition doesn't change to Unknown
@@ -168,7 +168,7 @@ var _ = Describe("Termination", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Trigger CloudProvider Delete
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Root().IsTrue())
+		Expect(nodeClaim.StatusConditions().Root().IsTrue()).To(BeTrue())
 	})
 	It("should delete the NodeClaim when the spec resource.Quantity values will change during deserialization", func() {
 		nodeClaim.SetGroupVersionKind(object.GVK(nodeClaim)) // This is needed so that the GVK is set on the unstructured object
