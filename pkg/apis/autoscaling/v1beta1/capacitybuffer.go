@@ -31,13 +31,16 @@ import (
 // +kubebuilder:resource:path=capacitybuffers,scope=Namespaced,shortName=cb,categories=autoscaling
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
-// +kubebuilder:printcolumn:name="Strategy",type="string",JSONPath=".spec.provisioningStrategy",description="The strategy to be used."
-// +kubebuilder:printcolumn:name="PodTemplate",type="string",JSONPath=".status.podTemplateRef.name",description="The name of the PodTemplate used."
+// +kubebuilder:printcolumn:name="Satisfied",type="string",JSONPath=".status.conditions[?(@.type==\"Provisioning\")].status",description="Whether the requested buffer capacity is available."
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type==\"Provisioning\")].reason",description="The reason of the Provisioning condition."
 // +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.replicas",description="The actual number of buffer chunks."
-// +kubebuilder:printcolumn:name="ConditionsType",type="string",JSONPath=".status.conditions[*].type",description="List of all condition types."
-// +kubebuilder:printcolumn:name="ConditionsStatus",type="string",JSONPath=".status.conditions[*].status",description="List of all condition statuses."
-// +kubebuilder:printcolumn:name="ConditionsReason",type="string",JSONPath=".status.conditions[*].reason",description="List of all condition reasons."
+// +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"Provisioning\")].message",description="The message of the Provisioning condition."
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of the CapacityBuffer."
+// +kubebuilder:printcolumn:name="Strategy",type="string",priority=1,JSONPath=".spec.provisioningStrategy",description="The strategy to be used."
+// +kubebuilder:printcolumn:name="PodTemplate",type="string",priority=1,JSONPath=".status.podTemplateRef.name",description="The name of the PodTemplate used."
+// +kubebuilder:printcolumn:name="ConditionsType",type="string",priority=1,JSONPath=".status.conditions[*].type",description="List of all condition types."
+// +kubebuilder:printcolumn:name="ConditionsStatus",type="string",priority=1,JSONPath=".status.conditions[*].status",description="List of all condition statuses."
+// +kubebuilder:printcolumn:name="ConditionsReason",type="string",priority=1,JSONPath=".status.conditions[*].reason",description="List of all condition reasons."
 
 // CapacityBuffer is the configuration that an autoscaler can use to provision buffer capacity within a cluster.
 // This buffer is represented by placeholder pods that trigger the Cluster Autoscaler to scale up nodes in advance,
