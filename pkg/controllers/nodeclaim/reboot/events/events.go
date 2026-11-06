@@ -50,8 +50,20 @@ func rebootEpisode(nodeClaim *v1.NodeClaim) string {
 	return ""
 }
 
+func RebootRequested(nodeClaim *v1.NodeClaim, message string) events.Event {
+	return event(nodeClaim, corev1.EventTypeNormal, v1.RebootReasonRequested, message)
+}
+
+func RebootIssued(nodeClaim *v1.NodeClaim, message string) events.Event {
+	return event(nodeClaim, corev1.EventTypeNormal, v1.RebootReasonIssued, message)
+}
+
 func RebootObserved(nodeClaim *v1.NodeClaim) events.Event {
 	return event(nodeClaim, corev1.EventTypeNormal, events.RebootObserved, "New boot observed (bootID changed); awaiting node readiness")
+}
+
+func RebootSucceeded(nodeClaim *v1.NodeClaim, message string) events.Event {
+	return event(nodeClaim, corev1.EventTypeNormal, v1.RebootReasonSucceeded, message)
 }
 
 func RebootFailed(nodeClaim *v1.NodeClaim, message string) events.Event {

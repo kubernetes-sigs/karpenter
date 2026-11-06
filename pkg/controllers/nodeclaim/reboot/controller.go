@@ -162,8 +162,13 @@ func (c *Controller) reconcileRequested(ctx context.Context, nodeClaim *v1.NodeC
 		return c.transitionToFailed(ctx, nodeClaim, node, resultInvalidRequest, fmt.Sprintf("invalid reboot request: %v", err))
 	}
 	// Fence new scheduling before draining.
-	if err := c.ensureRebootTaint(ctx, node); err != nil {
+	added, err := c.ensureRebootTaint(ctx, node)
+	if err != nil {
 		return reconcile.Result{}, err
+	}
+	// The recorder's dedupe expires and resets on restart, so publish only when the taint is first added.
+	if added {
+		c.recorder.Publish(rebootevents.RebootRequested(nodeClaim, nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Message))
 	}
 
 	preBootID, issuing := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]
@@ -310,6 +315,7 @@ func (c *Controller) transitionToIssued(ctx context.Context, nodeClaim *v1.NodeC
 			return reconcile.Result{}, err
 		}
 	}
+	c.recorder.Publish(rebootevents.RebootIssued(nodeClaim, cond.Message))
 	// Best effort; reconcileIssued re-enforces this.
 	if err := c.removeInitializedLabel(ctx, node); err != nil {
 		return reconcile.Result{}, err
@@ -327,10 +333,12 @@ func (c *Controller) transitionToSucceeded(ctx context.Context, nodeClaim *v1.No
 	if issuedAt, ok := c.issuedAt(nodeClaim); ok {
 		recovery, hasRecovery = c.clock.Since(issuedAt), true
 	}
-	if err := c.setTerminal(ctx, nodeClaim, v1.RebootReasonSucceeded, "node rebooted and rejoined the cluster"); err != nil {
+	msg := "node rebooted and rejoined the cluster"
+	if err := c.setTerminal(ctx, nodeClaim, v1.RebootReasonSucceeded, msg); err != nil {
 		return reconcile.Result{}, err
 	}
-	// Record metrics only after the terminal state is persisted.
+	// Record the event and metrics only after the terminal state is persisted.
+	c.recorder.Publish(rebootevents.RebootSucceeded(nodeClaim, msg))
 	recordTerminalMetrics(resultSucceeded, duration)
 	if hasRecovery {
 		// Recovery time is measured from issuance to rejoin.
@@ -394,13 +402,16 @@ func (c *Controller) setTerminal(ctx context.Context, nodeClaim *v1.NodeClaim, r
 	return nil
 }
 
-func (c *Controller) ensureRebootTaint(ctx context.Context, node *corev1.Node) error {
+func (c *Controller) ensureRebootTaint(ctx context.Context, node *corev1.Node) (added bool, err error) {
 	if _, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool { return t.MatchTaint(&v1.RebootingNoScheduleTaint) }); found {
-		return nil
+		return false, nil
 	}
 	stored := node.DeepCopy()
 	node.Spec.Taints = append(node.Spec.Taints, v1.RebootingNoScheduleTaint)
-	return c.kubeClient.Patch(ctx, node, client.MergeFrom(stored))
+	if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (c *Controller) removeRebootTaint(ctx context.Context, node *corev1.Node) error {

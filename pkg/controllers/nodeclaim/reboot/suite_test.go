@@ -162,6 +162,8 @@ var _ = Describe("Reboot Lifecycle", func() {
 			stepPastDrainFloor()
 			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
 			Expect(cloudProvider.RebootCalls).To(HaveLen(1))
+			// The second pass doesn't repeat the event.
+			Expect(recorder.Calls(v1.RebootReasonRequested)).To(Equal(1))
 		})
 
 		It("issues the reboot and transitions to RebootIssued", func() {
@@ -271,6 +273,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 
 				Expect(cloudProvider.RebootCalls).To(BeEmpty())
 				expectReplaced(nodeClaim, "provider_error")
+				Expect(recorder.Calls(v1.RebootReasonIssued)).To(Equal(0))
 			},
 			Entry("a failed reboot", cloudprovider.NewNodeRebootFailedError(fmt.Errorf("unauthorized"))),
 			Entry("an instance that no longer exists", cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found"))),
@@ -522,6 +525,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeTrue())
 			Expect(recorder.Calls(events.RebootObserved)).To(Equal(1))
+			Expect(recorder.Calls(v1.RebootReasonSucceeded)).To(Equal(0))
 		})
 
 		It("records a success once when a stale cached NodeClaim is reconciled again", func() {
@@ -535,6 +539,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(err).To(HaveOccurred())
 			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{"result": "succeeded"})
 			ExpectMetricHistogramSampleCountValue("karpenter_nodes_reboot_recovery_duration_seconds", 1, map[string]string{})
+			Expect(recorder.Calls(v1.RebootReasonSucceeded)).To(Equal(1))
 		})
 
 		It("succeeds when the boot changed and the node is Ready", func() {
