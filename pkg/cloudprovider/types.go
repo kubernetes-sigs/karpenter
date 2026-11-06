@@ -668,6 +668,7 @@ type Offering struct {
 	Requirements        scheduling.Requirements
 	Price               float64
 	Available           bool
+	Incompatible        bool
 	ReservationCapacity int
 
 	// CapacityOverride specifies resource overrides for this offering's capacity.
@@ -751,9 +752,10 @@ func (ofs Offerings) Available() Offerings {
 // to be healthy (Available) and, for a reserved offering, to have remaining reservation capacity. Availability alone is
 // insufficient because capacity and health are independent axes: a full-but-healthy reservation is Available with a
 // ReservationCapacity of 0, and launching into it would fail. Non-reserved offerings are never reservation-constrained,
-// so for them Launchable is equivalent to Available.
+// so for them Launchable is equivalent to Available. An Incompatible offering is never launchable, even if a provider
+// leaves it Available.
 func (o *Offering) Launchable() bool {
-	if !o.Available {
+	if !o.Available || o.Incompatible {
 		return false
 	}
 	// Being out of reservation capacity disqualifies only reserved offerings. Index the requirement map directly and use
