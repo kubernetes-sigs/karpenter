@@ -163,7 +163,7 @@ var (
 	}
 	TerminationMode = opmetrics.Label{
 		Name: TerminationModeLabel,
-		Help: "The termination mode used to disrupt the node. It depends on the terminationGracePeriod that applies: the NodeClaim's, or a shorter one from a repair policy.",
+		Help: "The termination mode used to disrupt the node. It depends on the terminationGracePeriod that applies: the NodeClaim's, or a shorter one set by node repair.",
 		Values: []opmetrics.Value{
 			{
 				Name: TerminationModeGraceful,
