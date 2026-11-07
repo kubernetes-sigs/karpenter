@@ -1,0 +1,13 @@
+diff --git a/pkg/scheduling/requirements.go b/pkg/scheduling/requirements.go
+index bcf0b760..2758c021 100644
+--- a/pkg/scheduling/requirements.go
++++ b/pkg/scheduling/requirements.go
+@@ -257,7 +257,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
+ 	for key := range r.intersectKeys(requirements) {
+ 		existing := r.Get(key)
+ 		incoming := requirements.Get(key)
+-		if !existing.HasIntersection(incoming) {
++		if existing.Intersection(incoming).Len() == 0 {
+ 			// where the incoming requirement has operator { NotIn, DoesNotExist }
+ 			if operator := incoming.Operator(); operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
+ 				// and the existing requirement has operator { NotIn, DoesNotExist }

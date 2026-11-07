@@ -1,0 +1,22 @@
+name: perf-periodic
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+jobs:
+  perf-periodic:
+    if: github.event_name != 'schedule' || github.repository == 'kubernetes-sigs/karpenter'
+    permissions:
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ["pods", "nodepools", "topology"]
+        run: [1, 2, 3]
+    uses: ./.github/workflows/e2e.yaml
+    with:
+      suite: Performancev2
+      focus: ${{ matrix.scenario }}
+      test_name: perf-periodic ${{ matrix.scenario }} ${{ matrix.run }}
+      perf_env: KARPENTER_PERF_PROVIDER=kwok-ci
+      retention_days: 90

@@ -1,0 +1,13 @@
+diff --git c/pkg/controllers/disruption/types.go w/pkg/controllers/disruption/types.go
+index 4acfcb64..36a9c787 100644
+--- c/pkg/controllers/disruption/types.go
++++ w/pkg/controllers/disruption/types.go
+@@ -213,7 +213,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
+ 	reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
+ 	price, _ := cloudprovider.PriceNodeClaim(ctx, node.NodeClaim, instanceType)
+ 	return &Candidate{
+-		StateNode:         node,
++		StateNode:         node.DeepCopy(),
+ 		instanceType:      instanceType,
+ 		NodePool:          nodePool,
+ 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],

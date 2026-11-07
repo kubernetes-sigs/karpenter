@@ -56,6 +56,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				400, 15*time.Minute,
 				"balanced_churn_scale_out")
 			Expect(err).ToNot(HaveOccurred())
+			ExpectGates(scaleOutReport, "balancedChurn/scaleOut")
 			initialNodes := scaleOutReport.TotalNodes
 			Expect(initialNodes).To(BeNumerically(">", 0))
 
@@ -80,6 +81,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			consolidationReport.LatencyStats = result.LatencyStats
 			consolidationReport.Counters = result.Counters
 			OutputPerformanceReport(consolidationReport, "balanced_churn_consolidation")
+			ExpectGates(consolidationReport, "balancedChurn/consolidation")
 
 			expectBalancedDecisionsMatchThreshold(result)
 		})
