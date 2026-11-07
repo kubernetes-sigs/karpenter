@@ -1,0 +1,23 @@
+name: perf-smoke
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      regression:
+        description: "Patch in test/suites/performancev2/perf/regressions to apply, to show the smoke test catches it"
+        type: string
+jobs:
+  perf-smoke:
+    permissions:
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ["pods", "nodepools", "topology"]
+    uses: ./.github/workflows/e2e.yaml
+    with:
+      suite: Performancev2
+      focus: ${{ matrix.scenario }}
+      test_name: perf-smoke ${{ matrix.scenario }}
+      perf_env: KARPENTER_PERF_PROVIDER=kwok-ci
+      regression: ${{ inputs.regression }}
