@@ -134,8 +134,7 @@ func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerSta
 	now := time.Now()
 	m, err := mp.scrapeMetrics(ctx, state.podName)
 	if err != nil {
-		var notFound *metricsNotFoundError
-		if !errors.As(err, &notFound) {
+		if _, ok := errors.AsType[*metricsNotFoundError](err); !ok {
 			// Pod may have been replaced (e.g. leader election change). Try to find the new one.
 			if pod, findErr := mp.env.FindActiveKarpenterPod(ctx); findErr == nil && pod != nil && pod.Name != state.podName {
 				GinkgoWriter.Printf("KarpenterMetricsPoller: active pod changed from %s to %s\n", state.podName, pod.Name)

@@ -258,7 +258,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
+		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()), cmd.TerminateFirstReason.Explanation())...)
 		recordCandidateDisrupted(cmd, cmd.Candidates[i])
 	})
 	// If there were any deletion failures, we should requeue.

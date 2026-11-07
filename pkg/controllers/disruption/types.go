@@ -294,6 +294,18 @@ const (
 	TerminateFirstStaticAtLimit TerminateFirstReason = "static-at-limit"
 )
 
+// Explanation says in plain words why the node goes before its replacement, and is empty when it doesn't.
+func (r TerminateFirstReason) Explanation() string {
+	switch r {
+	case TerminateFirstNoReservedCapacity:
+		return "its capacity reservation is full"
+	case TerminateFirstStaticAtLimit:
+		return "its NodePool is at its node limit"
+	default:
+		return string(r)
+	}
+}
+
 func (c Command) Decision() Decision {
 	switch {
 	case len(c.Candidates) > 0 && c.Reboot:

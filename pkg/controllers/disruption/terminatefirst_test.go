@@ -513,6 +513,34 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
 		})
 
+		// kubectl describe node shows this event, so it should say why the node goes first.
+		It("says why the node goes before its replacement in the termination event", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			recorder.Reset()
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+
+			// The RFC allows a distinct reason or message, so check them together.
+			nodeEvents := lo.FilterMap(recorder.Events(), func(e events.Event, _ int) (string, bool) {
+				_, onNode := e.InvolvedObject.(*corev1.Node)
+				return e.Reason + ": " + e.Message, onNode
+			})
+			Expect(nodeEvents).To(HaveLen(1))
+			// A replace-first drift gets this event.
+			Expect(nodeEvents[0]).NotTo(Equal(events.DisruptionTerminating + ": Disrupting Node: Drifted"))
+			// Here the node goes first because its reservation is full.
+			Expect(nodeEvents[0]).To(MatchRegexp(`(?i)reserv`))
+		})
+
 		It("does NOT terminate-first when more reschedulable pods need the reservation than the freed slot can hold", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
