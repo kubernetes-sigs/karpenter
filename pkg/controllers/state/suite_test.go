@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -57,6 +58,7 @@ var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
 var clusterCost *cost.ClusterCost
+var nodePoolBackoff *nodepoolbackoff.State
 var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var podController *informer.PodController
@@ -84,10 +86,11 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
+	nodePoolBackoff = nodepoolbackoff.NewState(env.Clock)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
-	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
+	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost, nodePoolBackoff)
 	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
 	nodeOverlayController = nodeoverlay.NewController(env.Clock, env.Client, cloudProvider, nodeOverlayStore, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
@@ -1747,6 +1750,15 @@ var _ = Describe("Consolidated State", func() {
 		state := cluster.ConsolidationState()
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
+	})
+	It("should reset NodePool drift backoff state when a NodePool is deleted", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
+		Expect(nodePoolBackoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
+		Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeTrue())
+
+		ExpectDeleted(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeFalse())
 	})
 })
 

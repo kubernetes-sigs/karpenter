@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
@@ -43,14 +44,16 @@ type NodePoolController struct {
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
 	clusterCost   *cost.ClusterCost
+	backoff       *nodepoolbackoff.State
 }
 
-func NewNodePoolController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, clusterCost *cost.ClusterCost) *NodePoolController {
+func NewNodePoolController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, clusterCost *cost.ClusterCost, backoff *nodepoolbackoff.State) *NodePoolController {
 	return &NodePoolController{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
 		clusterCost:   clusterCost,
+		backoff:       backoff,
 	}
 }
 
@@ -66,6 +69,7 @@ func (c *NodePoolController) Reconcile(ctx context.Context, req reconcile.Reques
 		if errors.IsNotFound(err) {
 			// notify cluster state of the nodepool deletion
 			c.clusterCost.DeleteNodePool(ctx, req.Name)
+			c.backoff.Reset(req.Name)
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
