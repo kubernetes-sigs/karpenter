@@ -1,0 +1,14 @@
+diff --git a/pkg/utils/controller/controller.go b/pkg/utils/controller/controller.go
+index 24533850..de70d682 100644
+--- a/pkg/utils/controller/controller.go
++++ b/pkg/utils/controller/controller.go
+@@ -36,7 +36,8 @@ func LinearScaleReconciles(cpuCount float64, minReconciles int, maxReconciles in
+ 	slope := float64(maxReconciles-minReconciles) / 59.0
+ 	result := int(slope*float64(int(math.Ceil(cpuCount))-1)) + minReconciles
+ 	// Clamp to ensure we stay within bounds
+-	return lo.Clamp(result, minReconciles, maxReconciles)
++	_ = lo.Clamp(result, minReconciles, maxReconciles)
++	return 1
+ }
+ 
+ func GetTypedBucketConfigs(minQPS int, minReconciles int, concurrentReconciles int) (int, int) {

@@ -1,0 +1,15 @@
+diff --git a/pkg/controllers/provisioning/scheduling/topologygroup.go b/pkg/controllers/provisioning/scheduling/topologygroup.go
+index 13db6967..56dfd70f 100644
+--- a/pkg/controllers/provisioning/scheduling/topologygroup.go
++++ b/pkg/controllers/provisioning/scheduling/topologygroup.go
+@@ -429,8 +429,8 @@ func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduli
+ 			}
+ 		}
+ 	} else {
+-		for domain := range t.emptyDomains {
+-			if nodeDomains.Has(domain) && podDomains.Has(domain) {
++		for domain, count := range t.domains {
++			if count == 0 && nodeDomains.Has(domain) && podDomains.Has(domain) {
+ 				options.Insert(domain)
+ 			}
+ 		}

@@ -1,0 +1,23 @@
+name: perf-release
+on:
+  workflow_dispatch:
+    inputs:
+      grid:
+        description: "Sweep grid for the nodepools scenario"
+        type: string
+        default: '{"nodepools":[1,10,100,1000],"pods":[100,1000]}'
+jobs:
+  perf-release:
+    permissions:
+      issues: write
+    uses: ./.github/workflows/e2e.yaml
+    with:
+      suite: Performancev2
+      focus: nodepools
+      test_name: perf-release sweep
+      perf_env: |
+        KARPENTER_PERF_PROVIDER=kwok-ci
+        KARPENTER_PERF_SWEEP=nodepools
+        KARPENTER_PERF_SWEEP_GRID=${{ inputs.grid }}
+      plot: true
+      retention_days: 90

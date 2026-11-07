@@ -12,30 +12,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
-  before:
-    name: Before PR
-    strategy:
-      fail-fast: false
-      matrix:
-        path: ["pkg/controllers/provisioning/scheduling"]
-    uses: ./.github/workflows/run-bench-test.yaml
-    secrets: inherit
-    with:
-      path: ${{ matrix.path }}
-      runName: before-${{ strategy.job-index }}
-      githubSha: ${{ github.event.pull_request.base.sha }}
-  after:
-    name: After PR
-    permissions:
-      pull-requests: write
-    strategy:
-      fail-fast: false
-      matrix:
-        path: ["pkg/controllers/provisioning/scheduling"]
-    uses: ./.github/workflows/run-bench-test.yaml
-    secrets: inherit
-    with:
-      path: ${{ matrix.path }}
-      runName: after-${{ strategy.job-index }}  
-      githubSha: ${{ github.sha }}
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/install-deps
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
+      - name: Compare base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BENCH: "BenchmarkScheduling(100|1000)$|BenchmarkNewScheduler|BenchmarkNewTopology|BenchmarkForEachDomain|BenchmarkStoreApply|BenchmarkRepair|BenchmarkClusterUpdateNode"
+        run: |
+          hack/bench/compare.sh "$BASE_SHA" HEAD | tee "$GITHUB_STEP_SUMMARY"

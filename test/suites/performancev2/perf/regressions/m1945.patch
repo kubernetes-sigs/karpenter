@@ -1,0 +1,13 @@
+diff --git a/pkg/cloudprovider/types.go b/pkg/cloudprovider/types.go
+index d1b8c9b6..fb1563c1 100644
+--- a/pkg/cloudprovider/types.go
++++ b/pkg/cloudprovider/types.go
+@@ -390,7 +390,7 @@ func (i *InstanceType) AllocatableOfferingsList() []AllocatableOfferings {
+ // Allocatable returns the base allocatable resources (no offering overrides applied).
+ func (i *InstanceType) Allocatable() corev1.ResourceList {
+ 	i.once.Do(i.precompute)
+-	return i.allocatableOfferings[0].Allocatable
++	return i.allocatableOfferings[0].Allocatable.DeepCopy()
+ }
+ 
+ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
