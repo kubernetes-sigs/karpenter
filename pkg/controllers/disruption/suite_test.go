@@ -944,6 +944,39 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
 	})
+	It("should not write conditions onto cluster state NodeClaims while counting", func() {
+		// A deleting NodeClaim skips condition initialization when it enters cluster state, so it can be stored
+		// without its root conditions. NodePoolStats reads live nodes under the read lock and must not fill them in.
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:        nodePool.Name,
+					v1.NodeInitializedLabelKey: "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		stateConditions := func() []status.Condition {
+			for n := range cluster.Nodes() {
+				if n.NodeClaim != nil && n.NodeClaim.Name == nodeClaim.Name {
+					return slices.Clone(n.NodeClaim.Status.Conditions)
+				}
+			}
+			Fail("NodeClaim not found in cluster state")
+			return nil
+		}
+		before := stateConditions()
+		Expect(before).To(BeEmpty())
+
+		for _, reason := range allKnownDisruptionReasons {
+			disruption.NodePoolStats(cluster, reason)
+		}
+		Expect(stateConditions()).To(Equal(before))
+	})
 	Context("after a successful reboot", func() {
 		// markRebootSucceeded leaves nodes[0] where the reboot controller does on success: Rebooting=False/RebootSucceeded
 		// and the initialized label still removed, waiting on initialization to re-run.
