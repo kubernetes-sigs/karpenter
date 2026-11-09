@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -283,7 +284,9 @@ func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 			}}})
 	ExpectApplied(ctx, env.Client, pods[0])
 	ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
+	// do-not-disrupt annotation is added to the node to simulate pod churn
+	nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+	ExpectApplied(ctx, env.Client, nodes[0])
 	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
 }
 
