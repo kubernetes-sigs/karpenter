@@ -652,7 +652,7 @@ var _ = Describe("Topology", func() {
 			Expect(nodes.Items).To(HaveLen(4))
 		})
 		It("should reuse an in-flight nodeclaim when the first node affinity term doesn't match", func() {
-			// Issue #2123 (closed as not planned but actually fixed in PR #2126)
+			// Issue #2123
 			testNodePool := test.NodePool(v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test",
