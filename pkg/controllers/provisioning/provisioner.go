@@ -284,6 +284,22 @@ func (p *Provisioner) NewScheduler(
 	deletingPodUIDs sets.Set[types.UID],
 	opts ...scheduler.Options,
 ) (*scheduler.Scheduler, error) {
+	catalog, err := p.newSchedulerCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return p.newScheduler(ctx, pods, stateNodes, deletingPodUIDs, catalog, opts...)
+}
+
+// schedulerCatalog contains scheduler inputs that are safe to reuse across fresh scheduling
+// simulations within a single controller pass.
+type schedulerCatalog struct {
+	nodePools     []*v1.NodePool
+	instanceTypes map[string][]*cloudprovider.InstanceType
+	daemonSetPods []*corev1.Pod
+}
+
+func (p *Provisioner) newSchedulerCatalog(ctx context.Context) (*schedulerCatalog, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing nodepools, %w", err)
@@ -327,7 +343,25 @@ func (p *Provisioner) NewScheduler(
 		}
 		instanceTypes[np.Name] = its
 	}
+	daemonSetPods, err := p.getDaemonSetPods(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting daemon pods, %w", err)
+	}
+	return &schedulerCatalog{
+		nodePools:     nodePools,
+		instanceTypes: instanceTypes,
+		daemonSetPods: daemonSetPods,
+	}, nil
+}
 
+func (p *Provisioner) newScheduler(
+	ctx context.Context,
+	pods []*corev1.Pod,
+	stateNodes []*state.StateNode,
+	deletingPodUIDs sets.Set[types.UID],
+	catalog *schedulerCatalog,
+	opts ...scheduler.Options,
+) (*scheduler.Scheduler, error) {
 	// Get volume topology requirements WITHOUT modifying pods.
 	// Volume requirements are passed separately and added to nodeRequirements only.
 	// Pods that fail volume topology lookup are excluded from scheduling.
@@ -346,14 +380,10 @@ func (p *Provisioner) NewScheduler(
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	stopTopologyTimer := metrics.Measure(scheduler.TopologyBuildDurationSeconds, map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, catalog.nodePools, catalog.instanceTypes, pods, opts...)
 	stopTopologyTimer()
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
-	}
-	daemonSetPods, err := p.getDaemonSetPods(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
 
 	// Build the DRA device allocator for this scheduling loop. Slice/device gathering happens here (rather than in the
@@ -369,12 +399,16 @@ func (p *Provisioner) NewScheduler(
 		if err != nil {
 			return nil, fmt.Errorf("gathering allocated devices, %w", err)
 		}
-		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient, deletingPodUIDs)
+		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(catalog.instanceTypes), p.kubeClient, deletingPodUIDs)
 	}
 
-	predictionStore := lo.Ternary(options.FromContext(ctx).FeatureGates.PredictionEnabled, p.predictionStore, nil)
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, deletingPodUIDs, predictionStore, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, catalog.nodePools, p.cluster, stateNodes, topology, catalog.instanceTypes, catalog.daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, deletingPodUIDs, p.schedulingPredictionStore(ctx), opts...), nil
+}
+
+// schedulingPredictionStore returns the prediction store schedulers should size with, or nil when predictions are disabled.
+func (p *Provisioner) schedulingPredictionStore(ctx context.Context) *prediction.Store {
+	return lo.Ternary(options.FromContext(ctx).FeatureGates.PredictionEnabled, p.predictionStore, nil)
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
