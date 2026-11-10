@@ -654,6 +654,64 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(1))
 		})
 
+		// kubernetes-sigs/karpenter#3415: the reservation is full and the NodePool's on-demand offerings are unavailable, so
+		// freeing the candidate's slot is the only way to reschedule now. Drift waits (Blocked), like a static NodePool,
+		// only if some on-demand offering the pod could use may come back.
+		DescribeTable("a full reservation with unavailable on-demand offerings",
+			func(mutate func(), nodeSelector map[string]string, terminateFirst bool) {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+				for _, o := range mostExpensiveInstance.Offerings {
+					o.Available = false
+				}
+				mutate()
+				setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+				pod := test.Pod(test.PodOptions{NodeSelector: nodeSelector, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+				}}}})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+				ExpectSingletonReconciled(ctx, driftController)
+
+				cmds := queue.GetCommands()
+				if !terminateFirst {
+					Expect(cmds).To(HaveLen(0))
+					Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+					return
+				}
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+				Expect(cmds[0].Replacements).To(HaveLen(0))
+				Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+				Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
+			},
+			Entry("waits when on-demand is transiently unavailable", func() {}, nil, false),
+			Entry("terminates first when on-demand is Incompatible", func() {
+				for _, o := range mostExpensiveInstance.Offerings {
+					o.Incompatible = true
+				}
+			}, nil, true),
+			Entry("terminates first when the instance type has no on-demand offering", func() {
+				mostExpensiveInstance.Offerings = nil
+			}, nil, true),
+			// e.g. a zone the type isn't offered in, or the NodeClass has no subnet in: that capacity can't come back.
+			Entry("terminates first when on-demand is unavailable only outside the instance type's zones", func() {
+				zone := mostExpensiveOffering.Zone()
+				mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
+				mostExpensiveInstance.Offerings = []*cloudprovider.Offering{{
+					Price:        mostExpensiveOffering.Price,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: zone + "-elsewhere"}),
+				}}
+			}, nil, true),
+			Entry("terminates first when the pod can't use on-demand", func() {}, map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}, true),
+		)
+
 		It("replaces-first when the reservation still has a spare slot", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(5, true, v1.CapacityTypeReserved) // spare reservation capacity -> can grow in place

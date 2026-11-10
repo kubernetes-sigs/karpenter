@@ -89,6 +89,9 @@ type Candidate struct {
 	reschedulablePods []*corev1.Pod
 	hasPodBlockers    bool
 
+	// nodePoolInstanceTypes are the NodePool's instance types, keyed by name, as resolved when the candidate was built.
+	nodePoolInstanceTypes map[string]*cloudprovider.InstanceType
+
 	// Price is this candidate's hourly price from the NodeClaimPriceProvider, or 0 if it's unknown.
 	// Precomputed at creation to avoid repeated offering lookups.
 	Price float64
@@ -223,6 +226,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		DisruptionCost:           disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 		Price:                    price,
 		RescheduleDisruptionCost: disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable),
+		nodePoolInstanceTypes:    instanceTypeMap,
 	}, nil
 }
 

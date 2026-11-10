@@ -185,7 +185,8 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     will free on termination). If every pod then places, terminateFirst is true — deleting the candidate is exactly
 //     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
 //     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
-//     uselessly.
+//     uselessly. Even then, if the NodePool's non-reserved fallback is only transiently unavailable (e.g. ICE), we wait
+//     for it rather than terminating first, as a static NodePool does (see awaitsTransientCapacity).
 //
 // A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, unchanged.
 func SimulateSchedulingWithReservedFallback(
@@ -220,7 +221,9 @@ func SimulateSchedulingWithReservedFallback(
 	if err != nil {
 		return results, false, err
 	}
-	if tfResults.AllNonPendingPodsScheduled() {
+	// A replacement only blocked on capacity that may come back (e.g. ICE'd on-demand) waits, as a static NodePool does,
+	// rather than taking the workload down until the refill launches (kubernetes-sigs/karpenter#3415).
+	if tfResults.AllNonPendingPodsScheduled() && !awaitsTransientCapacity(candidate) {
 		// Return the credit-back Results, not pass 1's: this is the accurate post-termination picture (reactive
 		// provisioning runs strict with the freed slot available), so the caller nominates the existing nodes that
 		// absorb the freed pods without spuriously reporting the reserved-bound pods as unschedulable.
@@ -491,6 +494,27 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 		}
 	}
 	return true, offered, nil
+}
+
+// awaitsTransientCapacity reports whether the candidate's NodePool has a non-reserved offering that's only transiently
+// unavailable (not Available, not Incompatible) and that every reschedulable pod could use, so its replacement may
+// launch without the candidate's reservation slot once that capacity comes back. It's the dynamic counterpart of
+// staticReservations' non-reserved fallback check.
+func awaitsTransientCapacity(c *Candidate) bool {
+	podReqs := lo.Map(c.reschedulablePods, func(p *corev1.Pod, _ int) pkgscheduling.Requirements {
+		return pkgscheduling.NewStrictPodRequirements(p)
+	})
+	for it, o := range templateOfferings(lo.Values(c.nodePoolInstanceTypes), scheduling.NewNodeClaimTemplate(c.NodePool)) {
+		if o.CapacityType() == v1.CapacityTypeReserved || o.Available || o.Incompatible {
+			continue
+		}
+		if lo.EveryBy(podReqs, func(r pkgscheduling.Requirements) bool {
+			return r.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) && r.IsCompatible(o.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels)
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // holdsOfferedReservation reports whether the candidate holds a slot in a reservation that's still offered, so
