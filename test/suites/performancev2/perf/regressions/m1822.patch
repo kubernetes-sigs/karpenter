@@ -1,0 +1,15 @@
+diff --git a/pkg/controllers/provisioning/scheduling/topologygroup.go b/pkg/controllers/provisioning/scheduling/topologygroup.go
+index 13db6967..e4396ce5 100644
+--- a/pkg/controllers/provisioning/scheduling/topologygroup.go
++++ b/pkg/controllers/provisioning/scheduling/topologygroup.go
+@@ -440,5 +440,9 @@ func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduli
+ 
+ // selects returns true if the given pod is selected by this topology
+ func (t *TopologyGroup) selects(pod *corev1.Pod) bool {
+-	return t.namespaces.Has(pod.Namespace) && t.selector.Matches(labels.Set(pod.Labels))
++	selector := labels.Nothing()
++	if t.rawSelector != nil {
++		selector, _ = metav1.LabelSelectorAsSelector(t.rawSelector)
++	}
++	return t.namespaces.Has(pod.Namespace) && selector.Matches(labels.Set(pod.Labels))
+ }
