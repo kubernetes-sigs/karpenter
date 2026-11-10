@@ -885,21 +885,24 @@ func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
 	if len(newResources) != 0 {
 		newResources[resources.Node] = resource.MustParse("1")
 	}
-	if _, ok := c.nodePoolResources[newNodePoolName]; !ok && newNodePoolName != "" {
-		c.nodePoolResources[newNodePoolName] = corev1.ResourceList{}
-	}
-	if oldNodePoolName != "" {
+	// The old NodePool's entry may already have been garbage collected below; there's nothing left to subtract from
+	if oldNodePoolResources, ok := c.nodePoolResources[oldNodePoolName]; ok && oldNodePoolName != "" {
 		for resourceName, quantity := range oldResources {
-			current := c.nodePoolResources[oldNodePoolName][resourceName]
+			current := oldNodePoolResources[resourceName]
 			current.Sub(quantity)
-			c.nodePoolResources[oldNodePoolName][resourceName] = current
+			oldNodePoolResources[resourceName] = current
 		}
 	}
 	if newNodePoolName != "" {
+		newNodePoolResources, ok := c.nodePoolResources[newNodePoolName]
+		if !ok {
+			newNodePoolResources = corev1.ResourceList{}
+			c.nodePoolResources[newNodePoolName] = newNodePoolResources
+		}
 		for resourceName, quantity := range newResources {
-			current := c.nodePoolResources[newNodePoolName][resourceName]
+			current := newNodePoolResources[resourceName]
 			current.Add(quantity)
-			c.nodePoolResources[newNodePoolName][resourceName] = current
+			newNodePoolResources[resourceName] = current
 		}
 	}
 	// Garbage collect any NodePool keys that no longer have any resources assigned to them.

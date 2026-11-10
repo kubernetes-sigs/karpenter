@@ -72,7 +72,7 @@ func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType,
 	var instanceTypeOptions []InstanceTypeOptions
 
 	rawInstanceTypes := defaultRawInstanceTypes
-	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" {
+	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" { //nolint:nilaway // options are always injected into the operator context
 		customRawInstanceTypes, err := os.ReadFile(customInstanceTypes)
 		if err != nil {
 			return nil, fmt.Errorf("could not read custom instance types file: %w", err)

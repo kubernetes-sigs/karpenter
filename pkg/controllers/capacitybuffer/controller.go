@@ -100,7 +100,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	cb.Status.ProvisioningStrategy = cb.Spec.ProvisioningStrategy
 
 	// Always attempt to patch status so conditions are visible even on errors.
-	statusChanged := !equality.Semantic.DeepEqual(stored.Status, cb.Status)
+	statusChanged := !equality.Semantic.DeepEqual(stored.Status, cb.Status) //nolint:nilaway // DeepCopy of a non-nil object is non-nil
 	if statusChanged {
 		if err := c.kubeClient.Status().Patch(ctx, cb, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) || errors.IsNotFound(err) {
@@ -118,7 +118,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// avoiding a second lookup of the same PodTemplate/workload. On resolution
 	// failure (resolved == false) the buffer's ReadyForProvisioning condition is
 	// False, so UpdateEntry drops any stale entry for it.
-	if resolved {
+	if resolved && podSpec != nil {
 		c.virtualPodCache.UpdateEntry(cb, *podSpec)
 	} else {
 		c.virtualPodCache.RemoveEntry(client.ObjectKeyFromObject(cb))
