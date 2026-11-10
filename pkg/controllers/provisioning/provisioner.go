@@ -316,7 +316,7 @@ func (p *Provisioner) NewScheduler(
 				continue
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, fmt.Errorf("getting instance types, %w", err)
+				return nil, fmt.Errorf("getting instance types, %w", err) //nolint:karpenterlint // the pass's deadline expired, so every remaining NodePool would fail too
 			}
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
 			continue

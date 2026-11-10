@@ -90,7 +90,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return []Command{}, err
+			return []Command{}, err //nolint:karpenterlint // simulation errors are cluster-wide (API reads, scheduler timeout), not per candidate
 		}
 		if terminateFirst {
 			// Delete-only (no Replacements): carry the Results so existing nodes that can absorb the freed pods get
