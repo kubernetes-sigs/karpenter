@@ -11,6 +11,9 @@ linters:
     - copyloopvar
     - depguard
     - errorlint
+    - forbidigo
+    - ginkgolinter
+    - gocritic
     - gocyclo
     - goheader
     - gosec
@@ -18,13 +21,13 @@ linters:
     - misspell
     - modernize
     - nilerr
+    - noctx
+    - prealloc
     - revive
     - staticcheck
     - tparallel
     - unconvert
     - unparam
-  disable:
-    - prealloc
   settings:
     custom:
       kubeapilinter:
@@ -48,6 +51,37 @@ linters:
           deny:
             - pkg: github.com/avast/retry-go
               desc: use k8s.io/apimachinery/pkg/util/wait
+    # Use the injected clock in production code: #3009, #3045, #3406, #3038.
+    # Background deletion in e2e helpers: #3316.
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^time\.(Now|Since|Until)$
+          pkg: ^time$
+          msg: use the injected clock.Clock
+        - pattern: ^clock\.RealClock$
+          pkg: ^k8s\.io/utils/clock$
+          msg: use the injected clock.Clock
+        - pattern: ^v1\.DeletePropagationForeground$
+          pkg: ^k8s\.io/apimachinery/pkg/apis/meta/v1$
+          msg: use background deletion in e2e helpers
+    # Expect(x) and Eventually(f) without a matcher pass silently, e.g. the drift
+    # check in test/suites/disruption/drift_test.go and Expect(c.Delete(...)) in
+    # the pkg/test expectations helper. Also forbids focused specs left in.
+    ginkgolinter:
+      suppress-len-assertion: true
+      suppress-nil-assertion: true
+      suppress-err-assertion: true
+      suppress-compare-assertion: true
+      suppress-async-assertion: true
+      suppress-type-compare-assertion: true
+      forbid-focus-container: true
+      allow-havelen-zero: true
+    # Large per-iteration copies in scheduling and cluster state hot paths (#3211, #3310).
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - rangeValCopy
     gocyclo:
       min-complexity: 30
     goheader:
@@ -73,6 +107,10 @@ linters:
       locale: US
     # Keeps `go fix ./...` from #3024 from drifting back (lo.ToPtr/ptr.To went 1110 -> 91 -> 641).
     modernize: {}
+    # Allocation regressions in hot paths: #3211, #3310, #3068, #3137.
+    prealloc:
+      simple: true
+      range-loops: true
     revive:
       rules:
         - name: dot-imports
@@ -93,6 +131,9 @@ linters:
           - goheader
         path: zz_(.+)\.go
       - linters:
+          - prealloc
+        path: (_test\.go$|^pkg/test/|^test/)
+      - linters:
           - goheader
         path: scheduling_benchmark_test.go
       - path: (.+)\.go$
@@ -100,6 +141,20 @@ linters:
       - path-except: pkg/apis/
         linters:
           - kubeapilinter
+      - path: (_test\.go$|^test/|^pkg/test/|^pkg/operator/)
+        linters:
+          - forbidigo
+        text: use the injected clock
+      - path-except: ^test/
+        linters:
+          - forbidigo
+        text: use background deletion
+      - path-except: pkg/(scheduling|controllers/provisioning/scheduling|controllers/state)/
+        linters:
+          - gocritic
+      - path: _test\.go$
+        linters:
+          - gocritic
     paths:
       - tools
       - website

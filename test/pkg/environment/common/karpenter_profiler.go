@@ -98,7 +98,7 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 	defer heapTicker.Stop()
 
 	// Capture an initial heap profile immediately
-	kp.captureHeap(localPort)
+	kp.captureHeap(ctx, localPort)
 
 	for {
 		select {
@@ -106,9 +106,9 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 			return
 		case <-heapTicker.C:
 			kp.pollCount++
-			kp.captureHeap(localPort)
+			kp.captureHeap(ctx, localPort)
 			if kp.pollCount%2 == 0 {
-				kp.captureCPU(localPort)
+				kp.captureCPU(ctx, localPort)
 			}
 		}
 	}
@@ -126,16 +126,16 @@ func (kp *KarpenterProfiler) establishPortForward(ctx context.Context, localPort
 	return nil
 }
 
-func (kp *KarpenterProfiler) captureHeap(localPort int) {
-	if memMB, memData := kp.fetchHeapProfile(localPort); memMB > kp.peakMemoryMB {
+func (kp *KarpenterProfiler) captureHeap(ctx context.Context, localPort int) {
+	if memMB, memData := kp.fetchHeapProfile(ctx, localPort); memMB > kp.peakMemoryMB {
 		GinkgoWriter.Printf("KarpenterProfiler: [heap] new peak memory: %.2f MB (previous: %.2f MB)\n", memMB, kp.peakMemoryMB)
 		kp.peakMemoryMB = memMB
 		kp.peakMemoryProfile = memData
 	}
 }
 
-func (kp *KarpenterProfiler) captureCPU(localPort int) {
-	if cpuNanos, cpuData := kp.fetchCPUProfile(localPort); cpuNanos > kp.peakCPUNanos {
+func (kp *KarpenterProfiler) captureCPU(ctx context.Context, localPort int) {
+	if cpuNanos, cpuData := kp.fetchCPUProfile(ctx, localPort); cpuNanos > kp.peakCPUNanos {
 		GinkgoWriter.Printf("KarpenterProfiler: [cpu] new peak CPU: %.2f ms (previous: %.2f ms)\n", float64(cpuNanos)/1e6, float64(kp.peakCPUNanos)/1e6)
 		kp.peakCPUNanos = cpuNanos
 		kp.peakCPUProfile = cpuData
@@ -144,8 +144,13 @@ func (kp *KarpenterProfiler) captureCPU(localPort int) {
 
 var profilerClient = &http.Client{Timeout: 30 * time.Second}
 
-func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
-	resp, err := profilerClient.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", port)) //nolint:gosec
+func (kp *KarpenterProfiler) fetchHeapProfile(ctx context.Context, port int) (float64, []byte) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", port), nil)
+	if err != nil {
+		kp.lastError = fmt.Sprintf("pprof heap error: %v", err)
+		return 0, nil
+	}
+	resp, err := profilerClient.Do(req)
 	if err != nil {
 		kp.lastError = fmt.Sprintf("pprof heap error: %v", err)
 		return 0, nil
@@ -165,10 +170,15 @@ func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
 	return float64(memBytes) / (1024 * 1024), data
 }
 
-func (kp *KarpenterProfiler) fetchCPUProfile(port int) (int64, []byte) {
+func (kp *KarpenterProfiler) fetchCPUProfile(ctx context.Context, port int) (int64, []byte) {
 	// CPU profile blocks for CPUProfileSeconds, so use a longer timeout
 	cpuClient := &http.Client{Timeout: time.Duration(CPUProfileSeconds+15) * time.Second}
-	resp, err := cpuClient.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/profile?seconds=%d", port, CPUProfileSeconds)) //nolint:gosec
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/profile?seconds=%d", port, CPUProfileSeconds), nil)
+	if err != nil {
+		kp.lastError = fmt.Sprintf("pprof cpu error: %v", err)
+		return 0, nil
+	}
+	resp, err := cpuClient.Do(req)
 	if err != nil {
 		kp.lastError = fmt.Sprintf("pprof cpu error: %v", err)
 		return 0, nil
