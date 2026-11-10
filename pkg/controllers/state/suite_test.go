@@ -1052,6 +1052,58 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectStateNodeCount("==", 1)
 		ExpectStateNodeExists(cluster, node)
 	})
+	It("should handle deleting two nodes that share a providerID", func() {
+		providerID := test.RandomProviderID()
+		nodeA := test.Node(test.NodeOptions{ProviderID: providerID})
+		nodeB := test.Node(test.NodeOptions{ProviderID: providerID})
+		ExpectApplied(ctx, env.Client, nodeA, nodeB)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeA))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeB))
+		ExpectStateNodeCount("==", 1)
+
+		// Deleting the stale node shouldn't drop the state for the node that still owns the providerID
+		ExpectDeleted(ctx, env.Client, nodeA)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeA))
+		ExpectStateNodeCount("==", 1)
+		ExpectStateNodeExists(cluster, nodeB)
+
+		ExpectDeleted(ctx, env.Client, nodeB)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeB))
+		ExpectStateNodeCount("==", 0)
+	})
+	It("should handle deleting two nodes that share a providerID when the tracked node is deleted first", func() {
+		providerID := test.RandomProviderID()
+		nodeA := test.Node(test.NodeOptions{ProviderID: providerID})
+		nodeB := test.Node(test.NodeOptions{ProviderID: providerID})
+		ExpectApplied(ctx, env.Client, nodeA, nodeB)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeA))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeB))
+		ExpectStateNodeCount("==", 1)
+
+		ExpectDeleted(ctx, env.Client, nodeB)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeB))
+		ExpectStateNodeCount("==", 0)
+
+		// nodeA's providerID mapping is left behind with no state node; deleting it must not panic
+		ExpectDeleted(ctx, env.Client, nodeA)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeA))
+		ExpectStateNodeCount("==", 0)
+	})
+	It("should handle deleting two nodeclaims that share a providerID", func() {
+		providerID := test.RandomProviderID()
+		nodeClaimA := test.NodeClaim(v1.NodeClaim{Status: v1.NodeClaimStatus{ProviderID: providerID}})
+		nodeClaimB := test.NodeClaim(v1.NodeClaim{Status: v1.NodeClaimStatus{ProviderID: providerID}})
+		ExpectApplied(ctx, env.Client, nodeClaimA, nodeClaimB)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimA))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimB))
+		ExpectStateNodeCount("==", 1)
+
+		ExpectDeleted(ctx, env.Client, nodeClaimB)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimB))
+		ExpectDeleted(ctx, env.Client, nodeClaimA)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimA))
+		ExpectStateNodeCount("==", 0)
+	})
 })
 
 var _ = Describe("Pod Anti-Affinity", func() {

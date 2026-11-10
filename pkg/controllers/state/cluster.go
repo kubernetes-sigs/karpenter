@@ -767,16 +767,20 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 }
 
 func (c *Cluster) cleanupNodeClaim(name string) {
+	// Multiple NodeClaims can map to the same providerID, so the state node may already be gone or may be tracking a
+	// different NodeClaim. In either case, only the name mapping needs to be cleaned up.
 	if id := c.nodeClaimNameToProviderID[name]; id != "" {
-		if c.nodes[id].Node == nil {
-			c.updateNodePoolResources(c.nodes[id], nil)
-			delete(c.nodes, id)
-		} else {
-			oldNode := c.nodes[id].ShallowCopy()
-			c.nodes[id].NodeClaim = nil
-			c.updateNodePoolResources(oldNode, c.nodes[id])
+		if n, ok := c.nodes[id]; ok && (n.NodeClaim == nil || n.NodeClaim.Name == name) {
+			if n.Node == nil {
+				c.updateNodePoolResources(n, nil)
+				delete(c.nodes, id)
+			} else {
+				oldNode := n.ShallowCopy()
+				n.NodeClaim = nil
+				c.updateNodePoolResources(oldNode, n)
+			}
+			c.MarkUnconsolidated()
 		}
-		c.MarkUnconsolidated()
 	}
 	// Delete the node claim from the nodeClaimNameToProviderID in the case that the provider ID hasn't resolved
 	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
@@ -822,17 +826,22 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 }
 
 func (c *Cluster) cleanupNode(name string) {
+	// Multiple Nodes can map to the same providerID (e.g. an instance that registers under two names), so the state
+	// node may already be gone or may be tracking a different Node. In either case, only the name mapping needs to be
+	// cleaned up. The mapping must always be removed, otherwise every subsequent delete would hit the same state.
 	if id := c.nodeNameToProviderID[name]; id != "" {
-		if c.nodes[id].NodeClaim == nil {
-			c.updateNodePoolResources(c.nodes[id], nil)
-			delete(c.nodes, id)
-		} else {
-			oldNode := c.nodes[id].ShallowCopy()
-			c.nodes[id].Node = nil
-			c.updateNodePoolResources(oldNode, c.nodes[id])
+		if n, ok := c.nodes[id]; ok && (n.Node == nil || n.Node.Name == name) {
+			if n.NodeClaim == nil {
+				c.updateNodePoolResources(n, nil)
+				delete(c.nodes, id)
+			} else {
+				oldNode := n.ShallowCopy()
+				n.Node = nil
+				c.updateNodePoolResources(oldNode, n)
+			}
+			c.MarkUnconsolidated()
 		}
 		delete(c.nodeNameToProviderID, name)
-		c.MarkUnconsolidated()
 	}
 }
 
