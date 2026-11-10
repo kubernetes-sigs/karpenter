@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"iter"
 	"strings"
 	"time"
 
@@ -445,34 +446,48 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	})
 }
 
+// templateOfferings yields the offerings a NodePool template could launch into, with their instance types.
+// GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements. An offering outside its
+// instance type's zones (e.g. one the type isn't offered in, or the NodeClass has no subnet in) can never launch, so it
+// isn't yielded.
+func templateOfferings(its []*cloudprovider.InstanceType, nct *scheduling.NodeClaimTemplate) iter.Seq2[*cloudprovider.InstanceType, *cloudprovider.Offering] {
+	return func(yield func(*cloudprovider.InstanceType, *cloudprovider.Offering) bool) {
+		for _, it := range its {
+			if !nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) {
+				continue
+			}
+			zones := it.Requirements.Get(corev1.LabelTopologyZone)
+			for _, o := range it.Offerings.Compatible(nct.Requirements) {
+				if zones.Has(o.Zone()) && !yield(it, o) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // staticReservations reports whether a static NodePool's replacement can only land in full capacity reservations, so
 // pre-spinning it would fail to launch until a reserved node frees its slot, and which compatible reservations are still
 // offered (Available, even if full). A compatible non-reserved offering, even a transiently unavailable one, means the
 // replacement doesn't depend on a reservation slot, so the NodePool waits for that capacity rather than terminating
 // first. An Incompatible non-reserved offering can never launch, so it doesn't count. A static
 // replacement is the bare NodePool template, so this is an offering lookup rather than a scheduling simulation.
-// GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements.
 func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudProvider, np *v1.NodePool, nct *scheduling.NodeClaimTemplate) (bool, sets.Set[string], error) {
 	its, err := cloudProvider.GetInstanceTypes(ctx, np)
 	if err != nil {
 		return false, nil, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
 	}
 	offered := sets.New[string]()
-	for _, it := range its {
-		if !nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) {
+	for _, o := range templateOfferings(its, nct) {
+		// An Incompatible non-reserved offering can never launch, so it isn't a fallback worth waiting for.
+		if o.CapacityType() != v1.CapacityTypeReserved && o.Incompatible {
 			continue
 		}
-		for _, o := range it.Offerings.Compatible(nct.Requirements) {
-			// An Incompatible non-reserved offering can never launch, so it isn't a fallback worth waiting for.
-			if o.CapacityType() != v1.CapacityTypeReserved && o.Incompatible {
-				continue
-			}
-			if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
-				return false, nil, nil
-			}
-			if o.Available {
-				offered.Insert(o.ReservationID())
-			}
+		if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
+			return false, nil, nil
+		}
+		if o.Available {
+			offered.Insert(o.ReservationID())
 		}
 	}
 	return true, offered, nil

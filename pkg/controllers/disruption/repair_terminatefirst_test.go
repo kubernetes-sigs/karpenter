@@ -647,6 +647,24 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
+		// An on-demand offering outside the instance type's zones (e.g. one the type isn't offered in, or the NodeClass has no
+		// subnet in) can never launch, so it isn't a fallback to wait for and the NodePool terminates first.
+		It("should terminate-first when the template's on-demand offerings are unavailable only outside the instance type's zones", func() {
+			zone := mostExpensiveOffering.Zone()
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
+			mostExpensiveInstance.Offerings = []*cloudprovider.Offering{{
+				Price:        mostExpensiveOffering.Price,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: zone + "-elsewhere"}),
+			}}
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(0))
+		})
+
 		// One NodePool's lookup failure must not stop repair for the rest of the cluster.
 		It("should still repair other candidates when a static NodePool's instance types can't be resolved", func() {
 			withReservation(0)
