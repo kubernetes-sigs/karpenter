@@ -96,6 +96,7 @@ func coallateEvents(events []v1.Event) map[v1.ObjectReference]*v1.EventList {
 	eventMap := map[v1.ObjectReference]*v1.EventList{}
 	for i := range events {
 		elem := events[i]
+		//karpenterlint:partial-copy events are grouped by kind, namespace and name only
 		objectKey := v1.ObjectReference{Kind: elem.InvolvedObject.Kind, Namespace: elem.InvolvedObject.Namespace, Name: elem.InvolvedObject.Name}
 		if _, ok := eventMap[objectKey]; !ok {
 			eventMap[objectKey] = &v1.EventList{}

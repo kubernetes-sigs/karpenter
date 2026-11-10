@@ -753,6 +753,7 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 		markedForDeletion: oldNode.markedForDeletion,
 		nominatedUntil:    oldNode.nominatedUntil,
 
+		podDisruptionCosts:  oldNode.podDisruptionCosts,
 		repairPolicyMatches: oldNode.repairPolicyMatches,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
@@ -802,6 +803,8 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 		volumeUsage:       scheduling.NewVolumeUsage(),
 		markedForDeletion: oldNode.markedForDeletion,
 		nominatedUntil:    oldNode.nominatedUntil,
+
+		podDisruptionCosts: map[types.NamespacedName]float64{},
 	}
 	n.repairPolicyMatches = c.matchRepairPolicies(ctx, node, oldNode)
 	if err := multierr.Combine(

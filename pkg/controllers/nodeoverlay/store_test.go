@@ -218,6 +218,43 @@ var _ = Describe("Store Apply Correctness", func() {
 			// Verify original instance type was not mutated
 			Expect(instanceType.Offerings[0].Price).To(BeNumerically("==", originalPrice), "original instance type should not be mutated")
 		})
+		It("should keep provider capacity and overhead overrides on price-overlaid offerings", func() {
+			capacityOverride := corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")}
+			overheadOverride := &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}}
+			instanceType := fake.NewInstanceType("m5.large",
+				fake.WithOfferings(
+					cloudprovider.Offering{
+						Requirements: scheduling.NewRequirements(
+							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+						),
+						Price:            0.096,
+						Available:        true,
+						CapacityOverride: capacityOverride,
+						OverheadOverride: overheadOverride,
+					},
+				),
+			)
+
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates = map[string]map[string]*instanceTypeUpdate{
+				"default": {
+					instanceType.Name: &instanceTypeUpdate{
+						Price: map[string]*priceUpdate{
+							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+						},
+						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
+					},
+				},
+			}
+
+			result := store.apply("default", instanceType)
+
+			Expect(result.Offerings[0].IsPriceOverlaid()).To(BeTrue())
+			Expect(result.Offerings[0].CapacityOverride).To(Equal(capacityOverride))
+			Expect(result.Offerings[0].OverheadOverride).To(Equal(overheadOverride))
+		})
 	})
 
 	Context("with DRA templates", func() {
