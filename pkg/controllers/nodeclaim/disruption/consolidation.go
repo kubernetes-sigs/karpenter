@@ -72,7 +72,9 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 			)
 		}
 		consolidatableTime := timeToCheck.Add(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
-		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
+		if remaining := consolidatableTime.Sub(c.clock.Now()); remaining > 0 {
+			return reconcile.Result{RequeueAfter: remaining}, nil
+		}
 	}
 
 	// 6. Otherwise, add the consolidatable status condition

@@ -74,9 +74,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	expirationTime := nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired leave the reconcile loop.
-	if c.clock.Now().Before(expirationTime) {
-		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
-		return reconcile.Result{RequeueAfter: expirationTime.Sub(c.clock.Now())}, nil
+	// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
+	if remaining := expirationTime.Sub(c.clock.Now()); remaining > 0 {
+		return reconcile.Result{RequeueAfter: remaining}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
