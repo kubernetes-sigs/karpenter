@@ -66,8 +66,8 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]sc
 	// Start with a single empty alternative (matches everything)
 	alternatives := []scheduling.Requirements{nil}
 
-	for _, vol := range pod.Spec.Volumes {
-		volAlts, err := v.getRequirements(ctx, pod, vol)
+	for i := range pod.Spec.Volumes {
+		volAlts, err := v.getRequirements(ctx, pod, &pod.Spec.Volumes[i])
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +115,7 @@ func mergeCompatibleVolumeRequirementAlternatives(alternatives, volAlts []schedu
 }
 
 func mergeAllVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requirements) []scheduling.Requirements {
-	var mergedAlternatives []scheduling.Requirements
+	mergedAlternatives := make([]scheduling.Requirements, 0, len(alternatives)*len(volAlts))
 	for _, existing := range alternatives {
 		for _, volReq := range volAlts {
 			mergedAlternatives = append(mergedAlternatives, mergeVolumeRequirements(existing, volReq))
@@ -140,7 +140,7 @@ func mergeVolumeRequirements(existing, volReq scheduling.Requirements) schedulin
 	return merged
 }
 
-func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]scheduling.Requirements, error) {
+func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume *v1.Volume) ([]scheduling.Requirements, error) {
 	pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
 	if err != nil {
 		return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
@@ -224,7 +224,8 @@ func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, po
 // ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
 // PVCs (e.g. the PVC is not found or references an unknown storage class).
 func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
-	for _, vol := range pod.Spec.Volumes {
+	for i := range pod.Spec.Volumes {
+		vol := &pod.Spec.Volumes[i]
 		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, vol)
 		if err != nil {
 			return err

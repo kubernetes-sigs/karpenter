@@ -81,7 +81,7 @@ func (env *Environment) ExpectDeleted(objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
 		Eventually(func(g Gomega) {
-			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationForeground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
+			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationBackground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
 }
@@ -1476,9 +1476,10 @@ func (env *Environment) ExpectPodPortForwarded(ctx context.Context, pod *corev1.
 		close(stop)
 	}()
 	go func() {
+		defer GinkgoRecover()
 		fw, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", localPort, podPort)}, stop, ready, io.Discard, io.Discard)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(fw.ForwardPorts())
+		Expect(fw.ForwardPorts()).To(Succeed())
 	}()
 	<-ready
 }

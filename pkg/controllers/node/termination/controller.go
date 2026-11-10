@@ -335,8 +335,8 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 	// Match on Pod -> PersistentVolumeClaim -> PersistentVolume Name <- VolumeAttachment
 	shouldFilterOutVolume := sets.New[string]()
 	for _, p := range unDrainablePods {
-		for _, v := range p.Spec.Volumes {
-			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, v)
+		for i := range p.Spec.Volumes {
+			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, &p.Spec.Volumes[i])
 			if errors.IsNotFound(err) {
 				continue
 			}
@@ -373,11 +373,11 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 		})
 
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
-		DurationSeconds.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds(), map[string]string{
+		DurationSeconds.Observe(c.clock.Since(stored.DeletionTimestamp.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
 		})
 
-		NodeLifetimeDurationSeconds.Observe(time.Since(n.CreationTimestamp.Time).Seconds(), map[string]string{
+		NodeLifetimeDurationSeconds.Observe(c.clock.Since(n.CreationTimestamp.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
 		})
 
