@@ -191,6 +191,7 @@ func (t *TopologyGroup) Hash() uint64 {
 		Type         TopologyType
 		Namespaces   sets.Set[string]
 		MaxSkew      int32
+		MinDomains   *int32
 		NodeFilter   TopologyNodeFilter
 		SelectorHash uint64
 	}{
@@ -198,6 +199,7 @@ func (t *TopologyGroup) Hash() uint64 {
 		Type:         t.Type,
 		Namespaces:   t.namespaces,
 		MaxSkew:      t.maxSkew,
+		MinDomains:   t.minDomains,
 		NodeFilter:   t.nodeFilter,
 		SelectorHash: hashSelector(t.rawSelector),
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))

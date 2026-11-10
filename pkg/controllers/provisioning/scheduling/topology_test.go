@@ -1579,6 +1579,32 @@ var _ = Describe("Topology", func() {
 				Skip("NodeAffinityPolicy ony enabled by default for K8s >= 1.26.x")
 			}
 		})
+		It("should keep spread groups separate for pods whose node affinity differs only in values", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			zoneOne := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				NodeRequirements:          []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}},
+				TopologySpreadConstraints: topology,
+			}, 2)
+			otherZones := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: lo.Assign(labels, map[string]string{"group": "other-zones"})},
+				NodeRequirements:          []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}}},
+				TopologySpreadConstraints: topology,
+			}, 4)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, append(zoneOne, otherZones...)...)
+			zones := map[string]int{}
+			for _, pod := range otherZones {
+				node := ExpectScheduled(ctx, env.Client, pod)
+				zones[node.Labels[corev1.LabelTopologyZone]]++
+			}
+			Expect(zones).To(Equal(map[string]int{"test-zone-2": 2, "test-zone-3": 2}))
+		})
 		It("should balance pods across a label (NodeAffinityPolicy=ignore)", func() {
 			const spreadLabel = "fake-label"
 			const affinityLabel = "selector"
@@ -3476,3 +3502,23 @@ func ownerReferenceFor(replicaSet *appsv1.ReplicaSet) metav1.OwnerReference {
 		Controller: new(true),
 	}
 }
+
+var _ = Describe("TopologyGroup Hash", func() {
+	spreadGroup := func(zones []string, minDomains *int32) *scheduling.TopologyGroup {
+		selector := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "spread"}}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta:       metav1.ObjectMeta{Labels: selector.MatchLabels},
+			NodeRequirements: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: zones}},
+		})
+		return scheduling.NewTopologyGroup(scheduling.TopologyTypeSpread, corev1.LabelTopologyZone, pod, sets.New("default"), selector, 1, minDomains, nil, nil, scheduling.NewTopologyDomainGroup())
+	}
+	It("should differ for node affinity values", func() {
+		Expect(spreadGroup([]string{"test-zone-1"}, nil).Hash()).ToNot(Equal(spreadGroup([]string{"test-zone-2"}, nil).Hash()))
+	})
+	It("should differ for minDomains", func() {
+		Expect(spreadGroup([]string{"test-zone-1"}, new(int32(1))).Hash()).ToNot(Equal(spreadGroup([]string{"test-zone-1"}, new(int32(3))).Hash()))
+	})
+	It("should match for identical groups", func() {
+		Expect(spreadGroup([]string{"test-zone-1", "test-zone-2"}, nil).Hash()).To(Equal(spreadGroup([]string{"test-zone-2", "test-zone-1"}, nil).Hash()))
+	})
+})
