@@ -140,7 +140,7 @@ func (r *Run) Restart(name string, timeout time.Duration) *Result {
 	}
 	old := map[string]bool{}
 	for _, p := range pods.Items {
-		old[p.Name] = true
+		old[p.Name] = true //nolint:karpenterlint // pods are listed from the single controller namespace
 	}
 	rep := &Result{Kind: "startup"}
 	Eventually(func(g Gomega) {
