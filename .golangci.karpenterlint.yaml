@@ -20,6 +20,12 @@ linters:
           disable: []
   exclusions:
     generated: lax
+    rules:
+      # Test builders copy on purpose.
+      - path: pkg/test/
+        linters:
+          - karpenterlint
+        text: "^copylit:"
     paths:
       - tools
       - website

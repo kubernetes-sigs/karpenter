@@ -165,6 +165,8 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 				Price:               offering.Price,
 				Available:           offering.Available,
 				ReservationCapacity: offering.ReservationCapacity,
+				CapacityOverride:    offering.CapacityOverride,
+				OverheadOverride:    offering.OverheadOverride,
 			}
 			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
 			result[i] = copiedOffering

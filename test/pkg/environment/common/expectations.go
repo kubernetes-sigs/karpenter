@@ -201,6 +201,7 @@ func (env *Environment) ExpectRepairFaultInjected(node *corev1.Node) {
 	cond, ok := env.RepairCondition()
 	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
 	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		//karpenterlint:partial-copy injected faults set their own transition time and no heartbeat
 		env.ReplaceNodeConditions(n, corev1.NodeCondition{
 			Type:               cond.Type,
 			Status:             cond.Status,
@@ -245,6 +246,7 @@ func (env *Environment) ExpectRebootFaultInjected(node *corev1.Node) {
 	cond, ok := env.RebootCondition()
 	Expect(ok).To(BeTrue(), "no reboot condition for this provider, pass --reboot-condition")
 	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		//karpenterlint:partial-copy injected faults set their own transition time and no heartbeat
 		env.ReplaceNodeConditions(n, corev1.NodeCondition{
 			Type:               cond.Type,
 			Status:             cond.Status,

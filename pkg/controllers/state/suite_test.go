@@ -49,6 +49,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -324,6 +325,21 @@ var _ = Describe("Volume Usage/Limits", func() {
 		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
 			csiProvider: sets.New("test"),
 		})).ToNot(BeNil())
+	})
+	It("should maintain pod disruption costs when receiving NodeClaim updates", func() {
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		for range 3 {
+			pod := test.Pod()
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		cost := ExpectStateNodeExists(cluster, node).DisruptionCost()
+		Expect(cost).To(BeNumerically(">", disruptionutils.PerNodeBaseDisruptionCost))
+
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(ExpectStateNodeExists(cluster, node).DisruptionCost()).To(Equal(cost))
 	})
 	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)

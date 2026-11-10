@@ -280,6 +280,7 @@ func (s *Store) PredictedRequests(ctx context.Context, cachedOwnerResolutions Ow
 		if !ok {
 			return resources.RequestsForPods(pod)
 		}
+		//karpenterlint:partial-copy RequestsForSpec only reads containers, overhead and pod-level resources
 		result := resources.RequestsForSpec(&corev1.PodSpec{
 			Containers:     applyPredictions(pod.Spec.Containers, pred),
 			InitContainers: applyPredictions(pod.Spec.InitContainers, pred),
