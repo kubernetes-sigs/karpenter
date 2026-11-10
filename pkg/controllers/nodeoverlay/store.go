@@ -164,6 +164,7 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 				Requirements:        offering.Requirements, // Shared - requirements are immutable
 				Price:               offering.Price,
 				Available:           offering.Available,
+				Incompatible:        offering.Incompatible,
 				ReservationCapacity: offering.ReservationCapacity,
 			}
 			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
