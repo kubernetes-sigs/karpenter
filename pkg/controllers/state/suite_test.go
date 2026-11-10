@@ -1052,6 +1052,30 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectStateNodeCount("==", 1)
 		ExpectStateNodeExists(cluster, node)
 	})
+	It("should panic with a clear message when deleting two nodes that share a providerID", func() {
+		providerID := test.RandomProviderID()
+		nodeA := test.Node(test.NodeOptions{ProviderID: providerID})
+		nodeB := test.Node(test.NodeOptions{ProviderID: providerID})
+		ExpectApplied(ctx, env.Client, nodeA, nodeB)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeA))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeB))
+		ExpectStateNodeCount("==", 1)
+
+		cluster.DeleteNode(nodeA.Name)
+		Expect(func() { cluster.DeleteNode(nodeB.Name) }).To(PanicWith(And(BeAssignableToTypeOf(""), ContainSubstring(providerID))))
+	})
+	It("should panic with a clear message when deleting two nodeclaims that share a providerID", func() {
+		providerID := test.RandomProviderID()
+		nodeClaimA := test.NodeClaim(v1.NodeClaim{Status: v1.NodeClaimStatus{ProviderID: providerID}})
+		nodeClaimB := test.NodeClaim(v1.NodeClaim{Status: v1.NodeClaimStatus{ProviderID: providerID}})
+		ExpectApplied(ctx, env.Client, nodeClaimA, nodeClaimB)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimA))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimB))
+		ExpectStateNodeCount("==", 1)
+
+		cluster.DeleteNodeClaim(nodeClaimA.Name)
+		Expect(func() { cluster.DeleteNodeClaim(nodeClaimB.Name) }).To(PanicWith(And(BeAssignableToTypeOf(""), ContainSubstring(providerID))))
+	})
 })
 
 var _ = Describe("Pod Anti-Affinity", func() {
