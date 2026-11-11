@@ -247,6 +247,16 @@ var _ = Describe("Reboot", func() {
 		}}
 		env.ExpectCreated(nodeClass, nodePool, dep)
 		nodes := env.EventuallyExpectCreatedNodeCount("==", 3)
+		// Registration merges the NodePool's startup taints onto the node, so wait for it to finish before removing
+		// them; removing them earlier is a no-op and registration then adds them, leaving the nodes uninitialized.
+		Eventually(func(g Gomega) {
+			nodeClaims := &v1.NodeClaimList{}
+			g.Expect(env.Client.List(env, nodeClaims, client.MatchingLabels{v1.NodePoolLabelKey: nodePool.Name})).To(Succeed())
+			g.Expect(nodeClaims.Items).To(HaveLen(3))
+			for i := range nodeClaims.Items {
+				g.Expect(nodeClaims.Items[i].StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			}
+		}).Should(Succeed())
 		for _, node := range nodes {
 			setStartupTaint(node, false)
 		}
