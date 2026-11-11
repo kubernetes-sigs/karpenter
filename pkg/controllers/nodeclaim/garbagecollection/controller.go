@@ -18,15 +18,18 @@ package garbagecollection
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
 
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -42,6 +45,12 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
+
+// DisruptionReasonGarbageCollected is the DisruptionReason condition reason for a NodeClaim whose
+// backing instance is gone from the cloud provider. It is a condition reason, not a NodePool budget
+// reason, so it is not part of the v1.DisruptionReason enum; it follows the PascalCase of the voluntary
+// reasons set on the same condition.
+const DisruptionReasonGarbageCollected = "GarbageCollected"
 
 type Controller struct {
 	clock         clock.Clock
@@ -61,6 +70,7 @@ func (c *Controller) Name() string {
 	return "nodeclaim.garbagecollection"
 }
 
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -100,6 +110,13 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		if node != nil && nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue {
 			return
 		}
+		// Record why on the NodeClaim before deleting it, the way the disruption queue does for voluntary
+		// disruption, so the reason is on the object before termination starts and the pod drain metric
+		// can report it.
+		if err := c.markGarbageCollected(ctx, nodeClaims[i]); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
+		}
 		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
@@ -137,4 +154,20 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
+}
+
+// markGarbageCollected sets the DisruptionReason condition on the NodeClaim to GarbageCollected. The
+// NodeClaim is re-read and patched with an optimistic lock, and the patch is retried on conflict, so a
+// concurrent status update by another controller is not overwritten.
+func (c *Controller) markGarbageCollected(ctx context.Context, nodeClaim *v1.NodeClaim) error {
+	message := fmt.Sprintf("NodeClaim garbage collected: instance %s no longer exists in the cloud provider", nodeClaim.Status.ProviderID)
+	return retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+		latest := &v1.NodeClaim{}
+		if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(nodeClaim), latest); err != nil {
+			return err
+		}
+		stored := latest.DeepCopy()
+		latest.StatusConditions(status.WithClock(c.clock)).SetTrueWithReason(v1.ConditionTypeDisruptionReason, DisruptionReasonGarbageCollected, message)
+		return c.kubeClient.Status().Patch(ctx, latest, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
+	})
 }
