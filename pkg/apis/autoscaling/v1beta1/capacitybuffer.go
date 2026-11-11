@@ -95,6 +95,8 @@ type CapacityBufferSpec struct {
 	// provisioningStrategy defines how the buffer is utilized.
 	// "buffer.x-k8s.io/active-capacity" is the default strategy, where the buffer actively scales up the cluster by creating placeholder pods.
 	// +default="buffer.x-k8s.io/active-capacity"
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	ProvisioningStrategy *string `json:"provisioningStrategy,omitempty" protobuf:"bytes,1,opt,name=provisioningStrategy"`
 
@@ -167,6 +169,8 @@ type CapacityBufferStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,4,rep,name=conditions"` //nolint:kubeapilinter
 
 	// provisioningStrategy defines how the buffer should be utilized.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	ProvisioningStrategy *string `json:"provisioningStrategy,omitempty" protobuf:"bytes,5,opt,name=provisioningStrategy"`
 }

@@ -116,6 +116,8 @@ spec:
                 description: |-
                   provisioningStrategy defines how the buffer is utilized.
                   "buffer.x-k8s.io/active-capacity" is the default strategy, where the buffer actively scales up the cluster by creating placeholder pods.
+                maxLength: 1024
+                minLength: 1
                 type: string
               replicas:
                 description: |-
@@ -247,6 +249,8 @@ spec:
               provisioningStrategy:
                 description: provisioningStrategy defines how the buffer should be
                   utilized.
+                maxLength: 1024
+                minLength: 1
                 type: string
               replicas:
                 description: replicas is the actual number of buffer chunks currently
