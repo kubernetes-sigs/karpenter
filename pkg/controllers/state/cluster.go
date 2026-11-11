@@ -295,6 +295,48 @@ func (c *Cluster) RepairPolicyMatcher() *health.RepairPolicyMatcher {
 	return c.repairPolicyMatcher
 }
 
+// RepairBreakers checks each NodePool's breaker with node repair's rule, for the breaker metrics. A Node is unhealthy
+// while a repair policy matches one of its conditions, whatever the toleration. Unlike node repair, which lists
+// Nodes, it leaves out a Node that cluster state hasn't added, such as one with no provider ID yet.
+func (c *Cluster) RepairBreakers() map[string]health.Breaker {
+	nodes, unhealthy := map[string]int{}, map[string]int{}
+	for n := range c.Nodes() {
+		nodePool := n.repairBreakerNodePool()
+		if nodePool == "" {
+			continue
+		}
+		nodes[nodePool]++
+		if len(n.repairPolicyMatches) > 0 {
+			unhealthy[nodePool]++
+		}
+	}
+	breakers := make(map[string]health.Breaker, len(nodes))
+	for nodePool, count := range nodes {
+		breakers[nodePool] = health.CheckBreaker(count, unhealthy[nodePool])
+	}
+	return breakers
+}
+
+// RepairBreakerTrippedAt dates the NodePool's repair breaker trip from the Nodes that RepairBreakers counts for it, or
+// returns zero if it isn't tripped.
+func (c *Cluster) RepairBreakerTrippedAt(nodePool string) time.Time {
+	nodes := 0
+	var unhealthySince []time.Time
+	for n := range c.Nodes() {
+		if name := n.repairBreakerNodePool(); name == "" || name != nodePool {
+			continue
+		}
+		nodes++
+		// The cached matches decide which Nodes are unhealthy, as in RepairBreakers. UnhealthySince reads the same
+		// conditions to date them.
+		if len(n.repairPolicyMatches) > 0 {
+			since, _ := c.repairPolicyMatcher.UnhealthySince(n.Node)
+			unhealthySince = append(unhealthySince, since)
+		}
+	}
+	return health.TrippedAt(nodes, unhealthySince)
+}
+
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
 func (c *Cluster) IsNodeNominated(providerID string) bool {

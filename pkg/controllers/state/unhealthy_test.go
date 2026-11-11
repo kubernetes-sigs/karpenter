@@ -197,4 +197,52 @@ var _ = Describe("Unhealthy Nodes", func() {
 
 		Expect(unhealthyNames()).To(BeEmpty())
 	})
+	Context("Repair breakers", func() {
+		// nodeIn applies a Node in the NodePool, or in none if nodePoolName is empty, and tells cluster state about it.
+		nodeIn := func(nodePoolName string, conditions ...corev1.NodeCondition) {
+			labels := map[string]string{corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name}
+			if nodePoolName != "" {
+				labels[v1.NodePoolLabelKey] = nodePoolName
+			}
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, ProviderID: test.RandomProviderID()})
+			node.Status.Conditions = append(node.Status.Conditions, conditions...)
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+
+		It("should count each NodePool's Nodes, and those that match a policy, whatever the toleration", func() {
+			// 5 nodes allow 1 unhealthy, so a is tripped and b isn't.
+			for i := range 5 {
+				nodeIn("a", lo.Ternary(i < 2, []corev1.NodeCondition{badNode()}, nil)...)
+				nodeIn("b", lo.Ternary(i < 1, []corev1.NodeCondition{badNode()}, nil)...)
+			}
+			// Neither a Node without a NodePool nor a NodeClaim whose Node is gone counts.
+			nodeIn("", badNode())
+			_, gone := managedNode(badNode())
+			ExpectDeleted(ctx, env.Client, gone)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(gone))
+
+			Expect(cluster.RepairBreakers()).To(Equal(map[string]health.Breaker{
+				"a": {Nodes: 5, Unhealthy: 2, Tripped: true},
+				"b": {Nodes: 5, Unhealthy: 1},
+			}))
+		})
+		It("should date a NodePool's trip to when its first Node past the limit became unhealthy", func() {
+			// An hour ahead is after the Nodes' creation, so no condition time is clamped to it.
+			later := env.Clock.Now().Add(time.Hour).Truncate(time.Second)
+			unhealthyAt := func(minutes int) corev1.NodeCondition {
+				return corev1.NodeCondition{Type: "BadNode", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(later.Add(time.Duration(minutes) * time.Minute))}
+			}
+			// 4 nodes allow 1 unhealthy, so the second node to become unhealthy tripped the breaker.
+			nodeIn("a", unhealthyAt(30))
+			nodeIn("a", unhealthyAt(10))
+			nodeIn("a", unhealthyAt(20))
+			nodeIn("a")
+			// A Node in another NodePool doesn't count, and that NodePool isn't tripped.
+			nodeIn("b", unhealthyAt(0))
+
+			Expect(cluster.RepairBreakerTrippedAt("a")).To(BeTemporally("==", later.Add(20*time.Minute)))
+			Expect(cluster.RepairBreakerTrippedAt("b").IsZero()).To(BeTrue())
+		})
+	})
 })
