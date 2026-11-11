@@ -65,7 +65,7 @@ var _ = BeforeSuite(func() {
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
-	metricsStateController = node.NewController(cluster)
+	metricsStateController = node.NewController(ctx, env.Clock, cloudProvider, cluster)
 })
 
 var _ = AfterSuite(func() {

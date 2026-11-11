@@ -296,7 +296,7 @@ const (
 var (
 	RepairCondition = opmetrics.Label{
 		Name: conditionLabel,
-		Help: "The node status condition type that triggered node repair disruption.",
+		Help: "The node status condition type that node repair acts on, in snake case, e.g. `ready` for `Ready`.",
 	}
 	ImageID = opmetrics.Label{
 		Name: imageIDLabel,

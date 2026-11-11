@@ -20,6 +20,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -30,12 +31,14 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -183,20 +186,30 @@ func nodeLabelNames() []opmetrics.Label {
 }
 
 type Controller struct {
+	clock       clock.Clock
 	cluster     *state.Cluster
 	metricStore *metrics.Store
+	// pastDueRepairs is nil when node repair is off.
+	pastDueRepairs *pastDueRepairs
 }
 
-func NewController(cluster *state.Cluster) *Controller {
-	initializeMetrics()
+// initializeMetricsOnce lets tests build more than one controller, since registering a metric twice panics.
+var initializeMetricsOnce sync.Once
+
+func NewController(ctx context.Context, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
+	initializeMetricsOnce.Do(initializeMetrics)
 	return &Controller{
-		cluster:     cluster,
-		metricStore: metrics.NewStore(),
+		clock:          clk,
+		cluster:        cluster,
+		metricStore:    metrics.NewStore(),
+		pastDueRepairs: newPastDueRepairs(ctx, cloudProvider),
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, c.Name())
+	// Cluster state may miss nodes until it first syncs, and a 0 then would wrongly say no repair is late.
+	reportPastDue := c.pastDueRepairs != nil && (c.cluster.HasSynced() || c.cluster.Synced(ctx))
 
 	nodes := lo.Reject(c.cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
@@ -209,6 +222,9 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	// Build cluster level metric
 	metricsMap["clusterUtilization"] = buildClusterUtilizationMetric(nodes)
+	if reportPastDue {
+		metricsMap["repairPastDue"] = c.pastDueRepairs.buildPastDueMetrics(nodes, c.clock.Now())
+	}
 
 	c.metricStore.ReplaceAll(metricsMap)
 
