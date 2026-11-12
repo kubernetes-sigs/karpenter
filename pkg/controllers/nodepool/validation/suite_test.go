@@ -21,16 +21,19 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -43,6 +46,7 @@ var (
 	env                          *test.Environment
 	nodePool                     *v1.NodePool
 	cp                           *fake.CloudProvider
+	recorder                     *test.EventRecorder
 )
 
 func TestAPIs(t *testing.T) {
@@ -54,10 +58,12 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
-	nodePoolValidationController = NewController(env.Clock, env.Client, cp)
+	recorder = test.NewEventRecorder()
+	nodePoolValidationController = NewController(env.Clock, env.Client, cp, recorder)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	recorder.Reset()
 })
 
 var _ = AfterSuite(func() {
@@ -108,6 +114,40 @@ var _ = Describe("Counter", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
+	})
+	Context("Budget Windows", func() {
+		budget := func(nodes string, duration time.Duration) v1.Budget {
+			return v1.Budget{Nodes: nodes, Schedule: new("0 12 * * mon"), Duration: &metav1.Duration{Duration: duration}}
+		}
+		BeforeEach(func() {
+			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 4 * time.Hour}
+		})
+		It("should warn when a budget window that allows disruption is shorter than terminationGracePeriod", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{budget("100%", 2*time.Hour)}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+			Expect(recorder.Calls(events.BudgetWindowShorterThanTerminationGracePeriod)).To(Equal(1))
+			Expect(recorder.DetectedEvent(`Budget with schedule "0 12 * * mon" and duration 2h0m0s is shorter than terminationGracePeriod 4h0m0s, so nodes disrupted in the window can keep draining after it ends`)).To(BeTrue())
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		})
+		DescribeTable("should not warn",
+			func(mutate func()) {
+				mutate()
+				ExpectApplied(ctx, env.Client, nodePool)
+				ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+				Expect(recorder.Calls(events.BudgetWindowShorterThanTerminationGracePeriod)).To(Equal(0))
+			},
+			Entry("when the window is at least terminationGracePeriod", func() { nodePool.Spec.Disruption.Budgets = []v1.Budget{budget("100%", 4*time.Hour)} }),
+			Entry("when the window blocks disruption", func() {
+				nodePool.Spec.Disruption.Budgets = []v1.Budget{budget("0", time.Hour), budget("0%", time.Hour)}
+			}),
+			Entry("when the budget has no schedule", func() { nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "10%"}} }),
+			Entry("when terminationGracePeriod is unset", func() {
+				nodePool.Spec.Template.Spec.TerminationGracePeriod = nil
+				nodePool.Spec.Disruption.Budgets = []v1.Budget{budget("100%", time.Hour)}
+			}),
+		)
 	})
 	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
 		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{

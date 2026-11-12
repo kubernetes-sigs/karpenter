@@ -47,6 +47,9 @@ const (
 	TerminationGracePeriodExpiring = "TerminationGracePeriodExpiring"
 	TerminationFailed              = "FailedTermination"
 
+	// nodepool/validation
+	BudgetWindowShorterThanTerminationGracePeriod = "BudgetWindowShorterThanTerminationGracePeriod"
+
 	// nodeclaim/consistency
 	FailedConsistencyCheck = "FailedConsistencyCheck"
 

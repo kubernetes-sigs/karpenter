@@ -141,7 +141,7 @@ func NewControllers(
 		nodepoolreadiness.NewController(clock, kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(clock, kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
-		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider),
+		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider, recorder),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, cluster, npState, o.registrationHooks),
