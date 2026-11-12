@@ -27,13 +27,15 @@ import (
 	clock "k8s.io/utils/clock/testing"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 )
 
 var _ = Describe("Reboot Issuance Timer", func() {
 	It("should not leak the in-memory issuance timer for a NodeClaim deleted mid-reboot", func() {
 		clk := clock.NewFakeClock(time.Now())
-		c := &Controller{clock: clk, issuanceStarted: map[types.UID]time.Time{}}
+		c := &Controller{clock: clk, cloudProvider: fake.NewCloudProvider(), issuanceStarted: map[types.UID]time.Time{}}
 		nodeClaim := &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "rebooting", UID: "uid-1", DeletionTimestamp: &metav1.Time{Time: clk.Now()}, Finalizers: []string{v1.TerminationFinalizer}}}
+		nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{Group: "karpenter.test.sh", Kind: "TestNodeClass", Name: "default"}
 		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "rebooting")
 		c.ensureIssuanceStarted(nodeClaim.UID)
 
