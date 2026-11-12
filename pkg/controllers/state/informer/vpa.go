@@ -18,21 +18,30 @@ package informer
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	vpav1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -42,23 +51,80 @@ import (
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
 
+const vpaCRDName = "verticalpodautoscalers.autoscaling.k8s.io"
+
+// VPAListTimeout bounds the VPA List. A cached List against a deleted CRD blocks until its context is done, so this
+// must stay at most prediction.HydrationTimeout/2 for a reconcile that times out and then finds the CRD gone to mark
+// the store hydrated in time.
+var VPAListTimeout = 30 * time.Second
+
+// vpaCRDLookupTimeout bounds each VPA CRD lookup, so a reconcile that looks up the CRD on both sides of its List still
+// finishes before prediction.HydrationTimeout.
+const vpaCRDLookupTimeout = 5 * time.Second
+
+// VPACRDCheckEveryNEmptyLists throttles the lookup before the List while Lists keep returning no VPAs. A cluster that
+// has the CRD installed and no VPAs would otherwise pay a lookup every reconcile forever, and nothing it detects
+// there is urgent: the store is already hydrated, so the only thing left to reap is a reflector retrying against a
+// deleted CRD. At the 30s requeue this is about every 5 minutes.
+var VPACRDCheckEveryNEmptyLists = 10
+
+type crdState int
+
+const (
+	crdUnknown crdState = iota
+	crdPresent
+	crdAbsent
+	crdTerminating
+	// crdNoMatch is the List's own answer, which doesn't say whether the CRD is missing or no longer served. It is
+	// only ever reported, never compared against.
+	crdNoMatch
+)
+
+func (s crdState) String() string {
+	switch s {
+	case crdPresent:
+		return "present"
+	case crdAbsent:
+		return "absent"
+	case crdTerminating:
+		return "terminating"
+	case crdNoMatch:
+		return "no match"
+	default:
+		return "unknown"
+	}
+}
+
 // Controller periodically lists VerticalPodAutoscaler objects and maintains a prediction
 // cache of post-recreation resources for VPA-managed pods. It uses a singleton (polling)
 // pattern rather than an informer to gracefully tolerate VPA CRD not being installed.
 type VPAController struct {
 	kubeClient client.Client
-	store      *prediction.Store
-	cluster    *state.Cluster
-	recorder   events.Recorder
+	// apiReader reads the VPA CRD uncached, so checking it needs only get on that CRD
+	apiReader client.Reader
+	// informers holds the VPA informer that kubeClient's List starts, so it can be removed once the CRD is gone
+	informers cache.Informers
+	store     *prediction.Store
+	cluster   *state.Cluster
+	recorder  events.Recorder
 	// lastSeen tracks the resourceVersion of each VPA we've processed,
 	// so we skip recomputation when nothing changed.
 	lastSeen map[types.NamespacedName]string
+	// listing reports whether the last List returned VPAs
+	listing bool
+	// emptyLists counts consecutive Lists that succeeded with no VPAs, so the lookup before the List can be throttled
+	// while there is nothing to lose by checking later. disable() and a List that returns VPAs both reset it.
+	emptyLists         int
+	crdForbiddenLogged bool
+	disabledLogged     bool
 }
 
-func NewVPAController(kubeClient client.Client, store *prediction.Store, cluster *state.Cluster, recorder events.Recorder) *VPAController {
+func NewVPAController(kubeClient client.Client, apiReader client.Reader, informers cache.Informers, store *prediction.Store, cluster *state.Cluster, recorder events.Recorder) *VPAController {
 	utilruntime.Must(vpav1.AddToScheme(scheme.Scheme))
 	return &VPAController{
 		kubeClient: kubeClient,
+		apiReader:  apiReader,
+		informers:  informers,
 		store:      store,
 		cluster:    cluster,
 		recorder:   recorder,
@@ -69,15 +135,31 @@ func NewVPAController(kubeClient client.Client, store *prediction.Store, cluster
 func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
+	// Once the CRD is deleted, a List that starts a new informer blocks until it times out instead of failing with
+	// NoMatch while the RESTMapper still maps VPAs, so the CRD is checked before listing and again when the List fails.
+	// The check before the first List is what keeps the store from never hydrating, and the one after a failed List
+	// catches a CRD deleted since.
+	// Listing stays checked after that for a different reason. A synced informer keeps answering Lists from its cache
+	// once the CRD is deleted, and deleting the CRD deletes its VPAs, so an empty List can't tell a present CRD from a
+	// cache whose objects are gone. Hydration is a one-way latch, so nothing here prevents a panic: what it buys is
+	// removing an informer whose reflector would otherwise retry against the deleted CRD until the process restarts.
+	// That isn't urgent, so the lookup is throttled while Lists keep coming back empty.
+	// A Terminating CRD still serves its objects, so it is listed, and only counts as gone when the List fails.
+	if !c.listing && c.emptyLists%VPACRDCheckEveryNEmptyLists == 0 {
+		if state := c.vpaCRDState(ctx); state == crdAbsent {
+			return c.disable(ctx, state)
+		}
+	}
 	var vpaList vpav1.VerticalPodAutoscalerList
-	if err := c.kubeClient.List(ctx, &vpaList); err != nil {
+	listCtx, cancel := context.WithTimeout(ctx, VPAListTimeout)
+	err := c.kubeClient.List(listCtx, &vpaList)
+	cancel()
+	if err != nil {
 		if meta.IsNoMatchError(err) {
-			if c.store.Reset() {
-				c.cluster.MarkUnconsolidated()
-			}
-			c.lastSeen = make(map[types.NamespacedName]string)
-			c.store.MarkHydrated()
-			return reconciler.Result{RequeueAfter: 1 * time.Minute}, nil
+			return c.disable(ctx, crdNoMatch)
+		}
+		if state := c.vpaCRDState(ctx); lo.Contains([]crdState{crdAbsent, crdTerminating}, state) {
+			return c.disable(ctx, state)
 		}
 		return reconciler.Result{}, err
 	}
@@ -98,8 +180,67 @@ func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error
 	if changed {
 		c.cluster.MarkUnconsolidated()
 	}
+	if c.listing = len(vpaList.Items) > 0; c.listing {
+		c.emptyLists = 0
+	} else {
+		c.emptyLists++
+	}
+	if c.disabledLogged {
+		log.FromContext(ctx).WithValues("CustomResourceDefinition", klog.KRef("", vpaCRDName)).Info("VPA CRD found")
+		c.disabledLogged = false
+	}
 	c.store.MarkHydrated()
 	return reconciler.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// vpaCRDState reports crdUnknown when the CRD can't be read, so the caller decides from its List result. A Forbidden
+// lookup is logged once, so the controller keeps working if its RBAC doesn't allow the get yet.
+func (c *VPAController) vpaCRDState(ctx context.Context) crdState {
+	ctx, cancel := context.WithTimeout(ctx, vpaCRDLookupTimeout)
+	defer cancel()
+	crd := &metav1.PartialObjectMetadata{}
+	crd.SetGroupVersionKind(apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinition"))
+	if err := c.apiReader.Get(ctx, client.ObjectKey{Name: vpaCRDName}, crd); err != nil {
+		logger := log.FromContext(ctx).WithValues("CustomResourceDefinition", klog.KRef("", vpaCRDName))
+		switch {
+		case apierrors.IsNotFound(err):
+			return crdAbsent
+		case apierrors.IsForbidden(err):
+			if !c.crdForbiddenLogged {
+				c.crdForbiddenLogged = true
+				logger.Info("forbidden from getting the VPA CRD, falling back to list errors to detect a missing CRD", "error", err)
+			}
+		default:
+			logger.V(1).Info("failed getting the VPA CRD", "error", err)
+		}
+		return crdUnknown
+	}
+	if !crd.DeletionTimestamp.IsZero() {
+		return crdTerminating
+	}
+	return crdPresent
+}
+
+// disable marks the store hydrated, since without the VPA CRD there are no VPAs to wait for.
+func (c *VPAController) disable(ctx context.Context, state crdState) (reconciler.Result, error) {
+	if !c.disabledLogged {
+		log.FromContext(ctx).WithValues("CustomResourceDefinition", klog.KRef("", vpaCRDName)).
+			Info("VPA CRD unavailable, no VPA predictions", "reason", state.String(), "dropped", len(c.lastSeen))
+		c.disabledLogged = true
+	}
+	if c.store.Reset() {
+		c.cluster.MarkUnconsolidated()
+	}
+	c.lastSeen = make(map[types.NamespacedName]string)
+	c.listing = false
+	c.emptyLists = 0
+	c.store.MarkHydrated()
+	// Only this controller reads VPAs through the cache. Removing the informer stops it retrying against a deleted CRD,
+	// and the next List starts a new one if the CRD comes back.
+	if err := c.informers.RemoveInformer(ctx, &vpav1.VerticalPodAutoscaler{}); err != nil {
+		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing informer, %w", err), "kind", "VerticalPodAutoscaler")
+	}
+	return reconciler.Result{RequeueAfter: 1 * time.Minute}, nil
 }
 
 // deleteUnseen removes predictions of VPAs that no longer exist and reports whether the store's predictions changed.
