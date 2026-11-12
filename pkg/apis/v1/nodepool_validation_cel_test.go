@@ -67,6 +67,22 @@ var _ = Describe("CEL/Validation", func() {
 		}
 		nodePool.SetGroupVersionKind(object.GVK(nodePool)) // This is needed so that the GVK is set on the unstructured object
 	})
+	Context("Name", func() {
+		It("should succeed for a name of 63 characters", func() {
+			nodePool.Name = strings.Repeat("a", 63)
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+		})
+		// The API server accepts names up to 253 characters, but the name is also used as the karpenter.sh/nodepool label value
+		DescribeTable("should fail at runtime for names that are too long to be a label value", func(length int) {
+			nodePool.Name = strings.Repeat("a", length)
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(MatchError(ContainSubstring("invalid nodepool name")))
+		},
+			Entry("64 characters", 64),
+			Entry("253 characters", 253),
+		)
+	})
 	Context("Disruption", func() {
 		It("should succeed on a disabled expireAfter", func() {
 			nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("Never")
