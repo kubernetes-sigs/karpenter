@@ -61,16 +61,17 @@ type optionsKey struct{}
 type FeatureGates struct {
 	inputStr string
 
-	NodeRepair                bool
-	ReservedCapacity          bool
-	SpotToSpotConsolidation   bool
-	NodeOverlay               bool
-	StaticCapacity            bool
-	CapacityBuffer            bool
-	TerminateFirstDrift       bool
-	TerminateFirstRepair      bool
-	PodDeletionCostManagement bool
-	PredictionEnabled         bool
+	NodeRepair                      bool
+	ReservedCapacity                bool
+	SpotToSpotConsolidation         bool
+	NodeOverlay                     bool
+	StaticCapacity                  bool
+	StaticCapacityAvailabilityCheck bool
+	CapacityBuffer                  bool
+	TerminateFirstDrift             bool
+	TerminateFirstRepair            bool
+	PodDeletionCostManagement       bool
+	PredictionEnabled               bool
 }
 
 // FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
@@ -121,6 +122,13 @@ var (
 		Help: "Enables static NodePools. Karpenter keeps NodePools that set spec.replicas at that number of nodes, " +
 			"regardless of pod demand.",
 	}
+	StaticCapacityAvailabilityCheckFeatureGate = FeatureGate{
+		Name:    "StaticCapacityAvailabilityCheck",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Checks for compatible launchable offerings before creating static NodeClaims. " +
+			"Adds instance-type lookups during static scale-up. Requires StaticCapacity.",
+	}
 	CapacityBufferFeatureGate = FeatureGate{
 		Name:    "CapacityBuffer",
 		Default: false,
@@ -166,6 +174,7 @@ var KarpenterFeatureGates = []FeatureGate{
 	SpotToSpotConsolidationFeatureGate,
 	NodeOverlayFeatureGate,
 	StaticCapacityFeatureGate,
+	StaticCapacityAvailabilityCheckFeatureGate,
 	CapacityBufferFeatureGate,
 	TerminateFirstDriftFeatureGate,
 	TerminateFirstRepairFeatureGate,
@@ -288,16 +297,17 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 
 func DefaultFeatureGates() FeatureGates {
 	return FeatureGates{
-		NodeRepair:                NodeRepairFeatureGate.Default,
-		ReservedCapacity:          ReservedCapacityFeatureGate.Default,
-		SpotToSpotConsolidation:   SpotToSpotConsolidationFeatureGate.Default,
-		NodeOverlay:               NodeOverlayFeatureGate.Default,
-		StaticCapacity:            StaticCapacityFeatureGate.Default,
-		CapacityBuffer:            CapacityBufferFeatureGate.Default,
-		TerminateFirstDrift:       TerminateFirstDriftFeatureGate.Default,
-		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
-		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
-		PredictionEnabled:         PredictionEnabledFeatureGate.Default,
+		NodeRepair:                      NodeRepairFeatureGate.Default,
+		ReservedCapacity:                ReservedCapacityFeatureGate.Default,
+		SpotToSpotConsolidation:         SpotToSpotConsolidationFeatureGate.Default,
+		NodeOverlay:                     NodeOverlayFeatureGate.Default,
+		StaticCapacity:                  StaticCapacityFeatureGate.Default,
+		StaticCapacityAvailabilityCheck: StaticCapacityAvailabilityCheckFeatureGate.Default,
+		CapacityBuffer:                  CapacityBufferFeatureGate.Default,
+		TerminateFirstDrift:             TerminateFirstDriftFeatureGate.Default,
+		TerminateFirstRepair:            TerminateFirstRepairFeatureGate.Default,
+		PodDeletionCostManagement:       PodDeletionCostManagementFeatureGate.Default,
+		PredictionEnabled:               PredictionEnabledFeatureGate.Default,
 	}
 }
 
@@ -324,6 +334,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap[StaticCapacityFeatureGate.Name]; ok {
 		gates.StaticCapacity = val
+	}
+	if val, ok := gateMap[StaticCapacityAvailabilityCheckFeatureGate.Name]; ok {
+		gates.StaticCapacityAvailabilityCheck = val
 	}
 	if val, ok := gateMap[CapacityBufferFeatureGate.Name]; ok {
 		gates.CapacityBuffer = val
