@@ -84,6 +84,36 @@ func (c *nodeClaimDeleteErrorClient) Delete(ctx context.Context, obj client.Obje
 	return c.Client.Delete(ctx, obj, opts...)
 }
 
+// concurrentUpdateClient injects a write after the controller reads an object but before it patches it.
+type concurrentUpdateClient struct {
+	client.Client
+	patch       func(context.Context, client.Client, client.Object, client.Patch, ...client.PatchOption) error
+	statusPatch func(context.Context, client.Client, client.Object, client.Patch, ...client.SubResourcePatchOption) error
+}
+
+func (c *concurrentUpdateClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if c.patch != nil {
+		return c.patch(ctx, c.Client, obj, patch, opts...)
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+func (c *concurrentUpdateClient) Status() client.SubResourceWriter {
+	return &concurrentStatusWriter{SubResourceWriter: c.Client.Status(), owner: c}
+}
+
+type concurrentStatusWriter struct {
+	client.SubResourceWriter
+	owner *concurrentUpdateClient
+}
+
+func (s *concurrentStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	if s.owner.statusPatch != nil {
+		return s.owner.statusPatch(ctx, s.owner.Client, obj, patch, opts...)
+	}
+	return s.SubResourceWriter.Patch(ctx, obj, patch, opts...)
+}
+
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
@@ -147,6 +177,82 @@ var _ = Describe("Reboot Lifecycle", func() {
 
 	// Advance past the minimum drain window.
 	stepPastDrainFloor := func() { env.Clock.Step(6 * time.Second) }
+
+	DescribeTable("preserves concurrent taint changes", func(removingFence, removingOther bool) {
+		other := corev1.Taint{Key: "example.com/quarantine", Effect: corev1.TaintEffectNoSchedule}
+		if removingOther {
+			node.Spec.Taints = append(node.Spec.Taints, other)
+		}
+		if removingFence {
+			node.Spec.Taints = append(node.Spec.Taints, v1.RebootingNoScheduleTaint)
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonIssued, "reboot issued")
+			nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey] = "boot-0"
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = env.Clock.Now().UTC().Format(time.RFC3339Nano)
+		}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+		injected := false
+		racingClient := &concurrentUpdateClient{Client: env.Client,
+			patch: func(ctx context.Context, kubeClient client.Client, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				if n, ok := obj.(*corev1.Node); ok && !injected && hasRebootTaint(n) != removingFence {
+					current := ExpectExists(ctx, env.Client, node)
+					if removingOther {
+						current.Spec.Taints = lo.Reject(current.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&other) })
+					} else {
+						current.Spec.Taints = append(current.Spec.Taints, other)
+					}
+					Expect(env.Client.Update(ctx, current)).To(Succeed())
+					injected = true
+				}
+				return kubeClient.Patch(ctx, obj, patch, opts...)
+			},
+		}
+		controller := reboot.NewController(env.Clock, racingClient, cloudProvider, terminator.NewTerminator(env.Clock, env.Client, queue, recorder), recorder)
+		_, err := controller.Reconcile(ctx, ExpectExists(ctx, env.Client, nodeClaim))
+		Expect(injected).To(BeTrue())
+		Expect(apierrors.IsConflict(err)).To(BeTrue())
+		Expect(hasRebootTaint(ExpectExists(ctx, env.Client, node))).To(Equal(removingFence))
+		Expect(cloudProvider.RebootCalls).To(BeEmpty())
+
+		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
+		current := ExpectExists(ctx, env.Client, node)
+		Expect(hasRebootTaint(current)).To(Equal(!removingFence))
+		Expect(lo.ContainsBy(current.Spec.Taints, func(t corev1.Taint) bool { return t.MatchTaint(&other) })).To(Equal(!removingOther))
+	},
+		Entry("adding the fence while another writer adds a taint", false, false),
+		Entry("adding the fence while another writer removes a taint", false, true),
+		Entry("removing the fence while another writer adds a taint", true, false),
+		Entry("removing the fence while another writer removes a taint", true, true),
+	)
+
+	It("preserves concurrent conditions when recording reboot issuance", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		injected := false
+		racingClient := &concurrentUpdateClient{Client: env.Client,
+			statusPatch: func(ctx context.Context, kubeClient client.Client, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if _, ok := obj.(*v1.NodeClaim); ok && !injected {
+					current := ExpectExists(ctx, env.Client, nodeClaim)
+					current.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+					Expect(env.Client.Status().Update(ctx, current)).To(Succeed())
+					injected = true
+				}
+				return kubeClient.Status().Patch(ctx, obj, patch, opts...)
+			},
+		}
+		controller := reboot.NewController(env.Clock, racingClient, cloudProvider, terminator.NewTerminator(env.Clock, env.Client, queue, recorder), recorder)
+		_, err := controller.Reconcile(ctx, ExpectExists(ctx, env.Client, nodeClaim))
+		Expect(injected).To(BeTrue())
+		Expect(apierrors.IsConflict(err)).To(BeTrue())
+		current := ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(current.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(current.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+
+		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
+		current = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(current.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(current.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
+		Expect(current.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown()).To(BeTrue())
+	})
 
 	DescribeTable("ignores NodeClaims managed by another provider", func(group, kind, reason string) {
 		nodeClaim.Spec.NodeClassRef.Group = group
