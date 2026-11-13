@@ -1064,11 +1064,13 @@ var _ = Describe("Consolidation", func() {
 				return []cloudprovider.Offering{
 					{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
 						Price:        price,
 					},
 					{
 						Available:    spotAvailable,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 						Price:        price / 2,
 					},
@@ -1600,6 +1602,7 @@ var _ = Describe("Consolidation", func() {
 				}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -1610,6 +1613,7 @@ var _ = Describe("Consolidation", func() {
 				}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.4,
 				}),
@@ -2329,6 +2333,7 @@ var _ = Describe("Consolidation", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -2337,16 +2342,19 @@ var _ = Describe("Consolidation", func() {
 				fake.WithOfferings(
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        1.0,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.4,
 					},
@@ -2408,6 +2416,7 @@ var _ = Describe("Consolidation", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -2416,21 +2425,25 @@ var _ = Describe("Consolidation", func() {
 				fake.WithOfferings(
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.6,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.6,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.3,
 					},
@@ -4140,12 +4153,14 @@ var _ = Describe("Consolidation", func() {
 			offerings := func(price float64) []cloudprovider.Offering {
 				result := []cloudprovider.Offering{{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
 					Price:        price,
 				}}
 				if includeUnavailableSpot {
 					result = append(result, cloudprovider.Offering{
 						Available:    false,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 						Price:        price / 2,
 					})
@@ -4990,6 +5005,7 @@ var _ = Describe("Consolidation", func() {
 			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               mostExpensiveOffering.Price / 1_000_000.0,
 				Available:           true,
+				Compatible:          true,
 				ReservationCapacity: 10,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
@@ -5023,6 +5039,7 @@ var _ = Describe("Consolidation", func() {
 			leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               leastExpensiveOffering.Price / 1_000_000.0,
 				Available:           true,
+				Compatible:          true,
 				ReservationCapacity: 10,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,

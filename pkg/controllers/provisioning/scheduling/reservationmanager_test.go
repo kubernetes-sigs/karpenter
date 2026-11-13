@@ -42,6 +42,7 @@ var _ = Describe("ReservationManager", func() {
 	BeforeEach(func() {
 		threeCapacityOffering = &cloudprovider.Offering{
 			Available:           true,
+			Compatible:          true,
 			ReservationCapacity: 3,
 			Requirements: pscheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -51,6 +52,7 @@ var _ = Describe("ReservationManager", func() {
 		}
 		twoCapacityOffering = &cloudprovider.Offering{
 			Available:           true,
+			Compatible:          true,
 			ReservationCapacity: 2,
 			Requirements: pscheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -60,6 +62,7 @@ var _ = Describe("ReservationManager", func() {
 		}
 		oneCapacityOffering = &cloudprovider.Offering{
 			Available:           true,
+			Compatible:          true,
 			ReservationCapacity: 1,
 			Requirements: pscheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -144,6 +147,7 @@ var _ = Describe("ReservationManager", func() {
 			It("should panic with non-existent reservation ID", func() {
 				nonExistentOffering := &cloudprovider.Offering{
 					Available:           true,
+					Compatible:          true,
 					ReservationCapacity: 1,
 					Requirements: pscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -228,6 +232,7 @@ var _ = Describe("ReservationManager", func() {
 			It("should panic with non-existent reservation ID", func() {
 				nonExistentOffering := &cloudprovider.Offering{
 					Available:           true,
+					Compatible:          true,
 					ReservationCapacity: 1,
 					Requirements: pscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -380,6 +385,7 @@ var _ = Describe("ReservationManager", func() {
 		It("is a no-op for an unknown reservation id (guard holds)", func() {
 			unknown := &cloudprovider.Offering{
 				Available:           true,
+				Compatible:          true,
 				ReservationCapacity: 1,
 				Requirements: pscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,

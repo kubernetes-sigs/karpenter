@@ -2953,6 +2953,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
 							}),
@@ -2966,6 +2967,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
 							}),
@@ -3004,6 +3006,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
 							}),
@@ -3017,6 +3020,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
 							}),
@@ -3065,6 +3069,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
 							}),
@@ -3078,6 +3083,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
 							}),
@@ -3141,6 +3147,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
 							}),
@@ -3154,6 +3161,7 @@ var _ = Describe("Provisioning", func() {
 							}),
 							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
 							}),
@@ -3258,11 +3266,13 @@ var _ = Describe("Provisioning", func() {
 						fake.WithOfferings(
 							cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 								Price:        0.52,
 							},
 							cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
 								Price:        0.54,
 							},
@@ -3324,11 +3334,13 @@ var _ = Describe("Provisioning", func() {
 						fake.WithOfferings(
 							cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 								Price:        0.52,
 							},
 							cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
 								Price:        0.54,
 							},
@@ -3453,11 +3465,13 @@ var _ = Describe("Provisioning", func() {
 						fake.WithOfferings(
 							cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 								Price:        0.52,
 							},
 							cloudprovider.Offering{
 								Available:    true,
+								Compatible:   true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
 								Price:        0.54,
 							},
@@ -3541,6 +3555,7 @@ func multiZoneInstanceType(name string, zones ...string) *cloudprovider.Instance
 		fake.WithOfferings(lo.Map(zones, func(zone string, _ int) cloudprovider.Offering {
 			return cloudprovider.Offering{
 				Available:    true,
+				Compatible:   true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: zone}),
 				Price:        0.52,
 			}
@@ -3555,7 +3570,8 @@ func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources
 		fake.WithResources(resources),
 		fake.WithOperatingSystems(string(corev1.Linux)),
 		fake.WithOfferings(cloudprovider.Offering{
-			Available: true,
+			Available:  true,
+			Compatible: true,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 				corev1.LabelTopologyZone: "test-zone-1",

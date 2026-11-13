@@ -125,7 +125,7 @@ func benchInstanceType(name string, gpu, scoped bool) *cloudprovider.InstanceTyp
 							scheduling.NewRequirement(benchNICModeKey, corev1.NodeSelectorOpIn, nicMode),
 						)
 					}
-					offerings = append(offerings, &cloudprovider.Offering{Requirements: reqs, Price: 1, Available: true})
+					offerings = append(offerings, &cloudprovider.Offering{Requirements: reqs, Price: 1, Available: true, Compatible: true})
 				}
 			}
 		}

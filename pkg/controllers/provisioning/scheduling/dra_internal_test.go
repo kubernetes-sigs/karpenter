@@ -113,7 +113,8 @@ var _ = Describe("DRA Scheduling Internals", func() {
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
 					scheduling.NewRequirement(modeKey, corev1.NodeSelectorOpIn, mode),
 				),
-				Available: available,
+				Available:  available,
+				Compatible: true,
 			}
 		}
 		modeReqs := func(mode string) scheduling.Requirements {

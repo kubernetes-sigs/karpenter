@@ -108,7 +108,7 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		candidate1.instanceType = &cloudprovider.InstanceType{
 			Name: "source-type",
 			Offerings: cloudprovider.Offerings{
-				{Price: 0.50, Available: true},
+				{Price: 0.50, Available: true, Compatible: true},
 			},
 		}
 		candidate1.Price = 0.50
@@ -124,7 +124,7 @@ var _ = Describe("Command.EstimatedSavings", func() {
 								{
 									Name: "dest-type-1",
 									Offerings: cloudprovider.Offerings{
-										{Price: 0.20, Available: true},
+										{Price: 0.20, Available: true, Compatible: true},
 									},
 								},
 							},
@@ -136,7 +136,7 @@ var _ = Describe("Command.EstimatedSavings", func() {
 								{
 									Name: "dest-type-2",
 									Offerings: cloudprovider.Offerings{
-										{Price: 0.15, Available: true},
+										{Price: 0.15, Available: true, Compatible: true},
 									},
 								},
 							},
@@ -160,8 +160,9 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		candidate := mockCandidate("node-1")
 		candidate.instanceType = fake.NewInstanceType("source-type",
 			fake.WithOfferings(cloudprovider.Offering{
-				Available: true,
-				Price:     0.50,
+				Available:  true,
+				Compatible: true,
+				Price:      0.50,
 				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 					corev1.LabelTopologyZone: "us-west-2a",
@@ -173,16 +174,18 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		destType := fake.NewInstanceType("dest-type",
 			fake.WithOfferings(
 				cloudprovider.Offering{
-					Available: true,
-					Price:     0.10,
+					Available:  true,
+					Compatible: true,
+					Price:      0.10,
 					Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 						corev1.LabelTopologyZone: "us-west-2a",
 					}),
 				},
 				cloudprovider.Offering{
-					Available: true,
-					Price:     0.40,
+					Available:  true,
+					Compatible: true,
+					Price:      0.40,
 					Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 						corev1.LabelTopologyZone: "us-west-2a",
@@ -223,8 +226,9 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		candidate := mockCandidate("node-1")
 		candidate.instanceType = fake.NewInstanceType("source-type",
 			fake.WithOfferings(cloudprovider.Offering{
-				Available: true,
-				Price:     0.50,
+				Available:  true,
+				Compatible: true,
+				Price:      0.50,
 				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 					corev1.LabelTopologyZone: "us-west-2a",
@@ -236,16 +240,18 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		destType := fake.NewInstanceType("dest-type",
 			fake.WithOfferings(
 				cloudprovider.Offering{
-					Available: true,
-					Price:     0.05,
+					Available:  true,
+					Compatible: true,
+					Price:      0.05,
 					Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 						corev1.LabelTopologyZone: "us-west-2b",
 					}),
 				},
 				cloudprovider.Offering{
-					Available: true,
-					Price:     0.45,
+					Available:  true,
+					Compatible: true,
+					Price:      0.45,
 					Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 						corev1.LabelTopologyZone: "us-west-2a",
@@ -286,8 +292,9 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		candidate := mockCandidate("node-1")
 		candidate.instanceType = fake.NewInstanceType("source-type",
 			fake.WithOfferings(cloudprovider.Offering{
-				Available: true,
-				Price:     0.50,
+				Available:  true,
+				Compatible: true,
+				Price:      0.50,
 				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 					corev1.LabelTopologyZone: "us-west-2a",
@@ -299,16 +306,18 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		destType := fake.NewInstanceType("dest-type",
 			fake.WithOfferings(
 				cloudprovider.Offering{
-					Available: true,
-					Price:     0.10,
+					Available:  true,
+					Compatible: true,
+					Price:      0.10,
 					Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 						corev1.LabelTopologyZone: "us-west-2a",
 					}),
 				},
 				cloudprovider.Offering{
-					Available: true,
-					Price:     0.40,
+					Available:  true,
+					Compatible: true,
+					Price:      0.40,
 					Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 						corev1.LabelTopologyZone: "us-west-2a",

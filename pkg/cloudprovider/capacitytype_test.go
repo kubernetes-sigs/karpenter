@@ -35,8 +35,9 @@ const onDemandAlt = "on-demand-alt"
 
 func offering(capacityType string, price float64) *cloudprovider.Offering {
 	return &cloudprovider.Offering{
-		Available: true,
-		Price:     price,
+		Available:  true,
+		Compatible: true,
+		Price:      price,
 		Requirements: scheduling.NewLabelRequirements(map[string]string{
 			v1.CapacityTypeLabelKey:  capacityType,
 			corev1.LabelTopologyZone: "test-zone-1",

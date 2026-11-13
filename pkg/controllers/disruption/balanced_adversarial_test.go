@@ -43,8 +43,9 @@ var _ = Describe("Adversarial", func() {
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"),
 					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
 				),
-				Price:     math.NaN(),
-				Available: true,
+				Price:      math.NaN(),
+				Available:  true,
+				Compatible: true,
 			}},
 		}
 
@@ -144,16 +145,18 @@ var _ = Describe("Adversarial", func() {
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"),
 						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
 					),
-					Price:     1.00,
-					Available: false, // ICE'd -- can't launch new, but running nodes still cost this
+					Price:      1.00,
+					Available:  false,
+					Compatible: true, // ICE'd -- can't launch new, but running nodes still cost this
 				},
 				&cloudprovider.Offering{
 					Requirements: scheduling.NewRequirements(
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-2"),
 						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
 					),
-					Price:     5.00,
-					Available: true,
+					Price:      5.00,
+					Available:  true,
+					Compatible: true,
 				},
 			},
 		}

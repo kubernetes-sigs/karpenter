@@ -208,6 +208,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 					Price:               mostExpensiveOffering.Price / 1_000_000.0,
 					Available:           true,
+					Compatible:          true,
 					ReservationCapacity: capacity,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -294,6 +295,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
 					Price:               leastExpensiveOffering.Price / 1_000_000.0,
 					Available:           true,
+					Compatible:          true,
 					ReservationCapacity: 1,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -456,6 +458,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               mostExpensiveOffering.Price / 1_000_000.0,
 				Available:           available,
+				Compatible:          true,
 				ReservationCapacity: reservationCapacity,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
