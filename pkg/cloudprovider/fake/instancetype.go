@@ -42,6 +42,17 @@ const (
 	ResourceGPUVendorB      corev1.ResourceName = "fake.com/vendor-b"
 )
 
+// Driver-mode fixtures model a provider whose GPU and NIC can each be managed by either a DRA driver or a device
+// plugin. The mode keys are offering-level labels; tests that use them must register them as well-known labels.
+const (
+	DriverModeGPULabelKey                       = "example.com/driver-mode-gpu"
+	DriverModeNICLabelKey                       = "example.com/driver-mode-nic"
+	DriverModeDevicePlugin                      = "device-plugin"
+	DriverModeDRA                               = "dynamic-resource-allocation"
+	ResourceDevicePluginGPU corev1.ResourceName = "example.com/gpu"
+	ResourceDevicePluginNIC corev1.ResourceName = "example.com/nic"
+)
+
 func init() {
 	v1.WellKnownLabels.Insert(
 		LabelInstanceSize,
@@ -58,6 +69,7 @@ type InstanceTypeConfig struct {
 	Architecture           string
 	OperatingSystems       sets.Set[string]
 	ResourceSliceTemplates []*cloudprovider.ResourceSliceTemplate
+	DynamicResources       []*cloudprovider.DynamicResources
 	AttributeBindings      []*cloudprovider.AttributeBinding
 	Requirements           []*scheduling.Requirement
 	VolumeAttachmentLimits map[string]int
@@ -84,6 +96,17 @@ func WithOperatingSystems(os ...string) InstanceTypeOptions {
 func WithResourceSliceTemplates(templates ...cloudprovider.ResourceSliceTemplate) InstanceTypeOptions {
 	return func(c *InstanceTypeConfig) {
 		c.ResourceSliceTemplates = lo.ToSlicePtr(templates)
+	}
+}
+
+// WithDynamicResources adds a DRA device set that's published by the offerings compatible with reqs. Sets are added
+// after the unscoped set built from WithResourceSliceTemplates, in the order they're passed.
+func WithDynamicResources(reqs scheduling.Requirements, templates ...cloudprovider.ResourceSliceTemplate) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) {
+		c.DynamicResources = append(c.DynamicResources, &cloudprovider.DynamicResources{
+			Requirements:           reqs,
+			ResourceSliceTemplates: lo.ToSlicePtr(templates),
+		})
 	}
 }
 
@@ -190,10 +213,8 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 		Offerings:              cfg.Offerings,
 		Capacity:               cfg.Resources,
 		VolumeAttachmentLimits: cfg.VolumeAttachmentLimits,
-		DynamicResources: cloudprovider.DynamicResources{
-			ResourceSliceTemplates: cfg.ResourceSliceTemplates,
-			AttributeBindings:      cfg.AttributeBindings,
-		},
+		DynamicResources:       dynamicResources(cfg),
+		AttributeBindings:      cfg.AttributeBindings,
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -201,6 +222,17 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 			},
 		},
 	}
+}
+
+// dynamicResources returns the instance type's DRA device sets: an unscoped set holding the templates from
+// WithResourceSliceTemplates (published by every offering, as before requirement-scoped sets existed), followed by any
+// sets from WithDynamicResources.
+func dynamicResources(cfg *InstanceTypeConfig) []*cloudprovider.DynamicResources {
+	var drs []*cloudprovider.DynamicResources
+	if len(cfg.ResourceSliceTemplates) > 0 {
+		drs = append(drs, &cloudprovider.DynamicResources{ResourceSliceTemplates: cfg.ResourceSliceTemplates})
+	}
+	return append(drs, cfg.DynamicResources...)
 }
 
 // ResourceSliceTemplate builds a cloud provider ResourceSliceTemplate with the given driver, pool, and devices.
@@ -327,6 +359,67 @@ func GPUAndNICInstanceType(name string) *cloudprovider.InstanceType {
 			ResourceSliceTemplate(test.GPUDriver, name+"-gpu-pool", Devices(name+"-gpu-0")...),
 			ResourceSliceTemplate(test.NICDriver, name+"-nic-pool", Devices(name+"-nic-0")...),
 		),
+	)
+}
+
+// DriverModeInstanceType builds a fake instance type with gpuCount GPUs and one NIC, each of which can run in DRA or
+// device-plugin mode. Offerings fan out over every combination of modes allowed by include (nil allows all), in two
+// zones, device-plugin mode first. Device-plugin offerings advertise ResourceDevicePluginGPU / ResourceDevicePluginNIC.
+// DRA offerings zero the corresponding extended resource and publish the driver's devices through a DynamicResources
+// set scoped to that driver's DRA mode.
+func DriverModeInstanceType(name string, gpuCount int, include func(gpuMode, nicMode string) bool) *cloudprovider.InstanceType {
+	resources := corev1.ResourceList{
+		corev1.ResourceCPU:      resource.MustParse("4"),
+		corev1.ResourceMemory:   resource.MustParse("4Gi"),
+		corev1.ResourcePods:     resource.MustParse("5"),
+		ResourceDevicePluginGPU: *resource.NewQuantity(int64(gpuCount), resource.DecimalSI),
+		ResourceDevicePluginNIC: resource.MustParse("1"),
+	}
+	modes := []string{DriverModeDevicePlugin, DriverModeDRA}
+	var offerings []cloudprovider.Offering
+	for _, gpuMode := range modes {
+		for _, nicMode := range modes {
+			if include != nil && !include(gpuMode, nicMode) {
+				continue
+			}
+			override := corev1.ResourceList{}
+			if gpuMode == DriverModeDRA {
+				override[ResourceDevicePluginGPU] = resource.MustParse("0")
+			}
+			if nicMode == DriverModeDRA {
+				override[ResourceDevicePluginNIC] = resource.MustParse("0")
+			}
+			for _, zone := range []string{"test-zone-1", "test-zone-2"} {
+				offerings = append(offerings, cloudprovider.Offering{
+					Available: true,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{
+						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone: zone,
+						DriverModeGPULabelKey:    gpuMode,
+						DriverModeNICLabelKey:    nicMode,
+					}),
+					Price:            PriceFromResources(resources),
+					CapacityOverride: lo.Ternary(len(override) == 0, nil, override),
+				})
+			}
+		}
+	}
+	modeValues := func(key string) []string {
+		return lo.Uniq(lo.Map(offerings, func(o cloudprovider.Offering, _ int) string { return o.Requirements.Get(key).Any() }))
+	}
+	draMode := func(key string) scheduling.Requirements {
+		return scheduling.NewRequirements(scheduling.NewRequirement(key, corev1.NodeSelectorOpIn, DriverModeDRA))
+	}
+	gpuNames := lo.Times(gpuCount, func(i int) string { return fmt.Sprintf("%s-gpu-%d", name, i) })
+	return NewInstanceType(name,
+		WithResources(resources),
+		WithOfferings(offerings...),
+		WithRequirements(
+			scheduling.NewRequirement(DriverModeGPULabelKey, corev1.NodeSelectorOpIn, modeValues(DriverModeGPULabelKey)...),
+			scheduling.NewRequirement(DriverModeNICLabelKey, corev1.NodeSelectorOpIn, modeValues(DriverModeNICLabelKey)...),
+		),
+		WithDynamicResources(draMode(DriverModeGPULabelKey), ResourceSliceTemplate(test.GPUDriver, name+"-gpu-pool", Devices(gpuNames...)...)),
+		WithDynamicResources(draMode(DriverModeNICLabelKey), ResourceSliceTemplate(test.NICDriver, name+"-nic-pool", Devices(name+"-nic-0")...)),
 	)
 }
 

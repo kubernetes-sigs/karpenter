@@ -162,6 +162,12 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		-v \
 		./pkg/...
 
+karpenterlint: ## Run linters for recurring regressions (not yet part of verify)
+	go tool -modfile=go.tools.mod golangci-lint-karpenter run -c .golangci.karpenterlint.yaml
+
+test-karpenterlint: ## Test the karpenterlint analyzers
+	cd hack/tools/karpenterlint && go test ./...
+
 vulncheck: ## Verify code vulnerabilities
 	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
 
@@ -202,4 +208,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake karpenterlint test-karpenterlint vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra

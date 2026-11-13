@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   # index pins the artifact name each leg uploads, and the compare job below keys
   # off the same index. timeoutMinutes is a per-leg wall clock ceiling. Measured

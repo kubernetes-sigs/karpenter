@@ -148,6 +148,31 @@ var _ = Describe("Reboot Lifecycle", func() {
 	// Advance past the minimum drain window.
 	stepPastDrainFloor := func() { env.Clock.Step(6 * time.Second) }
 
+	DescribeTable("ignores NodeClaims managed by another provider", func(group, kind, reason string) {
+		nodeClaim.Spec.NodeClassRef.Group = group
+		nodeClaim.Spec.NodeClassRef.Kind = kind
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, reason, "reboot requested")
+		if reason == v1.RebootReasonIssued {
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = env.Clock.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+		}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		storedNodeClaim := ExpectExists(ctx, env.Client, nodeClaim).DeepCopy()
+		storedNode := ExpectExists(ctx, env.Client, node).DeepCopy()
+
+		stepPastDrainFloor()
+		result := ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+		Expect(result.IsZero()).To(BeTrue())
+		Expect(cloudProvider.RebootCalls).To(BeEmpty())
+		Expect(ExpectExists(ctx, env.Client, nodeClaim)).To(Equal(storedNodeClaim))
+		Expect(ExpectExists(ctx, env.Client, node)).To(Equal(storedNode))
+	},
+		Entry("requested reboot with an unsupported kind", "karpenter.test.sh", "UnmanagedNodeClass", v1.RebootReasonRequested),
+		Entry("requested reboot with an unsupported group", "other.test.sh", "TestNodeClass", v1.RebootReasonRequested),
+		Entry("expired issued reboot with an unsupported kind", "karpenter.test.sh", "UnmanagedNodeClass", v1.RebootReasonIssued),
+		Entry("expired issued reboot with an unsupported group", "other.test.sh", "TestNodeClass", v1.RebootReasonIssued),
+	)
+
 	Context("RebootRequested", func() {
 		It("holds a drained reboot for minDrainTime before issuing, even when there is nothing to drain", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "1m"})
@@ -177,6 +202,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(cond.Reason).To(Equal(v1.RebootReasonIssued))
 			Expect(cond.Message).To(Equal("reboot requested")) // driving-fault message carried forward from RebootRequested
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.RebootPreBootIDAnnotationKey, "boot-1"))
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.RebootIssuedAtAnnotationKey, env.Clock.Now().UTC().Format(time.RFC3339Nano)))
 			Expect(cloudProvider.RebootOperationIDs[0]).ToNot(BeEmpty())
 			// A committed reboot invalidates Initialized until the node re-initializes.
 			initialized := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
@@ -186,6 +212,26 @@ var _ = Describe("Reboot Lifecycle", func() {
 			node = ExpectExists(ctx, env.Client, node)
 			Expect(hasRebootTaint(node)).To(BeTrue())
 			Expect(node.Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+		})
+
+		It("bounds recovery from issuance when the node was already uninitialized", func() {
+			nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeInitialized)
+			delete(node.Labels, v1.NodeInitializedLabelKey)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			// Initialized went Unknown well before the reboot.
+			env.Clock.Step(30 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(cloudProvider.RebootCalls).To(HaveLen(1))
+
+			env.Clock.Step(10 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
+
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			expectReplaced(nodeClaim, "recovery_timeout")
 		})
 
 		It("issues a committed reboot even when node repair is disabled", func() {
@@ -523,6 +569,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 		})
 
 		It("succeeds when the boot changed and the node is Ready", func() {
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = env.Clock.Now().UTC().Format(time.RFC3339Nano)
 			node.Status.NodeInfo.BootID = "boot-2"
 			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -532,6 +579,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 			cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
 			Expect(cond.IsFalse()).To(BeTrue())
 			Expect(cond.Reason).To(Equal(v1.RebootReasonSucceeded))
+			Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.RebootIssuedAtAnnotationKey))
 			node = ExpectExists(ctx, env.Client, node)
 			Expect(hasRebootTaint(node)).To(BeFalse())
 

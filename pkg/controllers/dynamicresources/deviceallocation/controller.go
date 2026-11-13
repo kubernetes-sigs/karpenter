@@ -148,7 +148,6 @@ func (c *Controller) Hydrate(ctx context.Context) {
 	})
 }
 
-//nolint:gocyclo
 func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName, claim *resourcev1.ResourceClaim) {
 	if claim.Status.Allocation == nil || len(claim.Status.Allocation.Devices.Results) == 0 {
 		c.finalizeClaim(ctx, nn)

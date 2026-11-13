@@ -200,8 +200,9 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req corev1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
 					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)
 				})...),
-				Price:     off.Price,
-				Available: off.Available,
+				Price:        off.Price,
+				Available:    off.Available,
+				Incompatible: off.Incompatible,
 			}
 		}),
 		Capacity: options.Resources,
@@ -222,7 +223,7 @@ func onDemandAltOfferings(offerings KWOKOfferings) KWOKOfferings {
 			return KWOKOffering{}, false
 		}
 		return KWOKOffering{
-			Offering: cloudprovider.Offering{Price: o.Price * (1 - onDemandAltDiscount), Available: o.Available},
+			Offering: cloudprovider.Offering{Price: o.Price * (1 - onDemandAltDiscount), Available: o.Available, Incompatible: o.Incompatible},
 			Requirements: lo.Map(o.Requirements, func(req corev1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
 				if req.Key == v1.CapacityTypeLabelKey {
 					return corev1.NodeSelectorRequirement{Key: req.Key, Operator: corev1.NodeSelectorOpIn, Values: []string{CapacityTypeOnDemandAlt}}

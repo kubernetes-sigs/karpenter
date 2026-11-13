@@ -22,6 +22,7 @@ import (
 	"time"
 	"unique"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -173,7 +174,7 @@ func NewAllocator(
 	}
 	// Pre-initialize shared counter budgets for all pools. This ensures InitRemainingCounters is
 	// never called during parallel Allocate() calls, keeping the tracker read-only under concurrency.
-	for _, pool := range GatherPools(inClusterSlices, scheduling.NewRequirements(), "") {
+	for _, pool := range GatherPools(inClusterSlices, scheduling.NewRequirements(), "", true) {
 		a.allocationTracker.InitRemainingCounters(pool)
 	}
 	return a
@@ -331,9 +332,9 @@ func (a *Allocator) Allocate(
 	// Phase 2: Pool gathering with cache, using the tightened effective requirements.
 	var pools []*Pool
 	if cached, ok := a.poolCache[nodeClaim.ID()]; ok {
-		pools = FilterPools(cached, classifyRes.requirements, nodeClaim.NodeName())
+		pools = FilterPools(cached, classifyRes.requirements, nodeClaim.NodeName(), nodeClaim.Superposed())
 	} else {
-		pools = GatherPools(a.inClusterSlices, classifyRes.requirements, nodeClaim.NodeName())
+		pools = GatherPools(a.inClusterSlices, classifyRes.requirements, nodeClaim.NodeName(), nodeClaim.Superposed())
 	}
 
 	// Build template devices by instance type.
@@ -341,24 +342,7 @@ func (a *Allocator) Allocate(
 	// modeling a subset of the total possible slices - we exclude those from drivers that have already had pools
 	// published. Let's consider a new interface to model this (e.g. outstanding drivers / pools?)
 	resourceSlices := nodeClaim.ResourceSlices()
-	templateDevicesByIT := make(map[InstanceTypeID][]DeviceWithID, len(resourceSlices))
-	for itID, slices := range resourceSlices {
-		for _, s := range slices {
-			for _, d := range s.Devices() {
-				templateDevicesByIT[itID] = append(templateDevicesByIT[itID], DeviceWithID{
-					Device: d,
-					ID: DeviceID{
-						DeviceID: cloudprovider.DeviceID{
-							Driver: s.Driver(),
-							Pool:   s.Pool().Name,
-							Device: d.Name,
-						},
-						Template: true,
-					},
-				})
-			}
-		}
-	}
+	templateDevicesByIT := templateDevicesByInstanceType(resourceSlices)
 
 	// Create child allocator.
 	child := &allocator{
@@ -366,6 +350,7 @@ func (a *Allocator) Allocate(
 		ctx:                        ctx,
 		nodeClaim:                  nodeClaim,
 		pools:                      pools,
+		resourceSlices:             resourceSlices,
 		templateDevicesByIT:        templateDevicesByIT,
 		celCache:                   dracel.NewCache(0, dracel.Features{EnableConsumableCapacity: true}),
 		allocatedDevices:           sets.New[DeviceID](),
@@ -395,6 +380,36 @@ func (a *Allocator) Allocate(
 	return result, nil
 }
 
+// templateDevicesByInstanceType builds the template devices for each of the NodeClaim's candidate instance types.
+func templateDevicesByInstanceType(resourceSlices map[InstanceTypeID][]ResourceSlice) map[InstanceTypeID][]DeviceWithID {
+	templateDevicesByIT := make(map[InstanceTypeID][]DeviceWithID, len(resourceSlices))
+	for itID, slices := range resourceSlices {
+		for _, s := range slices {
+			// Devices from a requirement-scoped set carry the set's requirements, so they go through the same
+			// eligibility and narrowing path as devices from in-cluster slices with a NodeSelector.
+			var topoReqs *scheduling.Requirements
+			if reqs := s.TemplateRequirements(); len(reqs) != 0 {
+				topoReqs = &reqs
+			}
+			for _, d := range s.Devices() {
+				templateDevicesByIT[itID] = append(templateDevicesByIT[itID], DeviceWithID{
+					Device: d,
+					ID: DeviceID{
+						DeviceID: cloudprovider.DeviceID{
+							Driver: s.Driver(),
+							Pool:   s.Pool().Name,
+							Device: d.Name,
+						},
+						Template: true,
+					},
+					TopologyRequirements: topoReqs,
+				})
+			}
+		}
+	}
+	return templateDevicesByIT
+}
+
 type classificationResult struct {
 	// unallocatedClaims is the set of claims that haven't already been allocated, either in-cluster or via previous
 	// invocations of the allocator.
@@ -406,8 +421,6 @@ type classificationResult struct {
 // ClassifyClaims evaluates the set of claims for the NodeClaims. It checks allocation status and ensures compatibility.
 // If any of claim is already allocated and incompatible with the NodeClaim, it returns an error. The result is the set
 // of unallocated claims and the cumalative requirements derived from the base NodeClaim and the allocated claims.
-//
-//nolint:gocyclo
 func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.ResourceClaim) (classificationResult, error) {
 	result := classificationResult{
 		requirements: copyRequirements(nodeClaim.Requirements()),
@@ -427,7 +440,7 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 		if claim.Status.Allocation != nil {
 			reqs := nodeSelectorsToRequirements(claim.Status.Allocation.NodeSelector)
 			if reqs != nil {
-				if !result.requirements.IsCompatible(*reqs, scheduling.AllowUndefinedWellKnownLabels) {
+				if !result.requirements.IsCompatible(*reqs, compatibilityOptions(nodeClaim.Superposed())...) {
 					return classificationResult{}, serrors.Wrap(fmt.Errorf("in-cluster allocation topology is incompatible with NodeClaim requirements"), "ResourceClaim", klog.KObj(claim))
 				}
 				result.requirements.Add(reqs.Values()...)
@@ -446,7 +459,7 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 			} else {
 				// In-cluster only — check topology compatibility.
 				if len(meta.TotalRequirements) != 0 {
-					if !result.requirements.IsCompatible(meta.TotalRequirements, scheduling.AllowUndefinedWellKnownLabels) {
+					if !result.requirements.IsCompatible(meta.TotalRequirements, compatibilityOptions(nodeClaim.Superposed())...) {
 						return classificationResult{}, serrors.Wrap(fmt.Errorf("in-memory allocation topology is incompatible with NodeClaim requirements"), "ResourceClaim", klog.KObj(claim))
 					}
 					result.requirements.Add(meta.TotalRequirements.Values()...)
@@ -498,6 +511,9 @@ type allocator struct {
 	templateDevicesByIT  map[InstanceTypeID][]DeviceWithID
 	claimData            []*ClaimData
 	deviceMatchesRequest map[matchKey]bool
+	// resourceSlices holds the NodeClaim's template slices by instance type. It's fetched once per Allocate call and
+	// reused for every instance type evaluated, rather than calling NodeClaim.ResourceSlices() per instance type.
+	resourceSlices map[InstanceTypeID][]ResourceSlice
 
 	// allocatedDevices represents the set of devices that have currently been allocated in the decision tree. Devices
 	// are added and removed from this set as we traverse the tree. This contains minimal allocation metadata and is used
@@ -565,8 +581,6 @@ type deviceAllocationMetadata struct {
 // allocate runs a per-instance-type DFS over in-cluster and template devices.
 // In-cluster devices are iterated first so the DFS naturally prefers them, minimizing
 // variance across instance types. Each IT gets a full DFS; ITs whose DFS fails are pruned.
-//
-//nolint:gocyclo
 func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult, error) {
 	var survivingITs []InstanceTypeID
 	deviceIDsByIT := make(map[InstanceTypeID][]DeviceID)
@@ -697,7 +711,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			allocator:                       a.Allocator,
 			nodeClaimID:                     a.nodeClaim.ID(),
 			deviceIDsByIT:                   deviceIDsByIT,
-			filteredPools:                   FilterPools(initialPools, a.requirements, a.nodeClaim.NodeName()),
+			filteredPools:                   FilterPools(initialPools, a.requirements, a.nodeClaim.NodeName(), a.nodeClaim.Superposed()),
 			claimMetadata:                   claimAllocMetaByRC,
 			counterConsumptionByIT:          counterConsumptionByIT,
 			templateCounterConsumptionByIT:  templateCounterConsumptionByIT,
@@ -712,7 +726,6 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 // or for parent requests), and device slots. Devices are iterated lazily from the current pools
 // and template devices rather than from a prebuilt candidate list, so pool re-filtering during
 // requirement tightening is automatically reflected in subsequent iterations.
-// nolint:gocyclo
 func (a *allocator) dfs(claimIdx, reqIdx, subReqIdx, slotIdx int) bool {
 	select {
 	case <-a.ctx.Done():
@@ -842,8 +855,6 @@ func (a *allocator) dfsAllMode(claimIdx, reqIdx, subReqIdx, slotIdx int, cd *Cla
 
 // tryDevice attempts to allocate a single device at the given position in the DFS tree.
 // Returns true if the subtree rooted at this device leads to a complete solution.
-//
-//nolint:gocyclo
 func (a *allocator) tryDevice(
 	claimIdx, reqIdx, subReqIdx, slotIdx int,
 	cd *ClaimData,
@@ -919,7 +930,7 @@ func (a *allocator) tryDevice(
 	// 4. Requirement compatibility (devices with topology requirements only).
 	pushedSnapshot := false
 	if dw.TopologyRequirements != nil {
-		if !a.requirements.IsCompatible(*dw.TopologyRequirements, scheduling.AllowUndefinedWellKnownLabels) {
+		if !a.requirements.IsCompatible(*dw.TopologyRequirements, compatibilityOptions(a.nodeClaim.Superposed())...) {
 			for j := constraintsAdded - 1; j >= 0; j-- {
 				cd.Constraints[j].Remove(rd.Name, dw.Device, deviceID)
 			}
@@ -931,7 +942,7 @@ func (a *allocator) tryDevice(
 			pools: a.pools,
 		})
 		a.requirements.Add(dw.TopologyRequirements.Values()...)
-		a.pools = FilterPools(a.pools, a.requirements, a.nodeClaim.NodeName())
+		a.pools = FilterPools(a.pools, a.requirements, a.nodeClaim.NodeName(), a.nodeClaim.Superposed())
 		a.buildPoolIndex()
 		pushedSnapshot = true
 	}
@@ -1018,7 +1029,7 @@ func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]re
 	if remaining := a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID); remaining != nil {
 		return remaining
 	}
-	slices, ok := a.nodeClaim.ResourceSlices()[a.itID]
+	slices, ok := a.resourceSlices[a.itID]
 	if !ok {
 		return nil
 	}
@@ -1058,6 +1069,16 @@ func computeTemplateTotals(slices []ResourceSlice) map[PoolKey]map[string]map[st
 		}
 	}
 	return totalsByPool
+}
+
+// compatibilityOptions returns the options for checking device and slice requirements against a NodeClaim's
+// requirements. A superposed NodeClaim is open to any value for a well-known label it doesn't define. A NodeClaim that
+// isn't superposed is compared strictly: a label it doesn't define is absent.
+func compatibilityOptions(superposed bool) []option.Function[scheduling.CompatibilityOptions] {
+	if !superposed {
+		return nil
+	}
+	return []option.Function[scheduling.CompatibilityOptions]{scheduling.AllowUndefinedWellKnownLabels}
 }
 
 // copyRequirements creates a shallow copy of a Requirements map.

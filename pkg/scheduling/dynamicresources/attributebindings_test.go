@@ -37,10 +37,8 @@ func deviceID(driver, pool, device string) dynamicresources.DeviceID {
 
 func itType(name string, bindings ...*cloudprovider.AttributeBinding) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
-		Name: name,
-		DynamicResources: cloudprovider.DynamicResources{
-			AttributeBindings: bindings,
-		},
+		Name:              name,
+		AttributeBindings: bindings,
 	}
 }
 
@@ -168,7 +166,8 @@ var _ = Describe("AttributeBindings", func() {
 				"pool-a": {itType("gpu-xl", attrBinding(attrZone, devA, devA))},
 			})
 			it := unique.Make("gpu-xl")
-			Expect(ab.HasBindings("pool-a", it, attrZone, devA)).To(BeTrue())
+			// A binding needs two distinct devices, so it's dropped and the device doesn't participate in any binding.
+			Expect(ab.HasBindings("pool-a", it, attrZone, devA)).To(BeFalse())
 			Expect(ab.Bound("pool-a", it, attrZone, devA, devA)).To(BeFalse())
 		})
 		It("transitive closure handles cycles correctly", func() {

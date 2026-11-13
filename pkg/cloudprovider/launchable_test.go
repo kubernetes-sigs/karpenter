@@ -99,3 +99,16 @@ var _ = Describe("Offering Launchability", func() {
 		Expect(ordered[1].Name).To(Equal("phantom-cheap"))
 	})
 })
+
+var _ = Describe("Incompatible offerings", func() {
+	It("Launchable is false for an Incompatible offering, even if it's left Available", func() {
+		od := onDemandOffering(1.0)
+		Expect(od.Launchable()).To(BeTrue())
+		od.Incompatible = true
+		Expect(od.Launchable()).To(BeFalse())
+		reserved := reservedOffering(true, 1)
+		Expect(reserved.Launchable()).To(BeTrue())
+		reserved.Incompatible = true
+		Expect(reserved.Launchable()).To(BeFalse())
+	})
+})

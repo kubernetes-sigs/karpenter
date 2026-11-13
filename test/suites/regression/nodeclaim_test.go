@@ -294,7 +294,13 @@ var _ = Describe("NodeClaim", func() {
 				},
 			})
 			env.ExpectCreated(nodeClass, nodeClaim)
-			nodeClaim = env.ExpectExists(nodeClaim).(*v1.NodeClaim)
+
+			// Wait for the launch to finish, otherwise its status patch can overwrite the providerID set below
+			By("Waiting for the NodeClaim to launch")
+			Eventually(func(g Gomega) {
+				g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(nodeClaim), nodeClaim)).To(Succeed())
+				g.Expect(nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeLaunched)).To(BeTrue())
+			}).Should(Succeed())
 
 			By("Updated NodeClaim Status")
 			nodeClaim.Status.ProviderID = "Provider:///AZ/i-01234567890123456"
