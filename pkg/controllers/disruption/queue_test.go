@@ -386,7 +386,7 @@ var _ = Describe("Queue", func() {
 				stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 				cmd := &disruption.Command{
-					Method:               disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+					Method:               disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 					CreationTimestamp:    env.Clock.Now(),
 					ID:                   uuid.New(),
 					Results:              scheduling.Results{},
