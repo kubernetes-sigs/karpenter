@@ -46,7 +46,6 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 	}
 }
 
-// nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if m.IsConsolidated() {
 		return []Command{}, nil
@@ -111,7 +110,6 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
-// nolint:gocyclo
 func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, map[string]ScoreResult, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {

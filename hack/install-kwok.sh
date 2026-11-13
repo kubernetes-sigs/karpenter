@@ -92,6 +92,16 @@ EOF
 
 curl -s -o "${BASE}/service.yaml" "https://raw.githubusercontent.com/kubernetes-sigs/kwok/refs/tags/${KWOK_RELEASE}/kustomize/kwok/service.yaml"
 curl -s -o "${BASE}/kwok.yaml" "https://raw.githubusercontent.com/kubernetes-sigs/kwok/refs/tags/${KWOK_RELEASE}/kustomize/kwok/kwok.yaml"
+# Remove KWOK's FlowSchema (https://github.com/kubernetes-sigs/kwok/issues/1492).
+# EKS rejects it, and elsewhere a built-in FlowSchema matches KWOK first, so it has no effect.
+cat <<'EOF' > "${BASE}/remove-flowschema.yaml"
+$patch: delete
+apiVersion: flowcontrol.apiserver.k8s.io/v1
+kind: FlowSchema
+metadata:
+  name: kwok-controller
+EOF
+
 cat <<EOF > "${BASE}/kustomization.yaml"
   apiVersion: kustomize.config.k8s.io/v1beta1
   kind: Kustomization
@@ -107,6 +117,8 @@ cat <<EOF > "${BASE}/kustomization.yaml"
       disableNameSuffixHash: true
     files:
     - kwok.yaml
+  patches:
+  - path: remove-flowschema.yaml
 EOF
 
 # Create num_partitions

@@ -147,8 +147,6 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 // have the same representation in the cluster state. This is to ensure that our view
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
-//
-//nolint:gocyclo
 func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// Set the metric depending on the result of the Synced() call
 	defer func() {
@@ -499,7 +497,6 @@ func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
 // It updates podHealthyNodePoolScheduledTime for pods scheduled against nodePool that have
 // NodeRegistrationHealthy=true. This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
-// nolint:gocyclo
 func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod, ncPods map[string][]*corev1.Pod) {
 	now := c.clock.Now()
 	for pod := range podErrors {
@@ -862,7 +859,6 @@ func (c *Cluster) matchRepairPolicies(ctx context.Context, node *corev1.Node, ol
 	return matches
 }
 
-// nolint:gocyclo
 func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
 	var oldNodePoolName, newNodePoolName string
 	var oldResources, newResources corev1.ResourceList

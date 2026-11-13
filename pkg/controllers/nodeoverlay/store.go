@@ -131,6 +131,7 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		Overhead:               it.Overhead,               // Shared - never modified
 		VolumeAttachmentLimits: it.VolumeAttachmentLimits, // Shared - never modified
 		DynamicResources:       it.DynamicResources,       // Shared - never modified
+		AttributeBindings:      it.AttributeBindings,      // Shared - never modified
 		Capacity:               it.Capacity,
 	}
 
@@ -163,6 +164,7 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 				Requirements:        offering.Requirements, // Shared - requirements are immutable
 				Price:               offering.Price,
 				Available:           offering.Available,
+				Incompatible:        offering.Incompatible,
 				ReservationCapacity: offering.ReservationCapacity,
 			}
 			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))

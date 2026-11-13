@@ -110,8 +110,6 @@ func SkipDaemonSets() DrainOption {
 
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
-//
-//nolint:gocyclo
 func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time, opts ...DrainOption) error {
 	o := &drainOptions{}
 	for _, opt := range opts {
@@ -127,19 +125,19 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	})
 
 	// Split waiting pods into two disjoint sets:
-	//   - deleteEligible: past the force-delete threshold. Enqueue across ALL tiers
+	//   - deleteEligible: past the delete-by-deadline threshold. Enqueue across ALL tiers
 	//     immediately — at the hard deadline we must not gate deletion behind
 	//     graceful eviction of an earlier tier (a PDB on a noncritical pod would
 	//     otherwise hold up a past-deadline critical pod).
 	//   - gracefulCandidates: candidates for the PDB-respecting eviction API.
 	//     Tier-gated so noncritical/non-daemon pods drain before critical/daemon
 	//     ones (k8s graceful shutdown ordering).
-	// The queue re-evaluates needsForceDelete on every reconcile, so a graceful
-	// candidate whose deadline crosses while it's enqueued upgrades to force-delete
+	// The queue re-evaluates needsDeleteByDeadline on every reconcile, so a graceful
+	// candidate whose deadline crosses while it's enqueued upgrades to a delete by the deadline
 	// naturally.
 	var deleteEligible, gracefulCandidates []*corev1.Pod
 	for _, p := range waiting {
-		if !o.leaveResidualPods && needsForceDelete(p, nodeGracePeriodExpirationTime, t.clock) {
+		if !o.leaveResidualPods && needsDeleteByDeadline(p, nodeGracePeriodExpirationTime, t.clock) {
 			deleteEligible = append(deleteEligible, p)
 		} else {
 			gracefulCandidates = append(gracefulCandidates, p)

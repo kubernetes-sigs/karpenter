@@ -17,28 +17,26 @@ limitations under the License.
 package common
 
 import (
-	"testing"
-
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 )
 
-func TestParseCondition(t *testing.T) {
-	for value, want := range map[string]corev1.NodeCondition{
-		"KernelReady=False": {Type: "KernelReady", Status: corev1.ConditionFalse},
-		"AcceleratedHardwareReady=False/NvidiaXID46Error": {Type: "AcceleratedHardwareReady", Status: corev1.ConditionFalse, Reason: "NvidiaXID46Error"},
-	} {
-		if got := parseCondition("test", value); got != want {
-			t.Errorf("parseCondition(%q) = %+v, want %+v", value, got, want)
-		}
-	}
-	for _, value := range []string{"KernelReady", "=False", "KernelReady=", "KernelReady=/Reason"} {
-		func() {
-			defer func() {
-				if recover() == nil {
-					t.Errorf("parseCondition(%q) didn't panic", value)
-				}
-			}()
-			parseCondition("test", value)
-		}()
-	}
-}
+var _ = Describe("parseCondition", func() {
+	DescribeTable("parses type=status[/reason]",
+		func(value string, want corev1.NodeCondition) {
+			Expect(parseCondition("test", value)).To(Equal(want))
+		},
+		Entry("type and status", "KernelReady=False", corev1.NodeCondition{Type: "KernelReady", Status: corev1.ConditionFalse}),
+		Entry("type, status and reason", "AcceleratedHardwareReady=False/NvidiaXID46Error", corev1.NodeCondition{Type: "AcceleratedHardwareReady", Status: corev1.ConditionFalse, Reason: "NvidiaXID46Error"}),
+	)
+	DescribeTable("panics on malformed values",
+		func(value string) {
+			Expect(func() { parseCondition("test", value) }).To(Panic())
+		},
+		Entry("no status", "KernelReady"),
+		Entry("no type", "=False"),
+		Entry("empty status", "KernelReady="),
+		Entry("empty status with reason", "KernelReady=/Reason"),
+	)
+})
