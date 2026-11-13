@@ -412,7 +412,8 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
 			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
-				Price: mostExpensiveOffering.Price / 1_000_000.0, Available: true, ReservationCapacity: 0, // full but healthy
+				Price: mostExpensiveOffering.Price / 1_000_000.0, Available: true,
+				Compatible: true, ReservationCapacity: 0, // full but healthy
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
 					corev1.LabelTopologyZone:         mostExpensiveOffering.Zone(),
@@ -467,9 +468,9 @@ var _ = Describe("Repair/TerminateFirst", func() {
 				o.Available = false
 			}
 		}, disruption.Decision("")),
-		Entry("terminates first when on-demand is Incompatible", func() {
+		Entry("terminates first when on-demand is not Compatible", func() {
 			for _, o := range mostExpensiveInstance.Offerings {
-				o.Available, o.Incompatible = false, true
+				o.Available, o.Compatible = false, false
 			}
 		}, disruption.TerminateFirstDecision),
 		Entry("terminates first when the instance type has no on-demand offering", func() {
@@ -709,10 +710,10 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		})
 
 		// On-demand offerings that can never launch aren't a fallback to wait for, so the NodePool terminates first.
-		It("should terminate-first when the template's on-demand offerings are Incompatible", func() {
+		It("should terminate-first when the template's on-demand offerings are not Compatible", func() {
 			for _, o := range mostExpensiveInstance.Offerings {
 				o.Available = false
-				o.Incompatible = true
+				o.Compatible = false
 			}
 			withReservation(0)
 			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
@@ -729,6 +730,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			zone := mostExpensiveOffering.Zone()
 			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
 			mostExpensiveInstance.Offerings = []*cloudprovider.Offering{{
+				Compatible:   true,
 				Price:        mostExpensiveOffering.Price,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: zone + "-elsewhere"}),
 			}}

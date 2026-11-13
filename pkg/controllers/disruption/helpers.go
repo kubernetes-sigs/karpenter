@@ -473,7 +473,7 @@ func templateOfferings(its []*cloudprovider.InstanceType, nct *scheduling.NodeCl
 // pre-spinning it would fail to launch until a reserved node frees its slot, and which compatible reservations are still
 // offered (Available, even if full). A compatible non-reserved offering, even a transiently unavailable one, means the
 // replacement doesn't depend on a reservation slot, so the NodePool waits for that capacity rather than terminating
-// first. An Incompatible non-reserved offering can never launch, so it doesn't count. A static
+// first. A non-reserved offering that isn't Compatible can never launch, so it doesn't count. A static
 // replacement is the bare NodePool template, so this is an offering lookup rather than a scheduling simulation.
 func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudProvider, np *v1.NodePool, nct *scheduling.NodeClaimTemplate) (bool, sets.Set[string], error) {
 	its, err := cloudProvider.GetInstanceTypes(ctx, np)
@@ -482,8 +482,8 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 	}
 	offered := sets.New[string]()
 	for _, o := range templateOfferings(its, nct) {
-		// An Incompatible non-reserved offering can never launch, so it isn't a fallback worth waiting for.
-		if o.CapacityType() != v1.CapacityTypeReserved && o.Incompatible {
+		// A non-reserved offering that isn't Compatible can never launch, so it isn't a fallback worth waiting for.
+		if o.CapacityType() != v1.CapacityTypeReserved && !o.Compatible {
 			continue
 		}
 		if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
@@ -497,7 +497,7 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 }
 
 // awaitsTransientCapacity reports whether the candidate's NodePool has a non-reserved offering that's only transiently
-// unavailable (not Available, not Incompatible) and that every reschedulable pod could use, so its replacement may
+// unavailable (Compatible but not Available) and that every reschedulable pod could use, so its replacement may
 // launch without the candidate's reservation slot once that capacity comes back. It's the dynamic counterpart of
 // staticReservations' non-reserved fallback check.
 func awaitsTransientCapacity(c *Candidate) bool {
@@ -505,7 +505,7 @@ func awaitsTransientCapacity(c *Candidate) bool {
 		return pkgscheduling.NewStrictPodRequirements(p)
 	})
 	for it, o := range templateOfferings(lo.Values(c.nodePoolInstanceTypes), scheduling.NewNodeClaimTemplate(c.NodePool)) {
-		if o.CapacityType() == v1.CapacityTypeReserved || o.Available || o.Incompatible {
+		if o.CapacityType() == v1.CapacityTypeReserved || o.Available || !o.Compatible {
 			continue
 		}
 		if lo.EveryBy(podReqs, func(r pkgscheduling.Requirements) bool {

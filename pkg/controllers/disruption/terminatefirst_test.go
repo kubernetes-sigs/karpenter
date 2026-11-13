@@ -289,11 +289,11 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 			// On-demand offerings that can never launch aren't a fallback to wait for, so the full reservation is the only
 			// way in and the NodePool terminates first.
-			It("issues a delete-only command when the template's on-demand offerings are Incompatible", func() {
+			It("issues a delete-only command when the template's on-demand offerings are not Compatible", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				for _, o := range mostExpensiveInstance.Offerings {
 					o.Available = false
-					o.Incompatible = true
+					o.Compatible = false
 				}
 				withReservation(0)
 				nodePool.Spec.Template.Spec.Requirements[1].Values = []string{v1.CapacityTypeReserved, v1.CapacityTypeOnDemand}
@@ -315,6 +315,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				zone := mostExpensiveOffering.Zone()
 				mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
 				mostExpensiveInstance.Offerings = []*cloudprovider.Offering{{
+					Compatible:   true,
 					Price:        mostExpensiveOffering.Price,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: zone + "-elsewhere"}),
 				}}
@@ -692,9 +693,9 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
 			},
 			Entry("waits when on-demand is transiently unavailable", func() {}, nil, false),
-			Entry("terminates first when on-demand is Incompatible", func() {
+			Entry("terminates first when on-demand is not Compatible", func() {
 				for _, o := range mostExpensiveInstance.Offerings {
-					o.Incompatible = true
+					o.Compatible = false
 				}
 			}, nil, true),
 			Entry("terminates first when the instance type has no on-demand offering", func() {
@@ -705,6 +706,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				zone := mostExpensiveOffering.Zone()
 				mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
 				mostExpensiveInstance.Offerings = []*cloudprovider.Offering{{
+					Compatible:   true,
 					Price:        mostExpensiveOffering.Price,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: zone + "-elsewhere"}),
 				}}
