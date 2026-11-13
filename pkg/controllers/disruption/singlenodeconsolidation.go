@@ -31,7 +31,13 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
+// SingleNodeConsolidationTimeoutDuration caps how many candidates a pass evaluates. It is checked
+// between candidates, not inside one.
 var SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
+
+// SingleNodeConsolidationSimulationTimeoutDuration is a worst-case backstop on a single candidate's
+// simulation, not a normal stopping condition.
+var SingleNodeConsolidationSimulationTimeoutDuration = 1 * time.Hour
 
 // SingleNodeConsolidation evaluates one node at a time for consolidation.
 type SingleNodeConsolidation struct {
@@ -58,8 +64,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
-	// The wall-clock check below only runs between candidates, so also bound the scheduling simulations themselves.
-	timeoutCtx, cancel := context.WithTimeout(ctx, SingleNodeConsolidationTimeoutDuration)
+	timeoutCtx, cancel := context.WithTimeout(ctx, SingleNodeConsolidationSimulationTimeoutDuration)
 	defer cancel()
 	constrainedByBudgets := false
 
@@ -67,7 +72,10 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: s.ConsolidationType()})
+			ConsolidationTimeoutsTotal.Inc(map[string]string{
+				ConsolidationTypeLabel: s.ConsolidationType(),
+				TimeoutScopeLabel:      CandidateLoopTimeoutScope.Name,
+			})
 			log.FromContext(ctx).V(1).Info("abandoning single-node consolidation due to timeout", "candidates_evaluated", i)
 
 			s.PreviouslyUnseenNodePools = unseenNodePools
@@ -94,8 +102,11 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		cmd, err := s.computeConsolidation(timeoutCtx, candidate)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: s.ConsolidationType()})
-				log.FromContext(ctx).V(1).Info("abandoning single-node consolidation due to timeout", "candidates_evaluated", i)
+				ConsolidationTimeoutsTotal.Inc(map[string]string{
+					ConsolidationTypeLabel: s.ConsolidationType(),
+					TimeoutScopeLabel:      SchedulingSimulationTimeoutScope.Name,
+				})
+				log.FromContext(ctx).V(1).Info("abandoning single-node consolidation, candidate's scheduling simulation exceeded its deadline", "candidates_evaluated", i)
 				// this candidate's nodepool wasn't actually evaluated, so keep prioritizing it next time
 				unseenNodePools.Insert(candidate.NodePool.Name)
 				s.PreviouslyUnseenNodePools = unseenNodePools

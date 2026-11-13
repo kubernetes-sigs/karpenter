@@ -96,6 +96,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 	AfterEach(func() {
 		disruption.SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
+		disruption.SingleNodeConsolidationSimulationTimeoutDuration = 1 * time.Hour
 		env.Clock.SetTime(time.Now())
 		ExpectCleanedUp(ctx, env.Client)
 	})
@@ -212,10 +213,10 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool3.Name)).To(BeTrue())
 		})
 
-		It("should abandon a candidate whose scheduling simulation exceeds the timeout", func() {
-			// The fake clock never advances, so the between-candidate wall-clock check can't fire; only the
-			// context deadline on the scheduling simulation can stop this pass.
-			disruption.SingleNodeConsolidationTimeoutDuration = time.Nanosecond
+		It("should abandon a candidate whose scheduling simulation exceeds its deadline", func() {
+			// The candidate-loop budget keeps its default and the fake clock never advances, so only the
+			// simulation's own deadline can stop this pass.
+			disruption.SingleNodeConsolidationSimulationTimeoutDuration = time.Nanosecond
 			candidates, err := createCandidates(1.0, 3)
 			Expect(err).To(BeNil())
 
@@ -235,6 +236,12 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool1.Name)).To(BeTrue())
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool3.Name)).To(BeTrue())
+
+			// this is the only spec that trips the simulation deadline, so the scoped series is exactly 1
+			ExpectMetricCounterValue(disruption.ConsolidationTimeoutsTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: consolidation.ConsolidationType(),
+				disruption.TimeoutScopeLabel:      disruption.SchedulingSimulationTimeoutScope.Name,
+			})
 		})
 	})
 })
