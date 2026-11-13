@@ -6,10 +6,10 @@ on:
       regression:
         description: "Patch in test/suites/performancev2/perf/regressions to apply, to show the smoke test catches it"
         type: string
+permissions:
+  contents: read
 jobs:
   perf-smoke:
-    permissions:
-      issues: write
     strategy:
       fail-fast: false
       matrix:
