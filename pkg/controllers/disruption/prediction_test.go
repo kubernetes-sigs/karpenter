@@ -61,6 +61,7 @@ var _ = Describe("Prediction", func() {
 				}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        1.0,
 				}),
@@ -73,6 +74,7 @@ var _ = Describe("Prediction", func() {
 				}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),

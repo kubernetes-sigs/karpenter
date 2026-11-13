@@ -51,8 +51,9 @@ func modeInstanceType() *cloudprovider.InstanceType {
 					scheduling.NewRequirement(gpuModeKey, corev1.NodeSelectorOpIn, gpu),
 					scheduling.NewRequirement(nicModeKey, corev1.NodeSelectorOpIn, nic),
 				),
-				Price:     1.0,
-				Available: true,
+				Price:      1.0,
+				Available:  true,
+				Compatible: true,
 			})
 		}
 	}

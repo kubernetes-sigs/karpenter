@@ -89,8 +89,9 @@ var _ = Describe("Store Apply Selective Copy", func() {
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 					),
-					Price:     0.096,
-					Available: true,
+					Price:      0.096,
+					Available:  true,
+					Compatible: true,
 				}),
 			),
 			nil,
@@ -127,8 +128,9 @@ var _ = Describe("Store Apply Selective Copy", func() {
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 					),
-					Price:     0.096,
-					Available: true,
+					Price:      0.096,
+					Available:  true,
+					Compatible: true,
 				}),
 			),
 			nil,
@@ -177,16 +179,18 @@ var _ = Describe("Store Apply Correctness", func() {
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 						),
-						Price:     originalPrice,
-						Available: true,
+						Price:      originalPrice,
+						Available:  true,
+						Compatible: true,
 					},
 					cloudprovider.Offering{
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 						),
-						Price:     originalPrice,
-						Available: true,
+						Price:      originalPrice,
+						Available:  true,
+						Compatible: true,
 					},
 				),
 			)
@@ -219,23 +223,24 @@ var _ = Describe("Store Apply Correctness", func() {
 			Expect(instanceType.Offerings[0].Price).To(BeNumerically("==", originalPrice), "original instance type should not be mutated")
 		})
 
-		It("should carry Available and Incompatible onto price-overlaid offerings", func() {
+		It("should carry Available and Compatible onto price-overlaid offerings", func() {
 			incompatible := cloudprovider.Offering{
 				Requirements: scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 				),
-				Price:        0.096,
-				Available:    false,
-				Incompatible: true,
+				Price:      0.096,
+				Available:  false,
+				Compatible: false,
 			}
 			transient := cloudprovider.Offering{
 				Requirements: scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 				),
-				Price:     0.096,
-				Available: false,
+				Price:      0.096,
+				Available:  false,
+				Compatible: true,
 			}
 			instanceType := fake.NewInstanceType("m5.large", fake.WithOfferings(incompatible, transient))
 
@@ -257,10 +262,10 @@ var _ = Describe("Store Apply Correctness", func() {
 
 			Expect(result.Offerings[0].IsPriceOverlaid()).To(BeTrue())
 			Expect(result.Offerings[0].Available).To(BeFalse())
-			Expect(result.Offerings[0].Incompatible).To(BeTrue())
+			Expect(result.Offerings[0].Compatible).To(BeFalse())
 			Expect(result.Offerings[1].IsPriceOverlaid()).To(BeTrue())
 			Expect(result.Offerings[1].Available).To(BeFalse())
-			Expect(result.Offerings[1].Incompatible).To(BeFalse())
+			Expect(result.Offerings[1].Compatible).To(BeTrue())
 		})
 	})
 
@@ -341,8 +346,9 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 				),
-				Price:     0.096,
-				Available: true,
+				Price:      0.096,
+				Available:  true,
+				Compatible: true,
 			}),
 		)
 
@@ -420,16 +426,18 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 						),
-						Price:     0.096,
-						Available: true,
+						Price:      0.096,
+						Available:  true,
+						Compatible: true,
 					},
 					cloudprovider.Offering{
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "spot"),
 						),
-						Price:     0.0288,
-						Available: true,
+						Price:      0.0288,
+						Available:  true,
+						Compatible: true,
 					},
 				),
 				fake.WithResources(corev1.ResourceList{
@@ -443,8 +451,9 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
 					),
-					Price:     0.192,
-					Available: true,
+					Price:      0.192,
+					Available:  true,
+					Compatible: true,
 				}),
 				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceMemory: resource.MustParse("16Gi"),
