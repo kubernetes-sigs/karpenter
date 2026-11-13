@@ -202,7 +202,7 @@ func computeProvisioningCondition(cb *autoscalingv1beta1.CapacityBuffer, s *buff
 // yet, and those nodes are naturally protected from consolidation by the
 // Consolidatable condition timer (which hasn't elapsed on a brand-new node).
 //
-// Consolidation does NOT consult this mapping. Instead, it naturally accounts
+// Consolidation also naturally accounts
 // for buffer pods because SimulateScheduling calls GetPendingPods (which injects
 // virtual pods). The simulation must fit all pending pods (including virtual ones)
 // onto the remaining/replacement nodes, so a replacement that's too small to
