@@ -1,0 +1,93 @@
+# GitHub only notifies the actor that triggered a run, and pushes to main are made by
+# kubernetes-prow[bot], so a red main notifies nobody. This opens one issue when presubmit
+# fails on main, comments on it while main stays red, and closes it on the next green run.
+name: main-health
+on:
+  workflow_run:
+    workflows: [presubmit]
+    types: [completed]
+    branches: [main]
+permissions: {}
+jobs:
+  report:
+    # A pull request from a fork branch named main also reports head_branch main.
+    # Every conclusion triggers the job, so a cancelled newest run still reports the run before it.
+    if: >-
+      github.repository == 'kubernetes-sigs/karpenter' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    # Serializes jobs so two of them never open the issue at once. GitHub cancels a pending job
+    # when another one queues, which loses nothing because every job reports the current state.
+    concurrency:
+      group: ${{ github.workflow }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      WORKFLOW: ${{ github.event.workflow_run.name }}
+      WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+    - name: Open, update or close the failing-test issue
+      run: |
+        set -euo pipefail
+        # Runs can finish out of order, so report the newest push run on main that has a result,
+        # not the run that triggered this job. Cancelled and skipped runs have no result.
+        # If a newer run is still going, its own completion reports main. The event is authoritative
+        # for the run that triggered it, in case the API still shows that attempt as in progress.
+        newest="$(gh api "repos/${GH_REPO}/actions/workflows/${WORKFLOW_ID}/runs?branch=main&event=push&per_page=20" \
+          | jq -r --argjson id "${RUN_ID}" --argjson attempt "${RUN_ATTEMPT}" --arg conclusion "${CONCLUSION}" '
+            .workflow_runs
+            | map(if .id == $id and .run_attempt == $attempt then .status = "completed" | .conclusion = $conclusion else . end)
+            | map(select(.status != "completed" or (.conclusion | IN("success", "failure", "timed_out", "startup_failure"))))
+            | .[0] // empty
+            | [.id, .status, .conclusion // "none", .head_sha, .html_url] | @tsv')"
+        if [[ -z "${newest}" ]]; then
+          echo "No recent push run on main has a result, skipping."
+          exit 0
+        fi
+        IFS=$'\t' read -r run_id status conclusion head_sha run_url <<< "${newest}"
+        if [[ "${status}" != "completed" ]]; then
+          echo "Run ${run_id} is ${status}, so its completion will report main. Skipping."
+          exit 0
+        fi
+        title="${WORKFLOW} is failing on main"
+        # Only reuse an issue this workflow opened. Anyone can open an issue and add kind/failing-test.
+        number="$(gh api "repos/${GH_REPO}/issues?state=open&labels=kind/failing-test&creator=github-actions%5Bbot%5D&per_page=100" \
+          | jq -r --arg t "${title}" 'map(select(.pull_request == null and .title == $t)) | .[0].number // empty')"
+        if [[ "${conclusion}" == "success" ]]; then
+          if [[ -n "${number}" ]]; then
+            gh issue close "${number}" --reason completed --comment "Green again at ${head_sha}: ${run_url}"
+          fi
+          exit 0
+        fi
+        if [[ -n "${number}" ]]; then
+          # Several jobs can report the same run, so comment once per run.
+          reported="$(gh issue view "${number}" --json body,comments \
+            | jq --arg u "${run_url}" '[.body, .comments[].body | split("\n")[] | rtrimstr("\r")] | any(endswith($u))')"
+          if [[ "${reported}" == "true" ]]; then
+            echo "Issue #${number} already has run ${run_id}, skipping."
+            exit 0
+          fi
+          gh issue comment "${number}" --body "Still failing at ${head_sha}: ${run_url}"
+          exit 0
+        fi
+        body="$(cat <<BODY
+        \`${WORKFLOW}\` ${conclusion} on main at ${head_sha}: ${run_url}
+
+        1. Find the culprit, usually the last merge or two merges that conflict. If only some Kubernetes versions failed, re-run the failed jobs first, since it may be a flake. If the failing step is vulncheck, no merge is at fault: bump the affected module or the Go version named by the GO-ID in the log.
+        2. Open a revert or fix-forward PR labeled kind/failing-test and priority/critical-urgent so tide merges it first.
+        3. If no fix can land soon, freeze merges with an issue titled "main is red branch:main" labeled tide/merge-blocker. That label blocks every PR to main, the fix included, so close it once the fix is approved.
+
+        This issue gets a comment on each failing run and closes on the next green run.
+        BODY
+        )"
+        gh issue create --title "${title}" --label kind/failing-test --label priority/critical-urgent --body "${body}"
