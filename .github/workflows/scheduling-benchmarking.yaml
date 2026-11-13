@@ -16,18 +16,9 @@ permissions:
   contents: read
 
 jobs:
-  # index pins the artifact name each leg uploads, and the compare job below keys
-  # off the same index. timeoutMinutes is a per-leg wall clock ceiling. Measured
-  # on ubuntu-latest at -count=6, the disruption leg's Run Test step took 37m40s
-  # and the scheduling leg's took 16m22s; at -count=4 those come to roughly 26
-  # and 12 minutes. The ceilings below sit above those with room for a slower
-  # runner, and are deliberately tight enough that a hang is caught in minutes
-  # rather than at GitHub's 360 minute default.
   resolve:
     name: Resolve Baseline
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     outputs:
       before: ${{ steps.firstparent.outputs.before }}
     steps:
@@ -44,123 +35,53 @@ jobs:
             exit 1
           fi
           echo "before=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
-  before:
-    name: Before PR
-    needs: [resolve]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - index: 0
-            path: "pkg/controllers/provisioning/scheduling"
-            timeoutMinutes: 30
-          - index: 1
-            path: "pkg/controllers/disruption"
-            timeoutMinutes: 45
-    uses: ./.github/workflows/run-bench-test.yaml
-    secrets: inherit
-    with:
-      path: ${{ matrix.path }}
-      runName: before-${{ matrix.index }}
-      githubSha: ${{ needs.resolve.outputs.before }}
-      timeoutMinutes: ${{ matrix.timeoutMinutes }}
-  after:
-    name: After PR
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - index: 0
-            path: "pkg/controllers/provisioning/scheduling"
-            timeoutMinutes: 30
-          - index: 1
-            path: "pkg/controllers/disruption"
-            timeoutMinutes: 45
-    uses: ./.github/workflows/run-bench-test.yaml
-    secrets: inherit
-    with:
-      path: ${{ matrix.path }}
-      runName: after-${{ matrix.index }}
-      githubSha: ${{ github.sha }}
-      timeoutMinutes: ${{ matrix.timeoutMinutes }}
   compare:
-    name: Compare Results
-    needs: [before, after]
+    name: Compare ${{ matrix.leg }}
+    needs: [resolve]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
+    timeout-minutes: ${{ matrix.timeoutMinutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - index: 0
-            name: scheduling
-          - index: 1
-            name: consolidation
+          # compare.sh interleaves both arms of a leg inside this one job, so
+          # timeoutMinutes is a ceiling on base plus head, not on one arm.
+          # Measured on ubuntu-latest at -bench=. -benchtime=1x -count=6, one
+          # arm, one package: the scheduling leg took 16m22s and the disruption
+          # leg 37m40s. At -count=4 those come to roughly 12 and 26, so two arms
+          # come to 24 and 52. The ceilings below add about 25 percent, which
+          # covers a slower runner and the package level sync.Once setup that
+          # each of the two -count=2 processes per arm pays. COUNT stays at 4
+          # because benchstat's Mann-Whitney U test cannot report below p=0.029
+          # with four samples a side, which is why MAX_P is 0.05 here rather
+          # than compare.sh's 0.01: at this sample count 0.01 would leave the
+          # gate unable to fire at any effect size. go test -timeout cannot
+          # supply the ceiling, because testing.M.Run stops its alarm before
+          # runBenchmarks and -run='^$' leaves no test holding it open, so
+          # without timeout-minutes the only bound is GitHub's 360 minute
+          # default.
+          - leg: scheduling
+            pkg: ./pkg/controllers/provisioning/scheduling
+            timeoutMinutes: 30
+          - leg: consolidation
+            pkg: ./pkg/controllers/disruption
+            timeoutMinutes: 65
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: "**/go.sum"
+          fetch-depth: 0
+      - uses: ./.github/actions/install-deps
       - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
+      - name: Compare base and head
         shell: bash
+        env:
+          BEFORE: ${{ needs.resolve.outputs.before }}
+          PKG: ${{ matrix.pkg }}
+          COUNT: "4"
+          BENCHTIME: "1x"
+          MAX_P: "0.05"
         run: |
-          set -euo pipefail
-          go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: before-${{ matrix.index }}
-          path: before
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: after-${{ matrix.index }}
-          path: after
-      - name: Compare benchmarks
-        id: benchstat
-        shell: bash
-        run: |
-          set -uo pipefail
-          STATUS=0
-          ./hack/benchmark-gate.sh before/results.txt after/results.txt || STATUS=$?
-          {
-            echo "result<<BENCHSTAT_EOF"
-            if [ -s cmp.txt ]; then cat cmp.txt; else echo "benchstat produced no comparison"; fi
-            echo "BENCHSTAT_EOF"
-          } >> "$GITHUB_OUTPUT"
-          if [ "$STATUS" -eq 0 ]; then
-            echo "regression=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "regression=true" >> "$GITHUB_OUTPUT"
-          fi
-          if [ "$STATUS" -gt 1 ]; then
-            echo "::error::the ${{ matrix.name }} benchmark comparison could not be made"
-            exit 1
-          fi
-      - name: Post PR comment
-        if: always() && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@67d0dec7b07ed060a405f9b2a64b8ab319fdd7db # v2.9.2
-        with:
-          header: bench-${{ matrix.name }}
-          message: |
-            ## ${{ matrix.name }} benchmark comparison
-
-            <details>
-            <summary>benchstat output</summary>
-
-            ```
-            ${{ steps.benchstat.outputs.result }}
-            ```
-
-            </details>
-
-            ${{ steps.benchstat.outputs.regression == 'true' && '⚠️ **Statistically significant allocs/op or B/op regression detected (>=20%, p<0.05).** Please investigate before merging.' || '✅ No significant allocs/op or B/op regression detected.' }}
-      - name: Fail on regression
-        if: steps.benchstat.outputs.regression == 'true'
-        run: |
-          echo "::error::Performance regression detected in ${{ matrix.name }} benchmarks"
-          exit 1
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          hack/bench/compare.sh "$BEFORE" HEAD "$PKG" | tee -a "$GITHUB_STEP_SUMMARY"
