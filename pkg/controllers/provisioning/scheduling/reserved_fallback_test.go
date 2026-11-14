@@ -287,6 +287,46 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		})
 	})
 
+	Context("strict (provisioning): an instance type whose only offering is a full reservation", func() {
+		// reserved-only-type can't launch until its reservation frees a slot. fallback-type keeps the fake's default
+		// on-demand and spot offerings.
+		nodePoolWithMinValues := func(minValues *int) *v1.NodePool {
+			return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"reserved-only-type", "fallback-type"}, MinValues: minValues},
+				},
+			}}}})
+		}
+		BeforeEach(func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("reserved-only-type", fake.WithOfferings(*reservedOffering("r-full", true, 0))),
+				fake.NewInstanceType("fallback-type"),
+			}
+		})
+
+		It("isn't an instance type option for the NodeClaim", func() {
+			ExpectApplied(ctx, env.Client, nodePoolWithMinValues(nil))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(lo.Map(results.NewNodeClaims[0].InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })).To(ConsistOf("fallback-type"))
+		})
+
+		It("doesn't count toward minValues", func() {
+			// Only one of the two instance types can launch, so a minValues of 2 can't be met.
+			ExpectApplied(ctx, env.Client, nodePoolWithMinValues(new(2)))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.NewNodeClaims).To(BeEmpty())
+			Expect(results.PodErrors).To(HaveKey(pod))
+		})
+	})
+
 	// https://github.com/kubernetes-sigs/karpenter/issues/3451: under PreferencePolicy=Respect, a preferred
 	// capacity-type=reserved is treated as required on the first pass, which hides the on-demand/spot fallback once the
 	// reservation is full. The scheduler must relax the preference or fall through to another NodePool instead of
