@@ -195,8 +195,10 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	go vet ./...
 	go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
 	cd kwok/charts && go tool -modfile=../../go.tools.mod helm-docs
-	@git diff --quiet ||\
-		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
+	@# git status (unlike git diff) also reports untracked files, e.g. a newly generated CRD that was never committed.
+	@# A git error is treated as drift so the check fails closed.
+	@changes="$$(git status --porcelain --untracked-files=all)" && test -z "$$changes" ||\
+		{ echo "New file modification detected in the Git working tree. Please check in before commit."; printf '%s\n' "$$changes" | awk 'NF {print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\
 			exit 1;\
 		fi;}
