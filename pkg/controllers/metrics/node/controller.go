@@ -248,10 +248,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 		utilizedResource := utilizedAggregate[resourceName]
 
 		// Typecast to float before the calculation to maximize resolution
-		utilizationPercentage := 100 * lo.Ternary(
-			resourceName == corev1.ResourceCPU,
-			float64(utilizedResource.MilliValue())/float64(allocatableResource.MilliValue()),
-			float64(utilizedResource.Value())/float64(allocatableResource.Value()))
+		utilizationPercentage := 100 * float64(resources.ScaledValue(resourceName, utilizedResource)) / float64(resources.ScaledValue(resourceName, allocatableResource))
 
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: ClusterUtilization,
