@@ -285,6 +285,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
+			Expect(recorder.Calls(events.ConsolidationRejected)).To(Equal(4))
 		},
 			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),

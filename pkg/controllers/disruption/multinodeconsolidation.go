@@ -97,7 +97,8 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		m.evaluator.EmitMultiNodeEvents(ctx, cmd, perPoolResults, true)
 	}
 
-	if cmd, err = m.validator.Validate(ctx, cmd, commandValidationDelay); err != nil {
+	validated, err := m.validator.Validate(ctx, cmd, commandValidationDelay)
+	if err != nil {
 		if IsValidationError(err) {
 			reason := getValidationFailureReason(err)
 			cmd.EmitRejectedEvents(m.recorder, reason)
@@ -105,7 +106,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
-	return []Command{cmd}, nil
+	return []Command{validated}, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
