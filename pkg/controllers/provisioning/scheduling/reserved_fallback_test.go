@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/uuid"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -284,6 +285,31 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 			Expect(results.NewNodeClaims).To(HaveLen(1))
 			scheduled := lo.Filter([]*corev1.Pod{p1, p2}, func(p *corev1.Pod, _ int) bool { _, pending := results.PodErrors[p]; return !pending })
 			Expect(scheduled).To(HaveLen(1))
+		})
+
+		It("lets a pod that can't share the credited slot's node fall through to a lower-weight NodePool (strict)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{newReservedType(reservedOffering("r-full", true, 0))}
+			reserved := reservedOnlyNodePool("reserved-type")
+			reserved.Spec.Weight = new(int32(100))
+			od := onDemandNodePool("reserved-type")
+			ExpectApplied(ctx, env.Client, reserved, od)
+
+			// The larger pod takes the credited slot, and the pods don't fit on one node. The reservation is then full again,
+			// so the flexible pod should fall through.
+			pinned := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:           metav1.ObjectMeta{UID: uuid.NewUUID()}, // the scheduler caches pod data by UID
+				NodeSelector:         map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeReserved},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")}},
+			})
+			flexible := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:           metav1.ObjectMeta{UID: uuid.NewUUID()},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}},
+			})
+			results := solveWith([]*corev1.Pod{pinned, flexible}, scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity("r-full", 1))
+
+			Expect(results.PodErrors[pinned]).ToNot(HaveOccurred())
+			Expect(results.PodErrors[flexible]).ToNot(HaveOccurred())
+			Expect(lo.Map(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) string { return nc.NodePoolName })).To(ConsistOf(reserved.Name, od.Name))
 		})
 	})
 
