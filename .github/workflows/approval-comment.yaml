@@ -2,6 +2,8 @@ name: ApprovalComment
 on:
   pull_request_review:
     types: [submitted]
+permissions:
+  contents: read
 jobs:
   approval-comment:
     if: startsWith(github.event.review.body, '/karpenter perf')

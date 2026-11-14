@@ -31,10 +31,11 @@ on:
       retention_days:
         type: number
         default: 30
+# A called workflow can only reduce the caller's token permissions, so every caller must grant at least these.
+permissions:
+  contents: read
 jobs:
   e2e:
-    permissions:
-      issues: write
     runs-on: ubuntu-latest
     name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}
     steps:
@@ -75,7 +76,9 @@ jobs:
     - name: install ko
       shell: bash
       run: |
-        go install github.com/google/ko@latest      
+        # Pinned so e2e runs are reproducible. To bump, take a tag from https://github.com/ko-build/ko/releases
+        # (the Go module path is still github.com/google/ko).
+        go install github.com/google/ko@v0.19.1
     - name: install VPA
       if: inputs.suite == 'Disruption'
       shell: bash
