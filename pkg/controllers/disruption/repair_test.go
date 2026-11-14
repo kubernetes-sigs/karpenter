@@ -252,8 +252,15 @@ var _ = Describe("Repair", func() {
 			metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
 		})
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
-			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:          strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
+		})
+		// The node has no pods, so this adds 0, but it still records the mode.
+		ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 0, map[string]string{
+			metrics.ReasonLabel:          strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
 		})
 		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
 			"condition":                  "bad_node",
@@ -1003,6 +1010,32 @@ var _ = Describe("Repair", func() {
 			metrics.CapacityTypeLabel:       v1.CapacityTypeOnDemand,
 			disruption.ImageID.Name:         "ami-test-1234",
 			metrics.TerminationModeLabel:    metrics.TerminationModeEventual,
+		})
+	})
+
+	// A policy terminationGracePeriod of 0s overrides the NodeClaim's unset one, so both counters should say forceful.
+	It("should report a forceful repair as forceful on the disrupted counter", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: new(time.Duration(0)), Action: cloudprovider.ReplaceNode},
+		})
+		newRepairController()
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+			disruption.RepairCondition.Name: "bad_node",
+			metrics.NodePoolLabel:           nodePool.Name,
+			metrics.TerminationModeLabel:    metrics.TerminationModeForceful,
+		})
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			metrics.ReasonLabel:          strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeForceful,
 		})
 	})
 

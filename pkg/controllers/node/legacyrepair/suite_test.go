@@ -92,6 +92,7 @@ var _ = Describe("Node Health", func() {
 
 		// Reset the metrics collectors
 		metrics.NodeClaimsDisruptedTotal.Reset()
+		metrics.PodsDisruptionInitiatedTotal.Reset()
 		disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
 	})
 
@@ -497,6 +498,9 @@ var _ = Describe("Node Health", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when unhealthy", func() {
+			// Legacy repair terminates forcefully even when neither the policy nor the NodeClaim sets a terminationGracePeriod.
+			cloudProvider.RepairPolicy[0].TerminationGracePeriod = nil
+			healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "BadNode",
 				Status:             corev1.ConditionFalse,
@@ -509,16 +513,19 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 
-			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			labels := map[string]string{
 				metrics.ReasonLabel:              metrics.UnhealthyReason,
 				metrics.NodePoolLabel:            nodePool.Name,
 				metrics.ConsolidationPolicyLabel: "",
-				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
-			})
+				metrics.TerminationModeLabel:     metrics.TerminationModeForceful,
+			}
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, labels)
+			// The node has no pods, so this adds 0, but it still records the mode.
+			ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 0, labels)
 			ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
 				disruption.RepairCondition.Name: pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel:           nodePool.Name,
-				metrics.TerminationModeLabel:    metrics.TerminationModeGraceful,
+				metrics.TerminationModeLabel:    metrics.TerminationModeForceful,
 			})
 		})
 	})
