@@ -105,7 +105,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 				cmd.EmitRejectedEvents(s.recorder, reason)
 				return []Command{}, nil
 			}
-			return []Command{}, fmt.Errorf("validating consolidation, %w", err)
+			return []Command{}, fmt.Errorf("validating consolidation, %w", err) //nolint:karpenterlint // non-validation errors come from re-simulation, which is cluster-wide
 		}
 		return []Command{cmd}, nil
 	}

@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -72,6 +73,25 @@ func (c *terminationTimestampPatchErrorClient) Patch(ctx context.Context, obj cl
 		nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey] != "" {
 		c.failNext = false
 		return c.err
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+// rebootPatchErrorClient fails every reboot-annotation patch for the first NodeClaim it sees.
+type rebootPatchErrorClient struct {
+	client.Client
+	err     error
+	failing string
+}
+
+func (c *rebootPatchErrorClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if nodeClaim, ok := obj.(*v1.NodeClaim); ok && nodeClaim.Annotations[v1.RebootTerminationGracePeriodAnnotationKey] != "" {
+		if c.failing == "" {
+			c.failing = nodeClaim.Name
+		}
+		if nodeClaim.Name == c.failing {
+			return c.err
+		}
 	}
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
@@ -267,6 +287,34 @@ var _ = Describe("Repair", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+	})
+
+	It("should reboot other candidates when committing one candidate's reboot fails", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode, TerminationGracePeriod: lo.ToPtr(5 * time.Minute)},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+		})
+		otherNodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, otherNodePool)
+		otherNodeClaim, otherNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(labels(), map[string]string{v1.NodePoolLabelKey: otherNodePool.Name})}})
+		failingClient := &rebootPatchErrorClient{Client: env.Client, err: errors.New("injected reboot patch failure")}
+		failingController := disruption.NewController(ctx, env.Clock, failingClient, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+			disruption.WithMethods(disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, failingClient, prov, cloudProvider, recorder, queue))))
+
+		initNode(nodeClaim, node)
+		initNode(otherNodeClaim, otherNode)
+		markUnhealthyWithReason(node, "BadNode", "RebootMe")
+		markUnhealthyWithReason(otherNode, "BadNode", "RebootMe")
+		env.Clock.Step(11 * time.Minute)
+
+		_, _ = singleton.AsReconciler(failingController).Reconcile(ctx, reconcile.Request{})
+
+		Expect(failingClient.failing).ToNot(BeEmpty())
+		rebooted := lo.Filter([]*v1.NodeClaim{ExpectExists(ctx, env.Client, nodeClaim), ExpectExists(ctx, env.Client, otherNodeClaim)}, func(nc *v1.NodeClaim, _ int) bool {
+			return nc.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()
+		})
+		Expect(rebooted).To(HaveLen(1))
+		Expect(rebooted[0].Name).ToNot(Equal(failingClient.failing))
 	})
 
 	It("should leave the reboot TGP annotation unset (unbounded) when neither policy nor NodeClaim sets one", func() {
