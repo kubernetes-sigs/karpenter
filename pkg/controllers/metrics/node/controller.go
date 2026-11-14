@@ -65,6 +65,7 @@ var (
 	TotalDaemonLimits   opmetrics.GaugeMetric
 	SystemOverhead      opmetrics.GaugeMetric
 	Lifetime            opmetrics.GaugeMetric
+	Info                opmetrics.GaugeMetric
 	ClusterUtilization  opmetrics.GaugeMetric
 )
 
@@ -79,7 +80,7 @@ func initializeMetrics() {
 			Name:      "allocatable",
 			Help:      "Node allocatable are the resources allocatable by nodes.",
 		},
-		nodeLabelNamesWithResourceType(),
+		nodeIdentityLabelNamesWithResourceType(),
 		opmetrics.Beta,
 	)
 	TotalPodRequests = opmetrics.NewPrometheusGauge(
@@ -90,7 +91,7 @@ func initializeMetrics() {
 			Name:      "total_pod_requests",
 			Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
 		},
-		nodeLabelNamesWithResourceType(),
+		nodeIdentityLabelNamesWithResourceType(),
 		opmetrics.Beta,
 	)
 	TotalPodLimits = opmetrics.NewPrometheusGauge(
@@ -101,7 +102,7 @@ func initializeMetrics() {
 			Name:      "total_pod_limits",
 			Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
 		},
-		nodeLabelNamesWithResourceType(),
+		nodeIdentityLabelNamesWithResourceType(),
 		opmetrics.Beta,
 	)
 	TotalDaemonRequests = opmetrics.NewPrometheusGauge(
@@ -112,7 +113,7 @@ func initializeMetrics() {
 			Name:      "total_daemon_requests",
 			Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
 		},
-		nodeLabelNamesWithResourceType(),
+		nodeIdentityLabelNamesWithResourceType(),
 		opmetrics.Beta,
 	)
 	TotalDaemonLimits = opmetrics.NewPrometheusGauge(
@@ -123,7 +124,7 @@ func initializeMetrics() {
 			Name:      "total_daemon_limits",
 			Help:      "Node total daemon limits are the resources specified by DaemonSet pod limits.",
 		},
-		nodeLabelNamesWithResourceType(),
+		nodeIdentityLabelNamesWithResourceType(),
 		opmetrics.Beta,
 	)
 	SystemOverhead = opmetrics.NewPrometheusGauge(
@@ -134,7 +135,7 @@ func initializeMetrics() {
 			Name:      "system_overhead",
 			Help:      "Node system daemon overhead are the resources reserved for system overhead, the difference between the node's capacity and allocatable values are reported by the status.",
 		},
-		nodeLabelNamesWithResourceType(),
+		nodeIdentityLabelNamesWithResourceType(),
 		opmetrics.Beta,
 	)
 	Lifetime = opmetrics.NewPrometheusGauge(
@@ -144,6 +145,17 @@ func initializeMetrics() {
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "current_lifetime_seconds",
 			Help:      "Node age in seconds",
+		},
+		nodeIdentityLabelNames(),
+		opmetrics.Alpha,
+	)
+	Info = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "info",
+			Help:      "Node info is always 1 and carries the node's descriptive labels. Join it to the other node metrics on node_name, for example `karpenter_nodes_allocatable * on (node_name) group_left (zone, instance_type, capacity_type) karpenter_nodes_info`.",
 		},
 		nodeLabelNames(),
 		opmetrics.Alpha,
@@ -161,11 +173,20 @@ func initializeMetrics() {
 	)
 }
 
-func nodeLabelNamesWithResourceType() []opmetrics.Label {
-	return append(
-		nodeLabelNames(),
-		metrics.ResourceType,
-	)
+// nodeIdentityLabelNames are the labels kept on every per-node metric: enough to
+// find a node and to aggregate by NodePool. The remaining descriptive labels live
+// on the node info metric so each one is exposed once per node instead of once per
+// resource type per metric.
+func nodeIdentityLabelNames() []opmetrics.Label {
+	return []opmetrics.Label{
+		{Name: getWellKnownLabels()[v1.NodePoolLabelKey]},
+		nodeNameLabel,
+		managedLabel,
+	}
+}
+
+func nodeIdentityLabelNamesWithResourceType() []opmetrics.Label {
+	return append(nodeIdentityLabelNames(), metrics.ResourceType)
 }
 
 func nodeLabelNames() []opmetrics.Label {
@@ -284,14 +305,27 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 		&metrics.StoreMetric{
 			GaugeMetric: Lifetime,
 			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+			Labels:      getNodeIdentityLabels(n),
+		},
+		&metrics.StoreMetric{
+			GaugeMetric: Info,
+			Value:       1,
 			Labels:      getNodeLabels(n),
 		})
 }
 
 func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
-	metricLabels := getNodeLabels(n)
+	metricLabels := getNodeIdentityLabels(n)
 	metricLabels[metrics.ResourceTypeLabel] = resourceTypeName
 	return metricLabels
+}
+
+func getNodeIdentityLabels(n *state.StateNode) prometheus.Labels {
+	return prometheus.Labels{
+		getWellKnownLabels()[v1.NodePoolLabelKey]: n.Node.Labels[v1.NodePoolLabelKey],
+		nodeName: n.Node.Name,
+		managed:  strconv.FormatBool(n.Managed()),
+	}
 }
 
 func getNodeLabels(n *state.StateNode) prometheus.Labels {
