@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -82,6 +83,25 @@ func (c *nodeClaimDeleteErrorClient) Delete(ctx context.Context, obj client.Obje
 		return c.err
 	}
 	return c.Client.Delete(ctx, obj, opts...)
+}
+
+// nodeTaintRaceClient adds a taint to the Node right before the first patch that changes the Node's taints, as another writer would.
+type nodeTaintRaceClient struct {
+	client.Client
+	taint corev1.Taint
+	raced bool
+}
+
+func (c *nodeTaintRaceClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if node, ok := obj.(*corev1.Node); ok && !c.raced {
+		current := ExpectExists(ctx, c.Client, node)
+		if !equality.Semantic.DeepEqual(current.Spec.Taints, node.Spec.Taints) {
+			current.Spec.Taints = append(current.Spec.Taints, c.taint)
+			ExpectApplied(ctx, c.Client, current)
+			c.raced = true
+		}
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
 var _ = AfterSuite(func() {
@@ -320,6 +340,22 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(cond.Reason).To(Equal(v1.RebootReasonRequested))
 		})
 
+		It("keeps a taint that another writer adds while it fences the node", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			quarantine := corev1.Taint{Key: "example.com/quarantine", Effect: corev1.TaintEffectNoSchedule}
+			race := &nodeTaintRaceClient{Client: env.Client, taint: quarantine}
+			racing := reboot.NewController(env.Clock, race, cloudProvider, terminator.NewTerminator(env.Clock, race, queue, recorder), recorder)
+
+			// Adding the taint can make the first Node patch fail with a conflict, so reconcile again.
+			_, _ = racing.Reconcile(ctx, ExpectExists(ctx, env.Client, nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, racing, nodeClaim)
+
+			Expect(race.raced).To(BeTrue())
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(node.Spec.Taints).To(ContainElement(quarantine))
+			Expect(hasRebootTaint(node)).To(BeTrue())
+		})
+
 		It("skips issuing when the boot already changed after recording issuing state (restart safety)", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
 				v1.RebootPreBootIDAnnotationKey: "boot-1",
@@ -553,6 +589,24 @@ var _ = Describe("Reboot Lifecycle", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeTrue())
 			Expect(recorder.Calls(events.RebootObserved)).To(Equal(1))
+		})
+
+		It("keeps a taint that another writer adds while it removes the fence", func() {
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionFalse}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			quarantine := corev1.Taint{Key: "example.com/quarantine", Effect: corev1.TaintEffectNoSchedule}
+			race := &nodeTaintRaceClient{Client: env.Client, taint: quarantine}
+			racing := reboot.NewController(env.Clock, race, cloudProvider, terminator.NewTerminator(env.Clock, race, queue, recorder), recorder)
+
+			// Adding the taint can make the first Node patch fail with a conflict, so reconcile again.
+			_, _ = racing.Reconcile(ctx, ExpectExists(ctx, env.Client, nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, racing, nodeClaim)
+
+			Expect(race.raced).To(BeTrue())
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(node.Spec.Taints).To(ContainElement(quarantine))
+			Expect(hasRebootTaint(node)).To(BeFalse())
 		})
 
 		It("records a success once when a stale cached NodeClaim is reconciled again", func() {
