@@ -174,6 +174,18 @@ var _ = Describe("Reboot Lifecycle", func() {
 	)
 
 	Context("RebootRequested", func() {
+		It("ignores a rebooting NodeClaim that the cloud provider doesn't manage", func() {
+			// Another Karpenter instance in the same cluster manages this NodeClaim.
+			nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{Group: "karpenter.test.sh", Kind: "UnmanagedNodeClass", Name: "default"}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			Expect(cloudProvider.RebootCalls).To(BeEmpty())
+			Expect(hasRebootTaint(ExpectExists(ctx, env.Client, node))).To(BeFalse())
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+			Expect(recorder.Events()).To(BeEmpty())
+		})
+
 		It("holds a drained reboot for minDrainTime before issuing, even when there is nothing to drain", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "1m"})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
