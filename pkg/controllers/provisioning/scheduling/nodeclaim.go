@@ -376,7 +376,7 @@ func (n *NodeClaim) offeringsToReserve(
 	// NodeClaim in this loop pessimistically holds it). Defer and retry next loop rather than falling back — this is
 	// what limits provisioning to one NodeClaim per loop when a pod is compatible with multiple reserved offerings.
 	if strict && reservedWithCapacity && len(reservedOfferings) == 0 {
-		return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+		return nil, NewReservedOfferingError(fmt.Errorf("waiting for compatible reserved capacity that other pods hold"))
 	}
 
 	// The only compatible option is a full reservation. Fail with a PLAIN error rather than creating a NodeClaim that

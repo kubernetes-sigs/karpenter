@@ -54,6 +54,48 @@ func (c *instanceTypesErrorCloudProvider) GetInstanceTypes(ctx context.Context, 
 	return c.CloudProvider.GetInstanceTypes(ctx, np)
 }
 
+// bindReservedOnlyAndFlexiblePods binds two pods that must move to separate nodes: one that only runs on reserved capacity
+// and one that can use any capacity type. The reserved-only one requests more CPU, so it takes a freed slot first.
+func bindReservedOnlyAndFlexiblePods(node *corev1.Node) (reservedOnly, flexible *corev1.Pod) {
+	rs := test.ReplicaSet()
+	ExpectApplied(ctx, env.Client, rs)
+	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+	bind := func(cpu string, nodeSelector map[string]string) *corev1.Pod {
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{"tf-spread": "x"},
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+				}},
+			},
+			NodeSelector:         nodeSelector,
+			ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu)}},
+			PodAntiRequirements: []corev1.PodAffinityTerm{{
+				TopologyKey:   corev1.LabelHostname,
+				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tf-spread": "x"}},
+			}},
+		})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		return pod
+	}
+	return bind("2", map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}), bind("1", nil)
+}
+
+// expectBlockedOnTerminateFirst expects each Blocked event to name the reserved-only pod as stopping replace-first and the
+// flexible pod as stopping terminate-first, since the strict check won't let it fall back to on-demand.
+func expectBlockedOnTerminateFirst(reservedOnly, flexible *corev1.Pod) {
+	GinkgoHelper()
+	messages := lo.FilterMap(recorder.Events(), func(e events.Event, _ int) (string, bool) {
+		return e.Message, e.Reason == events.DisruptionBlocked
+	})
+	Expect(messages).To(HaveEach(And(
+		HavePrefix(fmt.Sprintf("Not all pods would schedule, %s/%s => ", reservedOnly.Namespace, reservedOnly.Name)),
+		HaveSuffix(fmt.Sprintf(". If the node is terminated first, not all pods would schedule, %s/%s => waiting for compatible reserved capacity that other pods hold",
+			flexible.Namespace, flexible.Name)),
+	)))
+}
+
 // Terminate-First Disruption (RFC kubernetes-sigs/karpenter#3203) end-to-end. A voluntary disruption of a
 // capacity-constrained pool (a static NodePool at its replica count, or a reserved candidate whose reservation is
 // full) issues a delete-only command and lets reactive provisioning refill the freed slot, instead of the
@@ -676,6 +718,21 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 			Expect(cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
+		})
+
+		It("names the pod that stops terminate-first in the Blocked event", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
+			od := setupODFallbackNodePool()
+			ExpectApplied(ctx, env.Client, nodePool, od, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			reservedOnly, flexible := bindReservedOnlyAndFlexiblePods(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			expectBlockedOnTerminateFirst(reservedOnly, flexible)
 		})
 	})
 })
