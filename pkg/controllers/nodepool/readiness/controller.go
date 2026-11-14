@@ -93,7 +93,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 }
 
 func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.Object) {
-	ready := nodeClass.StatusConditions().Get(status.ConditionReady)
+	ready := nodeClass.StatusConditions(status.WithObservedOnly()).Get(status.ConditionReady)
 	if ready.IsUnknown() {
 		nodePool.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassReadinessUnknown", "Node Class Readiness Unknown")
 	} else if ready.IsFalse() {

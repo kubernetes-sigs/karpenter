@@ -33,6 +33,7 @@ import (
 	"k8s.io/client-go/transport/spdy"
 
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -293,7 +294,7 @@ func (env *Environment) ConsistentlyExpectDisruptionsUntilNoneLeft(nodesAtStart,
 		// Don't include NodeClaims with the `Terminating` status condition, as they're not included in budgets
 		removedProviderIDs := sets.Set[string]{}
 		nodeClaimList.Items = lo.Filter(nodeClaimList.Items, func(nc v1.NodeClaim, _ int) bool {
-			if !nc.StatusConditions().IsTrue(v1.ConditionTypeInstanceTerminating) {
+			if !nc.StatusConditions(status.WithObservedOnly()).IsTrue(v1.ConditionTypeInstanceTerminating) {
 				return true
 			}
 			removedProviderIDs.Insert(nc.Status.ProviderID)
@@ -332,7 +333,9 @@ func (env *Environment) EventuallyExpectLaunchedNodeClaimCount(comparator string
 	nodeClaimList := &v1.NodeClaimList{}
 	Eventually(func(g Gomega) {
 		g.Expect(env.Client.List(env, nodeClaimList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
-		g.Expect(lo.CountBy(nodeClaimList.Items, func(nc v1.NodeClaim) bool { return nc.StatusConditions().IsTrue(v1.ConditionTypeLaunched) })).To(BeNumerically(comparator, count),
+		g.Expect(lo.CountBy(nodeClaimList.Items, func(nc v1.NodeClaim) bool {
+			return nc.StatusConditions(status.WithObservedOnly()).IsTrue(v1.ConditionTypeLaunched)
+		})).To(BeNumerically(comparator, count),
 			fmt.Sprintf("expected %d nodeclaims, had %d (%v)", count, len(nodeClaimList.Items), NodeClaimNames(lo.ToSlicePtr(nodeClaimList.Items))))
 	}).Should(Succeed())
 	return lo.ToSlicePtr(nodeClaimList.Items)
@@ -343,7 +346,7 @@ func (env *Environment) EventuallyExpectConsolidatable(nodeClaims ...*v1.NodeCla
 	Eventually(func(g Gomega) {
 		for _, nc := range nodeClaims {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
-			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
+			g.Expect(nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 		}
 	}).Should(Succeed())
 }
@@ -945,7 +948,7 @@ func (env *Environment) EventuallyExpectNodeClaimsReady(nodeClaims ...*v1.NodeCl
 		for _, nc := range nodeClaims {
 			temp := &v1.NodeClaim{}
 			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(nc), temp)).Should(Succeed())
-			g.Expect(temp.StatusConditions().Root().IsTrue()).To(BeTrue())
+			g.Expect(temp.StatusConditions(status.WithObservedOnly()).Root().IsTrue()).To(BeTrue())
 		}
 	}).Should(Succeed())
 }
@@ -955,7 +958,7 @@ func (env *Environment) EventuallyExpectDrifted(nodeClaims ...*v1.NodeClaim) {
 	Eventually(func(g Gomega) {
 		for _, nc := range nodeClaims {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
-			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+			g.Expect(nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		}
 	}).Should(Succeed())
 }
@@ -1138,7 +1141,7 @@ func (env *Environment) ConsistentlyExpectNodeClaimsNotDrifted(duration time.Dur
 	Consistently(func(g Gomega) {
 		for _, nc := range nodeClaims {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
-			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
+			g.Expect(nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDrifted)).To(BeNil())
 		}
 	}, duration).Should(Succeed())
 }
@@ -1159,7 +1162,7 @@ func (env *Environment) EventuallyExpectEmpty(nodeClaims ...*v1.NodeClaim) {
 	Eventually(func(g Gomega) {
 		for _, nc := range nodeClaims {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
-			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
+			g.Expect(nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 		}
 	}).Should(Succeed())
 }

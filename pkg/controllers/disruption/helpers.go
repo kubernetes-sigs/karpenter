@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -386,7 +387,7 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason
 		// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
 		// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
 		// on the underlying cloud provider machine.
-		if node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+		if node.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
 			continue
 		}
 
