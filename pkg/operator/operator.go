@@ -61,6 +61,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/cachefields"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -144,6 +145,7 @@ type Operator struct {
 type Options struct {
 	LeaderElectionLabels map[string]string
 	LeaderElectionConfig *rest.Config // Optional separate config for leader election
+	CacheFieldsRead      []cachefields.Field
 }
 
 // Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
@@ -157,6 +159,14 @@ func WithLeaderElectionLabels(labels map[string]string) option.Function[Options]
 func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
 	return func(opts *Options) {
 		opts.LeaderElectionConfig = config
+	}
+}
+
+// WithCacheFieldsRead keeps fields the cloud provider reads in cached objects. Karpenter strips the fields in
+// cachefields.Stripped from cached objects, and cloud providers share the operator's cache.
+func WithCacheFieldsRead(fields ...cachefields.Field) option.Function[Options] {
+	return func(opts *Options) {
+		opts.CacheFieldsRead = append(opts.CacheFieldsRead, fields...)
 	}
 }
 
@@ -234,11 +244,6 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 				&coordinationv1.Lease{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
 				},
-				// Services are only read for their spec.selector (to deduce default topology spread selectors), so
-				// drop managedFields before they're stored. This is roughly a quarter to a third of each cached Service.
-				&corev1.Service{}: {
-					Transform: cache.TransformStripManagedFields(),
-				},
 			},
 		},
 		Controller: ctrlconfig.Controller{
@@ -248,6 +253,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			EnableWarmup: new(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
 		},
 	}
+	lo.Must0(cachefields.SetTransforms(&mgrOpts.Cache, opts.CacheFieldsRead...), "failed to set cache transforms")
 	if options.FromContext(ctx).EnableProfiling {
 		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
 		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
