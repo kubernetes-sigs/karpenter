@@ -768,6 +768,9 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 
 func (c *Cluster) cleanupNodeClaim(name string) {
 	if id := c.nodeClaimNameToProviderID[name]; id != "" {
+		if _, ok := c.nodes[id]; !ok {
+			panic(fmt.Sprintf("no state node for NodeClaim %q with providerID %q, multiple NodeClaims likely share this providerID", name, id))
+		}
 		if c.nodes[id].Node == nil {
 			c.updateNodePoolResources(c.nodes[id], nil)
 			delete(c.nodes, id)
@@ -823,6 +826,9 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 
 func (c *Cluster) cleanupNode(name string) {
 	if id := c.nodeNameToProviderID[name]; id != "" {
+		if _, ok := c.nodes[id]; !ok {
+			panic(fmt.Sprintf("no state node for Node %q with providerID %q, multiple Nodes likely share this providerID", name, id))
+		}
 		if c.nodes[id].NodeClaim == nil {
 			c.updateNodePoolResources(c.nodes[id], nil)
 			delete(c.nodes, id)
