@@ -267,6 +267,9 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 		}
 
 		availableOfferings := it.Offerings.Available().Compatible(requirements)
+		if len(availableOfferings) == 0 {
+			continue
+		}
 
 		offeringsByPrice := lo.GroupBy(availableOfferings, func(of *cloudprovider.Offering) float64 { return of.Price })
 		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
@@ -274,6 +277,9 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			cheapestOffering = lo.Sample(offeringsByPrice[minOfferingPrice])
 			instanceType = it
 		}
+	}
+	if instanceType == nil || cheapestOffering == nil {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no available offerings for the requested instance types"))
 	}
 
 	return &corev1.Node{

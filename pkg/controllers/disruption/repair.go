@@ -287,7 +287,7 @@ func (r *Repair) commitReboot(ctx context.Context, candidate *Candidate) (bool, 
 		// A previous reboot may have left a bound behind.
 		delete(nodeClaim.Annotations, v1.RebootTerminationGracePeriodAnnotationKey)
 	}
-	if !equality.Semantic.DeepEqual(stored.Annotations, nodeClaim.Annotations) {
+	if !equality.Semantic.DeepEqual(stored.Annotations, nodeClaim.Annotations) { //nolint:nilaway // DeepCopy of a non-nil object is non-nil
 		if err := r.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return false, err
 		}

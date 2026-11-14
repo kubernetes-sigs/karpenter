@@ -175,7 +175,7 @@ func (n *ExistingNode) tryVolumeAlternative(pod *v1.Pod, podData *PodData, baseR
 func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes, allocationResult *dynamicresources.AllocationResult) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
-	resources.SubtractFrom(n.remainingResources, podData.Requests)
+	resources.SubtractFrom(n.remainingResources, podData.Requests) //nolint:nilaway // Solve caches pod data for every pod before scheduling it
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
 	n.HostPortUsage().Add(pod, scheduling.GetHostPorts(pod))

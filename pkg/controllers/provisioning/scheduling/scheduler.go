@@ -625,12 +625,12 @@ func (s *Scheduler) updateCachedPodData(ctx context.Context, p *corev1.Pod) {
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Check if pod has DRA requirements - if so, return DRA error when IgnoreDRARequests is enabled
-	if s.cachedPodData[pod.UID].HasResourceClaimRequests && karpopts.FromContext(ctx).IgnoreDRARequests {
+	if s.cachedPodData[pod.UID].HasResourceClaimRequests && karpopts.FromContext(ctx).IgnoreDRARequests { //nolint:nilaway // Solve caches pod data for every pod before scheduling it
 		return NewDRAError(fmt.Errorf("pod has Dynamic Resource Allocation requirements that are not yet supported by Karpenter"))
 	}
 	// If the pod's ResourceClaims couldn't be resolved (e.g. a referenced claim hasn't been created yet), no candidate
 	// can satisfy it. Surface the error directly so the pod is deferred and retried once the claim exists.
-	if err := s.cachedPodData[pod.UID].ResourceClaimErr; err != nil {
+	if err := s.cachedPodData[pod.UID].ResourceClaimErr; err != nil { //nolint:nilaway // Solve caches pod data for every pod before scheduling it
 		return err
 	}
 
@@ -905,13 +905,13 @@ func (s *Scheduler) sortExistingNodes() {
 // specific zone name if exactly one zone, "flexible" if multiple zones, "none" if no intersection.
 func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 	podData := s.cachedPodData[pod.UID]
-	tscZoneValidDomains, satisfiable := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements)
+	tscZoneValidDomains, satisfiable := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements) //nolint:nilaway // Solve caches pod data for every pod before scheduling it
 	if !satisfiable {
 		return "none"
 	}
 
-	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone)
-	volZoneReq := volumeZoneReq(podData.VolumeRequirements)
+	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone) //nolint:nilaway // Solve caches pod data for every pod before scheduling it
+	volZoneReq := volumeZoneReq(podData.VolumeRequirements)             //nolint:nilaway // Solve caches pod data for every pod before scheduling it
 
 	var zonalValues []string
 	if zoneReq.Operator() == corev1.NodeSelectorOpIn {
