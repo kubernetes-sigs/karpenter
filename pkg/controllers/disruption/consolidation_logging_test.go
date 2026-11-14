@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"errors"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -58,34 +59,44 @@ var _ = Describe("getValidationFailureReason", func() {
 				expected: "unknown",
 			},
 			{
-				name:     "budget error - nominated",
-				err:      NewBudgetValidationError(errors.New("a candidate was nominated during validation")),
+				name:     "nominated failure keeps the budget event reason",
+				err:      NewValidationError(ValidationFailureReasonNominated, errors.New("a candidate was nominated during validation")),
 				expected: "budget",
 			},
 			{
-				name:     "budget error - budget",
-				err:      NewBudgetValidationError(errors.New("can no longer be disrupted without violating budgets")),
+				name:     "budget failure",
+				err:      NewValidationError(ValidationFailureReasonBudget, errors.New("can no longer be disrupted without violating budgets")),
 				expected: "budget",
 			},
 			{
-				name:     "scheduling error",
-				err:      NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+				name:     "unschedulable failure keeps the scheduling event reason",
+				err:      NewValidationError(ValidationFailureReasonUnschedulable, errors.New("pods failed to schedule")),
 				expected: "scheduling",
 			},
 			{
-				name:     "churn error - no longer valid",
-				err:      NewChurnValidationError(errors.New("candidates are no longer valid")),
-				expected: "churn",
+				name:     "no new nodeclaim failure keeps the scheduling event reason",
+				err:      NewValidationError(ValidationFailureReasonNoNewNodeClaim, errors.New("pods fit on existing capacity")),
+				expected: "scheduling",
 			},
 			{
-				name:     "churn error - churn",
-				err:      NewChurnValidationError(errors.New("pod churn detected")),
-				expected: "churn",
+				name:     "multiple nodeclaims failure keeps the scheduling event reason",
+				err:      NewValidationError(ValidationFailureReasonMultipleNodeClaims, errors.New("multiple nodeclaims are required")),
+				expected: "scheduling",
 			},
 			{
-				name:     "generic validation error",
-				err:      NewValidationError(errors.New("something unexpected")),
-				expected: "unknown",
+				name:     "unexpected replacement failure keeps the scheduling event reason",
+				err:      NewValidationError(ValidationFailureReasonUnexpectedReplacement, errors.New("a new nodeclaim is required")),
+				expected: "scheduling",
+			},
+			{
+				name:     "instance types failure keeps the scheduling event reason",
+				err:      NewValidationError(ValidationFailureReasonInstanceTypesNotSubset, errors.New("instance types are no longer a subset")),
+				expected: "scheduling",
+			},
+			{
+				name:     "churn failure",
+				err:      NewValidationError(ValidationFailureReasonChurn, errors.New("candidates are no longer valid")),
+				expected: "churn",
 			},
 		}
 
@@ -94,6 +105,55 @@ var _ = Describe("getValidationFailureReason", func() {
 			result := getValidationFailureReason(tt.err)
 			Expect(result).To(Equal(tt.expected), tt.name)
 		}
+	})
+})
+
+var _ = Describe("validationFailureReason", func() {
+	It("extracts the failure reason from validation errors", func() {
+		tests := []struct {
+			name     string
+			err      error
+			expected string
+		}{
+			{
+				name:     "nil error",
+				err:      nil,
+				expected: "",
+			},
+			{
+				name:     "non-validation error",
+				err:      errors.New("some other error"),
+				expected: "",
+			},
+			{
+				name:     "churn error",
+				err:      NewValidationError(ValidationFailureReasonChurn, errors.New("candidates are no longer valid")),
+				expected: string(ValidationFailureReasonChurn),
+			},
+			{
+				name:     "nominated error",
+				err:      NewValidationError(ValidationFailureReasonNominated, errors.New("a candidate was nominated during validation")),
+				expected: string(ValidationFailureReasonNominated),
+			},
+			{
+				name:     "wrapped scheduling error",
+				err:      fmt.Errorf("validating command, %w", NewValidationError(ValidationFailureReasonInstanceTypesNotSubset, errors.New("scheduling simulation produced new results"))),
+				expected: string(ValidationFailureReasonInstanceTypesNotSubset),
+			},
+		}
+
+		for _, tt := range tests {
+			By(tt.name)
+			Expect(validationFailureReason(tt.err)).To(Equal(tt.expected), tt.name)
+		}
+	})
+})
+
+var _ = Describe("ValidationError category", func() {
+	It("maps a wrapped reason to its event category", func() {
+		err := fmt.Errorf("validating command, %w", NewValidationError(ValidationFailureReasonMultipleNodeClaims, errors.New("scheduling simulation produced new results")))
+		Expect(IsValidationError(err)).To(BeTrue())
+		Expect(getValidationFailureReason(err)).To(Equal("scheduling"))
 	})
 })
 

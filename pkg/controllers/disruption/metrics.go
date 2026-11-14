@@ -31,6 +31,21 @@ const (
 	CandidatesIneligible         = "candidates_ineligible"
 	policyLabel                  = "policy"
 	terminateFirstReasonLabel    = "terminate_first_reason"
+	FailureReasonLabel           = "failure_reason"
+)
+
+// ValidationFailureReason is why a disruption command was discarded during validation.
+type ValidationFailureReason string
+
+const (
+	ValidationFailureReasonChurn                  ValidationFailureReason = "churn"
+	ValidationFailureReasonNominated              ValidationFailureReason = "nominated"
+	ValidationFailureReasonBudget                 ValidationFailureReason = "budget"
+	ValidationFailureReasonUnschedulable          ValidationFailureReason = "unschedulable"
+	ValidationFailureReasonNoNewNodeClaim         ValidationFailureReason = "no_new_nodeclaim"
+	ValidationFailureReasonMultipleNodeClaims     ValidationFailureReason = "multiple_nodeclaims"
+	ValidationFailureReasonUnexpectedReplacement  ValidationFailureReason = "unexpected_replacement"
+	ValidationFailureReasonInstanceTypesNotSubset ValidationFailureReason = "instance_types_not_subset"
 )
 
 var (
@@ -114,6 +129,44 @@ var (
 			{
 				Name: string(TerminateFirstStaticAtLimit),
 				Help: "The node's static NodePool is at its node limit, so the replacement can't launch alongside it.",
+			},
+		},
+	}
+	ValidationFailureReasonDim = opmetrics.Label{
+		Name: FailureReasonLabel,
+		Help: "Why a disruption command was discarded during validation.",
+		Values: []opmetrics.Value{
+			{
+				Name: string(ValidationFailureReasonChurn),
+				Help: "A candidate was no longer a valid disruption candidate when re-checked.",
+			},
+			{
+				Name: string(ValidationFailureReasonNominated),
+				Help: "A pod was nominated to schedule onto a candidate.",
+			},
+			{
+				Name: string(ValidationFailureReasonBudget),
+				Help: "Disrupting a candidate would no longer fit within its NodePool's disruption budget.",
+			},
+			{
+				Name: string(ValidationFailureReasonUnschedulable),
+				Help: "The re-run scheduling simulation could not place all of the candidates' pods.",
+			},
+			{
+				Name: string(ValidationFailureReasonNoNewNodeClaim),
+				Help: "The command expected a replacement, but the re-run scheduling simulation placed all pods on existing capacity.",
+			},
+			{
+				Name: string(ValidationFailureReasonMultipleNodeClaims),
+				Help: "The re-run scheduling simulation required more than one new NodeClaim.",
+			},
+			{
+				Name: string(ValidationFailureReasonUnexpectedReplacement),
+				Help: "The command expected no replacement, but the re-run scheduling simulation required a new NodeClaim.",
+			},
+			{
+				Name: string(ValidationFailureReasonInstanceTypesNotSubset),
+				Help: "The command's replacement instance types were no longer a subset of those the re-run scheduling simulation allows.",
 			},
 		},
 	}
@@ -202,9 +255,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "failed_validations_total",
-			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type.",
+			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type and failure reason.",
 		},
-		[]opmetrics.Label{ConsolidationType},
+		[]opmetrics.Label{ConsolidationType, ValidationFailureReasonDim},
 		opmetrics.Alpha,
 	)
 	NodePoolAllowedDisruptions = opmetrics.NewPrometheusGauge(
