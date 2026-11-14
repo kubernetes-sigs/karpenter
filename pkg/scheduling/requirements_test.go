@@ -540,6 +540,33 @@ var _ = Describe("Requirements", func() {
 			Expect(lessThan9.Compatible(lessThan1)).To(Succeed())
 			Expect(lessThan9.Compatible(lessThan9)).To(Succeed())
 		})
+		DescribeTable("should keep the label required when Exists, Gt, or Lt is intersected with NotIn",
+			func(mustExist corev1.NodeSelectorRequirement) {
+				notIn3 := corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"3"}}
+				acrossPods := NewNodeSelectorRequirements(mustExist)
+				acrossPods.Add(NewNodeSelectorRequirements(notIn3).Values()...)
+				for _, incoming := range []Requirements{
+					// within one pod
+					NewNodeSelectorRequirements(mustExist, notIn3),
+					NewNodeSelectorRequirements(notIn3, mustExist),
+					// across pods sharing a NodeClaim
+					acrossPods,
+				} {
+					Expect(NewRequirements().Compatible(incoming)).ToNot(Succeed())
+					Expect(NewRequirements(NewRequirement("key", corev1.NodeSelectorOpDoesNotExist)).Compatible(incoming)).ToNot(Succeed())
+					Expect(NewRequirements(NewRequirement("key", corev1.NodeSelectorOpIn, "3")).Compatible(incoming)).ToNot(Succeed())
+					Expect(NewRequirements(NewRequirement("key", corev1.NodeSelectorOpIn, "5")).Compatible(incoming)).To(Succeed())
+					// the existing side must exist too
+					Expect(incoming.Intersects(NewRequirements(NewRequirement("key", corev1.NodeSelectorOpDoesNotExist)))).ToNot(Succeed())
+				}
+				// NotIn alone still allows the label to be absent
+				Expect(NewRequirements().Compatible(NewNodeSelectorRequirements(notIn3))).To(Succeed())
+				Expect(NewRequirements(NewRequirement("key", corev1.NodeSelectorOpDoesNotExist)).Compatible(NewNodeSelectorRequirements(notIn3))).To(Succeed())
+			},
+			Entry("Exists", corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpExists}),
+			Entry("Gt", corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}),
+			Entry("Lt", corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}}),
+		)
 	})
 	Context("Error Messages", func() {
 		DescribeTable("should detect well known label truncations", func(badLabel, expectedError string) {
@@ -682,6 +709,18 @@ var _ = Describe("Requirements", func() {
 				v1.NodeSelectorRequirementWithMinValues{Key: "cpu", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}},
 			))
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(2))
+		})
+		It("should return both Exists and NotIn requirements when the label must exist", func() {
+			reqs := NewRequirements(
+				NewRequirementWithFlexibility("key", corev1.NodeSelectorOpExists, new(2)),
+				NewRequirement("key", corev1.NodeSelectorOpNotIn, "A"),
+			)
+			Expect(reqs.NodeSelectorRequirements()).To(ConsistOf(
+				v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpExists, MinValues: new(2)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}, MinValues: new(2)},
+			))
+			// the label stays required after a round trip
+			Expect(NewRequirements().Compatible(NewNodeSelectorRequirementsWithMinValues(reqs.NodeSelectorRequirements()...))).ToNot(Succeed())
 		})
 	})
 	Context("Stringify Requirements", func() {
