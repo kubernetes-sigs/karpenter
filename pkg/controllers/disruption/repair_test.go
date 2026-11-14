@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
@@ -1185,6 +1186,24 @@ var _ = Describe("Repair", func() {
 		commands, err := failingRepair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
 		Expect(commands).To(BeEmpty())
 		Expect(err).To(MatchError(ContainSubstring(injectedErr.Error())))
+	})
+
+	// Karpenter's logger turns an error's structured values into log fields, so the reason must be under the "reason" key.
+	It("should put the method's reason under the reason key when disruption fails", func() {
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+		injectedErr := errors.New("injected pending pod list failure")
+		failingClient := &podListErrorClient{Client: env.Client, err: injectedErr}
+		failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock,
+			deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient), store)
+		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, failingClient, failingProvisioner, cloudProvider, recorder, queue))
+		failingController := disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+			disruption.WithMethods(failingRepair))
+
+		err := ExpectSingletonReconcileFailed(ctx, failingController)
+		Expect(err).To(MatchError(ContainSubstring(injectedErr.Error())))
+		Expect(lo.Chunk(serrors.UnwrapValues(err), 2)).To(ContainElement([]any{"reason", "unhealthy"}))
 	})
 
 	It("should explicitly exclude standalone NodeClaims that have no safe replacement template", func() {
