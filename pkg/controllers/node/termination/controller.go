@@ -21,16 +21,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -69,16 +68,30 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 	terminator    *terminator.Terminator
 	recorder      events.Recorder
+	retryConfig   utilscontroller.RetryConfig
+}
+
+type ControllerOptions struct {
+	retryConfig utilscontroller.RetryConfig
+}
+
+// WithRetryConfig overrides failed-reconciliation retry settings.
+func WithRetryConfig(config utilscontroller.RetryConfig) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.retryConfig = config
+	}
 }
 
 // NewController constructs a controller instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder, opts ...option.Function[ControllerOptions]) *Controller {
+	o := option.Resolve(opts...)
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
 		recorder:      recorder,
+		retryConfig:   o.retryConfig,
 	}
 }
 
@@ -409,16 +422,21 @@ func (c *Controller) Name() string {
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
+	rateLimiter, err := c.retryConfig.NewRateLimiter(utilscontroller.RetryConfig{
+		InitialDelay: 100 * time.Millisecond,
+		MaxDelay:     10 * time.Second,
+		QPS:          float64(qps),
+		Burst:        bucketSize,
+	})
+	if err != nil {
+		return err
+	}
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(
 			controller.Options{
-				RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
-					workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](100*time.Millisecond, 10*time.Second),
-					// qps scales linearly at 10% of concurrentReconciles, bucket size is 10 * qps
-					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(qps), bucketSize)},
-				),
+				RateLimiter:             rateLimiter,
 				MaxConcurrentReconciles: maxConcurrentReconciles,
 			},
 		).

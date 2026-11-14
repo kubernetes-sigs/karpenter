@@ -73,11 +73,28 @@ import (
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
 type ControllerOptions struct {
 	registrationHooks   []cloudprovider.NodeLifecycleHook
 	enableVPAPrediction bool
+	retryConfiguration  RetryConfiguration
+}
+
+// RetryConfiguration contains optional per-controller retry overrides.
+// Omitted fields retain each controller's existing defaults.
+type RetryConfiguration struct {
+	NodeClaimLifecycle utilscontroller.RetryConfig
+	NodeTermination    utilscontroller.RetryConfig
+}
+
+// WithRetryConfig configures failed-reconciliation retries. These settings
+// do not enforce cloud-operation cooldowns or limit all cloud API requests.
+func WithRetryConfig(config RetryConfiguration) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.retryConfiguration = config
+	}
 }
 
 // WithVPAPrediction enables the VPA prediction controller as the prediction source.
@@ -139,14 +156,14 @@ func NewControllers(
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
 		statenodeclaimgc.NewController(kubeClient, cluster),
-		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
+		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder, termination.WithRetryConfig(o.retryConfiguration.NodeTermination)),
 		nodepoolreadiness.NewController(clock, kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(clock, kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
 		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, cluster, npState, o.registrationHooks),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, cluster, npState, o.registrationHooks, nodeclaimlifecycle.WithRetryConfig(o.retryConfiguration.NodeClaimLifecycle)),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),

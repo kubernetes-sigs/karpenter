@@ -21,15 +21,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
 	"go.uber.org/multierr"
-	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -71,6 +70,7 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 	recorder      events.Recorder
 	nodePoolState *nodepoolhealth.State
+	retryConfig   utilscontroller.RetryConfig
 
 	launch         *Launch
 	registration   *Registration
@@ -78,13 +78,26 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook) *Controller {
+type ControllerOptions struct {
+	retryConfig utilscontroller.RetryConfig
+}
+
+// WithRetryConfig overrides failed-reconciliation retry settings.
+func WithRetryConfig(config utilscontroller.RetryConfig) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.retryConfig = config
+	}
+}
+
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook, opts ...option.Function[ControllerOptions]) *Controller {
+	o := option.Resolve(opts...)
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
 		nodePoolState: nodePoolState,
+		retryConfig:   o.retryConfig,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cluster: cluster, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
 		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks, clock: clk},
@@ -97,6 +110,16 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	// higher concurrency limit since we want fast reaction to node syncing and launch
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
+	rateLimiter, err := c.retryConfig.NewRateLimiter(utilscontroller.RetryConfig{
+		// Back off until the last attempt occurs ~90 seconds before NodeClaim expiration.
+		InitialDelay: time.Second,
+		MaxDelay:     time.Minute,
+		QPS:          float64(qps),
+		Burst:        bucketSize,
+	})
+	if err != nil {
+		return err
+	}
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -114,12 +137,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	}
 	return b.
 		WithOptions(controller.Options{
-			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
-				// back off until last attempt occurs ~90 seconds before nodeclaim expiration
-				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](time.Second, time.Minute),
-				// qps scales linearly at 1% of concurrentReconciles, bucket size is 10 * qps
-				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(qps), bucketSize)},
-			),
+			RateLimiter:             rateLimiter,
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
