@@ -19,10 +19,12 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"iter"
 	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -342,7 +344,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 // The disrupting count is reason-dependent, so pass the same reason on to
 // MustGetAllowedDisruptions or NodePoolBudgetMap.
 func NodePoolStats(cluster *state.Cluster, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
-	return NodePoolStatsFromNodes(cluster.DeepCopyNodes(), reason)
+	return NodePoolStatsFromNodes(cluster.Nodes(), reason)
 }
 
 func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[string]*v1.NodePool, numNodes, disrupting map[string]int, reason v1.DisruptionReason) map[string]int {
@@ -364,11 +366,12 @@ func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[strin
 	return out
 }
 
-// NodePoolStats against a snapshot the caller already holds.
-func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
+// NodePoolStatsFromNodes counts nodes per NodePool. NodePoolStats passes cluster.Nodes(), which yields live nodes
+// under the cluster read lock, so the loop must only read them and must not call back into the Cluster.
+func NodePoolStatsFromNodes(nodes iter.Seq[*state.StateNode], reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
 	numNodes = map[string]int{}
 	disrupting = map[string]int{}
-	for _, node := range nodes {
+	for node := range nodes {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.
@@ -386,7 +389,7 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason
 		// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
 		// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
 		// on the underlying cloud provider machine.
-		if node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+		if node.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
 			continue
 		}
 
