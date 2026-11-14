@@ -18,8 +18,11 @@ package validation
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/status"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/clock"
@@ -32,6 +35,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
@@ -41,14 +45,16 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
+	recorder      events.Recorder
 }
 
 // NewController is a constructor
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		clock:         clk,
+		recorder:      recorder,
 	}
 }
 
@@ -67,6 +73,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	} else {
 		nodePool.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeValidationSucceeded)
 	}
+	c.warnOnShortBudgetWindows(nodePool)
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
@@ -79,6 +86,25 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		}
 	}
 	return reconcile.Result{}, nil
+}
+
+func (c *Controller) warnOnShortBudgetWindows(nodePool *v1.NodePool) {
+	tgp := nodePool.Spec.Template.Spec.TerminationGracePeriod
+	if tgp == nil {
+		return
+	}
+	for _, budget := range nodePool.Spec.Disruption.Budgets {
+		if budget.Schedule == nil || budget.Duration == nil || budget.Duration.Duration >= tgp.Duration || strings.TrimSuffix(budget.Nodes, "%") == "0" {
+			continue
+		}
+		c.recorder.Publish(events.Event{
+			InvolvedObject: nodePool,
+			Type:           corev1.EventTypeWarning,
+			Reason:         events.BudgetWindowShorterThanTerminationGracePeriod,
+			Message:        fmt.Sprintf("Budget with schedule %q and duration %s is shorter than terminationGracePeriod %s, so nodes disrupted in the window can keep draining after it ends", *budget.Schedule, budget.Duration.Duration, tgp.Duration),
+			DedupeValues:   []string{string(nodePool.UID), *budget.Schedule, budget.Duration.Duration.String()},
+		})
+	}
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
