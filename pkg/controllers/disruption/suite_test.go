@@ -208,6 +208,7 @@ var _ = AfterEach(func() {
 	disruption.NodepoolDecisionsPerformed.Reset()
 	disruption.TerminateFirstDecisionsTotal.Reset()
 	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
+	disruption.EvaluationDurationSeconds.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -2251,6 +2252,17 @@ var _ = Describe("Metrics", func() {
 			"decision":            "delete",
 			metrics.ReasonLabel:   "empty",
 			"consolidation_type":  "empty",
+		})
+	})
+	It("should fire EvaluationDurationSeconds when the empty-consolidation method runs", func() {
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+		ExpectSingletonReconciled(ctx, disruptionController)
+		// Emptiness succeeds first and short-circuits the method loop, so only its label set is observed.
+		ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_decision_evaluation_duration_seconds", 1, map[string]string{
+			metrics.ReasonLabel:  "empty",
+			"consolidation_type": "empty",
 		})
 	})
 	It("should fire metrics for multi-node delete disruption", func() {
