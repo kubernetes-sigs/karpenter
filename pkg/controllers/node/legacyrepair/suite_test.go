@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/legacyrepair"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -70,6 +71,14 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
+// nodeClaimTerminationWarnings returns the messages of TerminationGracePeriodExpiring events published on NodeClaims.
+func nodeClaimTerminationWarnings() []string {
+	return lo.FilterMap(recorder.Events(), func(e events.Event, _ int) (string, bool) {
+		_, onNodeClaim := e.InvolvedObject.(*v1.NodeClaim)
+		return e.Message, e.Reason == events.TerminationGracePeriodExpiring && onNodeClaim
+	})
+}
+
 var _ = Describe("Node Health", func() {
 	var node *corev1.Node
 	var nodeClaim *v1.NodeClaim
@@ -78,6 +87,7 @@ var _ = Describe("Node Health", func() {
 	BeforeEach(func() {
 		env.Clock.SetTime(time.Now())
 		cloudProvider.Reset()
+		recorder.Reset()
 		healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
 
 		nodePool = test.NodePool()
@@ -191,7 +201,9 @@ var _ = Describe("Node Health", func() {
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Format(time.RFC3339)))
+			deadline := env.Clock.Now().Format(time.RFC3339)
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, deadline))
+			Expect(nodeClaimTerminationWarnings()).To(ConsistOf("All pods will be deleted by " + deadline))
 		})
 		It("should not respect termination grace period if set on the nodepool", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: env.Clock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
@@ -225,6 +237,7 @@ var _ = Describe("Node Health", func() {
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime))
+			Expect(nodeClaimTerminationWarnings()).To(BeEmpty())
 		})
 		It("should return the requeue interval for the condition closest to its terminationDuration", func() {
 			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{

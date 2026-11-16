@@ -67,14 +67,18 @@ func PatchTerminationTimestampAnnotation(ctx context.Context, kubeClient client.
 }
 
 // TightenTerminationTimestampAnnotation sets the termination timestamp annotation to terminationTime unless the
-// NodeClaim already has an earlier one, so a deadline can be tightened but never extended.
-func TightenTerminationTimestampAnnotation(ctx context.Context, kubeClient client.Client, nodeClaim *v1.NodeClaim, terminationTime time.Time) error {
+// NodeClaim already has an earlier one, so a deadline can be tightened but never extended. It reports whether it
+// wrote the annotation, so callers can warn about the new deadline.
+func TightenTerminationTimestampAnnotation(ctx context.Context, kubeClient client.Client, nodeClaim *v1.NodeClaim, terminationTime time.Time) (bool, error) {
 	if value, ok := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
 		if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(terminationTime) {
-			return nil
+			return false, nil
 		}
 	}
-	return PatchTerminationTimestampAnnotation(ctx, kubeClient, nodeClaim, terminationTime)
+	if err := PatchTerminationTimestampAnnotation(ctx, kubeClient, nodeClaim, terminationTime); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // IsManagedPredicateFuncs is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.

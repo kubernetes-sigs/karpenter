@@ -978,6 +978,30 @@ var _ = Describe("Repair", func() {
 			HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Add(5*time.Minute).Format(time.RFC3339)))
 	})
 
+	// The NodeClaim lifecycle controller only warns about deadlines it stamps, so the queue must warn about repair's.
+	It("should warn on the NodeClaim when it stamps a termination deadline", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: new(5 * time.Minute), Action: cloudprovider.ReplaceNode},
+		})
+		newRepairController()
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer") // survive Delete so we can read the stamp
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		deadline := env.Clock.Now().Add(5 * time.Minute).Format(time.RFC3339)
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, deadline))
+		warnings := lo.FilterMap(recorder.Events(), func(e karpenterevents.Event, _ int) (string, bool) {
+			_, onNodeClaim := e.InvolvedObject.(*v1.NodeClaim)
+			return e.Message, e.Reason == karpenterevents.TerminationGracePeriodExpiring && onNodeClaim
+		})
+		Expect(warnings).To(ConsistOf("All pods will be deleted by " + deadline))
+	})
+
 	It("should act on and meter the highest-priority eligible condition", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
 			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, TerminationGracePeriod: lo.ToPtr(15 * time.Minute), Action: cloudprovider.ReplaceNode},
