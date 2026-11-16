@@ -50,6 +50,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -278,8 +279,13 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 				if err := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(cmd.Candidates[i].NodeClaim), stored); err != nil {
 					return client.IgnoreNotFound(err)
 				}
-				if err := nodeclaimutils.TightenTerminationTimestampAnnotation(ctx, q.kubeClient, stored, deadline); err != nil {
+				stamped, err := nodeclaimutils.TightenTerminationTimestampAnnotation(ctx, q.kubeClient, stored, deadline)
+				if err != nil {
 					return err
+				}
+				// The lifecycle controller only warns about deadlines it stamps itself, so warn about this one here.
+				if stamped {
+					q.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(stored, deadline.Format(time.RFC3339)))
 				}
 				cmd.Candidates[i].NodeClaim = stored
 				return nil
