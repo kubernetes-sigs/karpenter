@@ -24,7 +24,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [Clever Cloud](https://github.com/CleverCloud/karpenter-provider-clever-cloud)
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [Exoscale](https://github.com/exoscale/karpenter-provider-exoscale/)
-- [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
+- [GCP](https://github.com/karpenter-gcp/karpenter-provider-gcp)
 - [Hetzner](https://github.com/paperclipinc/karpenter-provider-hetzner)
 - [Huawei Cloud](https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei)
 - [IBM Cloud](https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud)
