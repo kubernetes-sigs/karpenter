@@ -1774,7 +1774,8 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					}),
 					fake.WithOfferings(cloudprovider.Offering{
-						Available: true,
+						Available:  true,
+						Compatible: true,
 						Requirements: pscheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 							corev1.LabelTopologyZone: "test-zone-1a",
@@ -1788,7 +1789,8 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceMemory: resource.MustParse("1Gi"),
 					}),
 					fake.WithOfferings(cloudprovider.Offering{
-						Available: true,
+						Available:  true,
+						Compatible: true,
 						Requirements: pscheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 							corev1.LabelTopologyZone: "test-zone-1a",
@@ -1802,7 +1804,8 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
 					}),
 					fake.WithOfferings(cloudprovider.Offering{
-						Available: true,
+						Available:  true,
+						Compatible: true,
 						Requirements: pscheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 							corev1.LabelTopologyZone: "test-zone-1a",
@@ -4974,6 +4977,7 @@ var _ = Context("Scheduling", func() {
 				it.Offerings = append(it.Offerings, &cloudprovider.Offering{
 					ReservationCapacity: 1,
 					Available:           true,
+					Compatible:          true,
 					Requirements: pscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
 						corev1.LabelTopologyZone:    "test-zone-1",
@@ -5111,6 +5115,7 @@ var _ = Context("Scheduling", func() {
 			distinctInstanceType.Offerings = append(distinctInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 1,
 				Available:           true,
+				Compatible:          true,
 				Requirements: pscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
 					corev1.LabelTopologyZone:    "test-zone-1",
@@ -5170,6 +5175,7 @@ var _ = Context("Scheduling", func() {
 			targetInstanceType.Offerings = append(targetInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 2,
 				Available:           true,
+				Compatible:          true,
 				Requirements: pscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
 					corev1.LabelTopologyZone:    "test-zone-1",
@@ -5269,6 +5275,7 @@ var _ = Context("Scheduling", func() {
 			targetInstanceType.Offerings = append(targetInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 1,
 				Available:           true,
+				Compatible:          true,
 				Requirements: pscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
 					corev1.LabelTopologyZone:    "test-zone-1",
@@ -5348,6 +5355,7 @@ var _ = Context("Scheduling", func() {
 			distinctInstanceType.Offerings = append(distinctInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 1,
 				Available:           true,
+				Compatible:          true,
 				Requirements: pscheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
 					corev1.LabelTopologyZone:    "test-zone-1",
@@ -5806,6 +5814,7 @@ var _ = Context("Scheduling", func() {
 			for _, o := range baseOfferings {
 				overrideOffering := &cloudprovider.Offering{
 					Available:        o.Available,
+					Compatible:       true,
 					Requirements:     o.Requirements,
 					Price:            o.Price,
 					CapacityOverride: corev1.ResourceList{extendedResource: resource.MustParse("4")},
@@ -5849,7 +5858,8 @@ var _ = Context("Scheduling", func() {
 			copy(baseOfferings, overrideInstanceType.Offerings)
 			for _, o := range baseOfferings {
 				overrideInstanceType.Offerings = append(overrideInstanceType.Offerings, &cloudprovider.Offering{
-					Available:        false, // unavailable!
+					Available:        false,
+					Compatible:       true, // unavailable!
 					Requirements:     o.Requirements,
 					Price:            o.Price,
 					CapacityOverride: corev1.ResourceList{extendedResource: resource.MustParse("4")},
