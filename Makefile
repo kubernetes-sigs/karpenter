@@ -42,7 +42,7 @@ install-vpa: ## Install VPA CRD and admission controller webhook
 	./hack/install-vpa-webhook.sh
 
 
-apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+apply-with-kind: build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
@@ -52,7 +52,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
-apply-with-kind-dra: verify build-with-kind ## Deploy the kwok controller for DRA testing
+apply-with-kind-dra: build-with-kind ## Deploy the kwok controller for DRA testing
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
