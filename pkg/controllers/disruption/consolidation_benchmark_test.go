@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -108,7 +109,7 @@ func setupBenchOnce(b *testing.B) {
 	benchRecorder = test.NewEventRecorder()
 	draCtl := deviceallocation.NewController(benchClient)
 	benchProv = provisioning.NewProvisioner(benchClient, benchRecorder, benchCP, benchCluster, benchClock, draCtl, virtualpods.NewVirtualPodCache(benchClient), prediction.NewStore(benchClient))
-	benchQueue = disruption.NewQueue(benchClient, benchRecorder, benchCluster, benchClock, benchProv)
+	benchQueue = disruption.NewQueue(benchClient, benchRecorder, benchCluster, benchClock, benchProv, nodepoolbackoff.NewState(benchClock))
 
 	benchInstType = pickCheapestOnDemandFitting(benchCP.InstanceTypes, benchPodCPU)
 	off := benchInstType.Offerings.Available()[0]
