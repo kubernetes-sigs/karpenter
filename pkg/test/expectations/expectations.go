@@ -640,8 +640,8 @@ func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *co
 // round that relies on the in-cluster allocated-device set.
 func ExpectDeviceAllocationReconciled(ctx context.Context, c client.Client, controller *deviceallocation.Controller) {
 	GinkgoHelper()
-	// Hydrate is guarded by sync.Once internally, so calling it multiple times is safe.
-	controller.Hydrate(ctx)
+	// Hydrate is a no-op once hydrated, so calling it multiple times is safe.
+	Expect(controller.Hydrate(ctx)).To(Succeed())
 	// Reconcile every existing claim to pick up allocation-status changes committed by prior provisioning runs.
 	claimList := &resourcev1.ResourceClaimList{}
 	Expect(c.List(ctx, claimList)).To(Succeed())
