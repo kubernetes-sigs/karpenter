@@ -4,34 +4,34 @@
 
 Karpenter exposes drift per NodeClaim, through the `Drifted` status condition. Neither the NodePool nor the NodeClass has an aggregate signal that answers the question an operator or an external orchestrator asks after pushing a change: *"has this spec finished rolling out?"*
 
-That question is as often about the NodeClass as the NodePool. An AMI bump, a `userData` change, or any other EC2NodeClass spec edit changes the NodeClass, not the NodePool. Argo CD health-checks the GVK that changed. A Lua check on `NodePool.status` cannot see an AMI rollout, and a check on `EC2NodeClass.status` has nothing to read today.
+In practice, that question is about the NodeClass as often as the NodePool. An AMI bump, a `userData` change, or any other `EC2NodeClass` spec edit changes the NodeClass, while the NodePool stays untouched. Argo CD health-checks the GVK that changed. A Lua check on `NodePool.status` can not see an AMI rollout, and a check on `EC2NodeClass.status` has nothing to read today.
 
-Answering it today requires listing NodeClaims, grouping them by `karpenter.sh/nodepool` (or `spec.nodeClassRef`), and aggregating their conditions. Consumers that gate on a single resource's status cannot do that, because they evaluate only the one resource they are looking at. These consumers include Argo CD health checks, `kstatus`, and `kubectl wait`. The workaround is an out-of-band job that re-implements the aggregation Karpenter already performs internally ([#3071](https://github.com/kubernetes-sigs/karpenter/issues/3071)). Consumers that can list NodeClaims, such as kro, still have no per-NodeClaim field that says which spec revision a node matches. They are left with the `Drifted` condition, which has the problems described in [Which drift causes count](#which-drift-causes-count).
+Answering this today requires listing NodeClaims, grouping them by `karpenter.sh/nodepool` (or `spec.nodeClassRef`), and aggregating their conditions. Single-resource status evaluators (Argo CD health checks, `kstatus`, `kubectl wait`) can not do that because they only see the one resource they are evaluating. The workaround is an out-of-band job that re-implements the aggregation Karpenter already does internally ([#3071](https://github.com/kubernetes-sigs/karpenter/issues/3071)). Even consumers that can list NodeClaims (like kro) have no per-NodeClaim field that says which spec revision a node matches. They are stuck reading the `Drifted` condition, which has the issues covered in [Which Drift Causes Count](#which-drift-causes-count).
 
-Core workload controllers solve this by reporting rollout accounting on the parent. A Deployment reports `replicas`/`updatedReplicas`/`readyReplicas` plus `observedGeneration`, a DaemonSet reports `desiredNumberScheduled`/`updatedNumberScheduled`, and Cluster API reports `upToDateReplicas` on MachineDeployments alongside an `UpToDate` condition on Machines. `kubectl rollout status` and most GitOps tooling build on that convention. NodePool is already partway there. It aggregates `status.resources` and `status.nodes`, and `status.nodes` is the `statuspath` of its scale subresource, so it already plays the role `status.replicas` plays on a Deployment. This RFC extends that accounting to rollout progress on both parents, with the NodeClaim as the source of truth for "compatible with generation G."
+Core workload controllers solve this by reporting rollout accounting on the parent. A Deployment reports `replicas`, `updatedReplicas`, `readyReplicas`, and `observedGeneration`. A DaemonSet reports `desiredNumberScheduled` and `updatedNumberScheduled`, and Cluster API puts `upToDateReplicas` on MachineDeployments alongside an `UpToDate` condition on Machines. `kubectl rollout status` and most GitOps tooling rely on that pattern. NodePool is already partway there - it aggregates `status.resources` and `status.nodes`, and `status.nodes` is the `statuspath` of its scale subresource (playing the same role as `status.replicas` on a Deployment).
 
-Earlier attempts are [#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) and [#3177](https://github.com/kubernetes-sigs/karpenter/pull/3177). Unlike those, this RFC does not propose reporting "drift" on the NodePool. It proposes reporting *how many of a parent's nodes were provisioned from its current spec revision*. Drift is the mechanism that eventually makes those numbers converge. The revision is the contract consumers gate on.
+Earlier attempts at this are [#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) and [#3177](https://github.com/kubernetes-sigs/karpenter/pull/3177). Those proposals focused on reporting drift counts on the NodePool. I propose tracking how many of a parent's nodes are compatible with its current spec generation on both NodePool and NodeClass, with the NodeClaim as the source of truth.
 
 ### Use cases
 
-1. **GitOps sync sequencing (Argo CD).** An Argo Application deploys a NodePool and its NodeClass, either together or in separate Applications. A custom Lua health check on each GVK must report `Progressing` while that resource's spec propagates and `Healthy` once it has, so that downstream Applications sync in order. The check can read only that resource's `status`. This covers AMI, `userData`, and any other NodeClass spec change, as well as NodePool `spec.template` edits.
-2. **Composite APIs (kro).** A `ResourceGraphDefinition` wraps NodePool and NodeClass into one custom API. A [collection `externalRef`](https://kro.run/docs/concepts/rgd/resource-definitions/external-references/#external-collections) with a selector on `karpenter.sh/nodepool` brings the pool's NodeClaims into the graph, and CEL can aggregate over them. What CEL cannot do today is tell whether a given NodeClaim matches the current spec. The `Drifted` condition mixes several causes and is not tied to a revision, and the NodeClaim hash annotation does not cover NodeClass changes. The `compatibleWith*Generation` stamps give CEL a field to compare against the parent's `metadata.generation`. For kro, the parent counts are a convenience, not a requirement.
-3. **Threshold-based gates.** Both of the above want a tolerance ("settled at ≥ 90% up to date") rather than an all-or-nothing boolean. Disruption budgets make node rollout gradual by design, and a single stuck node should not block a pipeline indefinitely.
-4. **Fleet-wide rollout dashboards.** "Are we fully onto the new AMI?" is a time-series question over every drift cause, including out-of-band ones such as an `al2023@latest` alias resolving to a new AMI with no spec change. This is a different question from use cases 1 to 3, and we suggest metrics rather than status for it. See [Which drift causes count](#which-drift-causes-count).
+1. Argo CD sync sequencing: An Argo Application deploys a NodePool and its NodeClass, together or in separate Applications. A Lua health check on each GVK needs to return `Progressing` while that resource's spec rolls out and `Healthy` once it finishes, so downstream Applications sync in order. The check can only read that single resource's `status`. This needs to cover AMI, `userData`, and other NodeClass spec changes, plus NodePool `spec.template` edits.
+2. Composite APIs (kro): A `ResourceGraphDefinition` wraps NodePool and NodeClass into one custom API. A [collection `externalRef`](https://kro.run/docs/concepts/rgd/resource-definitions/external-references/#external-collections) selecting `karpenter.sh/nodepool` pulls the pool's NodeClaims into the graph so CEL can aggregate over them. Today, CEL can not tell whether a NodeClaim matches the current spec - `Drifted` mixes several causes with no revision attached, and the NodeClaim hash annotation does not cover NodeClass changes. Stamping `compatibleWith*Generation` on the NodeClaim gives CEL a field to compare against the parent's `metadata.generation` (for kro, the parent counts are just a convenience).
+3. Threshold gates: Both Argo CD and kro users want a tolerance (e.g `>= 90%` up to date) because disruption budgets make node rollouts gradual by design, and 1 stuck node should not wedge a deployment pipeline indefinitely.
+4. Fleet-wide rollout dashboards: Answering "are we fully onto the new AMI?" across the fleet is a time-series question over every drift cause, including out-of-band updates like an `al2023@latest` alias resolving to a new AMI w/o a spec change. Metrics fit this better than resource status (see [Which Drift Causes Count](#which-drift-causes-count)).
 
 ### Non-goals
 
-- **Aggregating arbitrary NodeClaim conditions onto the NodePool.** #3108 proposed a generic `status.nodeClaimConditions[]` list of `{conditionType, count}`. That puts an open set of condition types, extensible by providers and versions, into the NodePool API. No entry has defined semantics, and there is no way to version or deprecate individual entries. We propose named fields with defined meanings instead.
-- **Policy in the API.** No thresholds, settling windows, or "rollout paused/complete" state machine. Karpenter reports counts, and consumers apply their own policy.
-- **Changing disruption behavior.** Nothing here gates, throttles, or reorders drift.
-- **Covering out-of-band or dynamic drift in the status counts.** An AMI alias resolving to a new image, a capacity-reservation reshuffle, or an instance type disappearing from the catalog does not bump `metadata.generation` on either parent. Status answers "did the spec I applied finish propagating?", and those events are not a spec apply. See [Which drift causes count](#which-drift-causes-count).
-- **Changing `status.resources`.** Capacity accounting stays on cluster state. The one existing field this RFC changes is `status.nodes`, and only in what it counts. See [Redefining `status.nodes`](#redefining-statusnodes).
+- Aggregating arbitrary NodeClaim conditions onto the NodePool: [#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) proposed a generic `status.nodeClaimConditions[]` list of `{conditionType, count}`. That puts an open set of condition types (extensible by providers and versions) into the NodePool API with no defined semantics and no way to version or deprecate entries. We use named fields instead.
+- Putting rollout policy in the API: No thresholds, settling windows, or "rollout paused/complete" state machine. Karpenter reports counts and consumers apply their own policy.
+- Changing disruption behavior: Nothing here gates, throttles, or reorders drift.
+- Counting out-of-band or dynamic drift in status: An AMI alias resolving to a new image, a capacity reservation reshuffle, or an instance type disappearing from the catalog does not bump `metadata.generation` on either parent. Status answers whether an applied spec change finished propagating.
+- Changing `status.resources`: Capacity accounting stays on cluster state. Only `status.nodes` changes in what it counts (see [Redefining `status.nodes`](#redefining-statusnodes)).
 
 ## Proposal
 
-The NodeClaim records the latest parent generation it is still compatible with. Each parent counts how many of its NodeClaims are compatible with *its* current generation. The counter does not re-derive drift. It compares integers.
+Each NodeClaim records the latest NodePool and NodeClass generations it is compatible with. Each parent counts how many of its NodeClaims match its current generation by comparing those integers.
 
-### NodeClaim status (source of truth)
+### NodeClaim Status
 
 ```yaml
 apiVersion: karpenter.sh/v1
@@ -67,21 +67,21 @@ type NodeClaimStatus struct {
 }
 ```
 
-The existing `nodeclaim.disruption` controller already evaluates drift and watches NodePool and NodeClass. It becomes the writer.
+The `nodeclaim.disruption` controller already evaluates drift and watches both NodePool and NodeClass, so it writes these fields:
 
-- When provisioning creates a NodeClaim, it stamps both fields with the generations of the NodePool and NodeClass it used to launch the NodeClaim.
-- On reconcile, the controller advances the two fields independently. Today's `isDrifted()` short-circuits, so static or requirements drift skips `cloudProvider.IsDrifted`. The stamp writer must not short-circuit. It fetches the referenced NodeClass and runs both checks on every pass.
-  - If `areStaticFieldsDrifted` and `areRequirementsDrifted` are both empty, set `compatibleWithNodePoolGeneration = nodePool.generation`.
-  - If `cloudProvider.IsDrifted` returns `""`, set `compatibleWithNodeClassGeneration = nodeClass.generation`.
-- If a check reports drift, the controller leaves the corresponding field at its previous value. The field is a high-water mark of the last generation this claim still matched, not a copy of the current generation.
-- If a check returns an error, the controller treats it like drift and leaves that field unchanged. An error on one axis does not stop the other from advancing. Today's `isDrifted()` returns on the first error, so the stamp writer cannot reuse it as is. For example, a provider may fail `IsDrifted` when an invalid NodeClass has no resolved AMIs. The NodeClass stamp stays put, and the NodePool stamp still advances if the NodePool checks pass.
-- `InstanceTypeNotFound` belongs to neither axis and does not block either stamp.
+- When provisioning creates a NodeClaim, it stamps both fields with the NodePool and NodeClass generations used to launch it.
+- On reconcile, `nodeclaim.disruption` updates the two fields independently. Today's `isDrifted()` short-circuits, so static or requirements drift skips `cloudProvider.IsDrifted`. The stamp writer can not short-circuit - it fetches the referenced NodeClass and runs both checks on every pass:
+  - If `areStaticFieldsDrifted` and `areRequirementsDrifted` both return `""`, set `compatibleWithNodePoolGeneration = nodePool.generation`
+  - If `cloudProvider.IsDrifted` returns `""`, set `compatibleWithNodeClassGeneration = nodeClass.generation`
+- When a check reports drift, the controller leaves that field at its previous value. The stamp acts as a high-water mark of the last generation the NodeClaim satisfied.
+- When a check returns an error, the controller leaves that field unchanged. An error on one axis does not block the other (unlike today's `isDrifted()`, which returns on the first error). For example, if an invalid NodeClass has no resolved AMIs and `IsDrifted` errors out, the NodeClass stamp stays put while the NodePool stamp still advances if the NodePool checks pass.
+- `InstanceTypeNotFound` belongs to neither parent spec and does not block either stamp.
 
-`IsDrifted` is only the signal to *advance* a stamp. It is not the predicate for *counting* a node. That split lets a GitOps gate cover NodeClass spec changes, including AMI, without stalling on out-of-band AMI alias updates. See [Which drift causes count](#which-drift-causes-count).
+Note: `IsDrifted` only controls whether a stamp advances when a parent's generation changes. Once stamped, a node stays counted as compatible with that generation even if `IsDrifted` later flips to true out-of-band (such as an AMI alias update). See [Which Drift Causes Count](#which-drift-causes-count).
 
 ### Shared rollout status
 
-NodePool and every supported NodeClass anonymously embed the same rollout accounting struct. Go promotes the embedded fields, and JSON serializes them directly under `status`, so both resources expose the same flat paths.
+NodePool and every supported NodeClass embed the same `NodeRolloutStatus` struct, serialized inline under `status`:
 
 ```go
 type NodeRolloutStatus struct {
@@ -104,9 +104,9 @@ type NodeRolloutStatus struct {
     UpToDateNodes *int64 `json:"upToDateNodes"`
 
     // ReadyNodes is the count of associated NodeClaims whose Ready condition is True,
-    // meaning they have launched, registered a Node, and initialized. This reports
-    // whether a node successfully came up, not whether it is currently healthy: the
-    // underlying conditions do not revert if the Node later goes NotReady.
+    // meaning they have launched, registered a Node, and initialized. This tracks
+    // initial startup - the underlying conditions do not flip back if the Node later
+    // goes NotReady.
     // +kubebuilder:default:=0
     // +optional
     ReadyNodes *int64 `json:"readyNodes"`
@@ -121,7 +121,7 @@ type NodeRolloutStatus struct {
 
 ### NodePool status
 
-This RFC adds four read-only fields to `NodePool.status` and redefines the existing `status.nodes` so that it can serve as their denominator (see [Redefining `status.nodes`](#redefining-statusnodes)).
+We add the four rollout fields to `NodePool.status` and redefine `status.nodes` to serve as their denominator (see [Redefining `status.nodes`](#redefining-statusnodes)):
 
 ```yaml
 apiVersion: karpenter.sh/v1
@@ -135,7 +135,7 @@ status:
   upToDateNodes: 14               # NEW: of those, compatible with the current NodePool revision
   readyNodes: 18                  # NEW: of those, whose NodeClaim Ready condition is True
   upToDateAndReadyNodes: 12       # NEW: of those, both
-  nodeClassObservedGeneration: 5  # exists today; not a NodeClass rollout signal (see below)
+  nodeClassObservedGeneration: 5  # exists today - not a NodeClass rollout signal
   resources: {...}
   conditions:
     - type: NodesUpToDate         # NEW
@@ -152,15 +152,15 @@ type NodePoolStatus struct {
 }
 ```
 
-A NodeClaim owned by the NodePool is up to date when `compatibleWithNodePoolGeneration == nodePool.metadata.generation`. The count does *not* require NodeClass compatibility, so a NodePool taint change can report complete while an AMI rollout is in flight on the other axis. Each parent reports the propagation of its own spec.
+A NodeClaim owned by the NodePool is up to date when `compatibleWithNodePoolGeneration == nodePool.metadata.generation`. This does not check NodeClass compatibility, so a NodePool taint change can finish while an AMI rollout is still running on the NodeClass.
 
-We do not bump `NodePool.status.observedGeneration` when the NodeClass changes. That field means "these NodePool counts were computed against this NodePool spec revision." An AMI pin does not edit the NodePool, so bumping `observedGeneration` for it would make a starved counter look current. Argo health-checks the GVK that changed, and AMI belongs on the NodeClass.
+We also do not bump `NodePool.status.observedGeneration` when the NodeClass changes. That field records which NodePool spec revision the NodePool counts were computed against. An AMI change does not edit the NodePool, so bumping `observedGeneration` for it would make a starved NodePool counter look current.
 
-### NodeClass status (provider contract)
+### NodeClass Status
 
-The Argo CD AMI use case depends on this section. An AMI pin, a `userData` change, or any other EC2NodeClass spec edit changes the NodeClass. Argo's Lua sandbox sees only that object, so the counts have to live there. Folding them into NodePool would leave an Application that only applies `EC2NodeClass` with nothing to read.
+When an edit only touches the `EC2NodeClass` (AMI pin, `userData`, tags, block devices), Argo's Lua sandbox only sees the `EC2NodeClass` object. So the rollout counts for the NodeClass have to live on `EC2NodeClass.status`.
 
-Providers anonymously embed the shared `NodeRolloutStatus` in their NodeClass status type.
+Providers embed `NodeRolloutStatus` in their NodeClass status type:
 
 ```yaml
 apiVersion: karpenter.k8s.aws/v1
@@ -182,24 +182,22 @@ status:
       observedGeneration: 5
 ```
 
-A NodeClaim referencing the NodeClass is up to date when `compatibleWithNodeClassGeneration == nodeClass.metadata.generation`. The count does *not* require NodePool compatibility, so an AMI rollout can report complete while a NodePool taint change is in flight on the other axis. Each parent reports the propagation of its own spec.
+A NodeClaim referencing the NodeClass is up to date when `compatibleWithNodeClassGeneration == nodeClass.metadata.generation`, independent of whether a NodePool change is in flight. The denominator is every NodeClaim that references this NodeClass across all NodePools, which matches how an operator checks whether an AMI finished rolling out across the nodes using that class.
 
-The denominator is every NodeClaim that references this NodeClass, across NodePools. That matches the question "did this AMI finish rolling out?", which is about one NodeClass and every node that uses it.
+A new `nodeclass.counter` controller in core lists each supported NodeClass, fetches its NodeClaims via the existing `spec.nodeClassRef` index, and patches status on types that implement `NodeClassWithRolloutStatus`. It skips NodeClasses that do not implement the interface yet, which lets core and KWOK land before every provider merges the CRD changes.
 
-A new `nodeclass.counter` controller in core lists each supported NodeClass, lists its NodeClaims through the existing `spec.nodeClassRef` index, and patches status for types that implement `NodeClassWithRolloutStatus`. It skips NodeClasses that do not implement the interface yet, so this can land in core (KWOK and the shared type) before every provider has merged the CRD fields.
+Neither `nodeclass.counter` nor `nodepool.counter` skips resources where `Ready=False`. They still write `observedGeneration` and the counts on every generation. If the counter skipped unready parents, `observedGeneration` would stay behind after a broken edit and consumers could not tell a validation failure apart from a lagging controller (see [Edge Cases](#edge-cases)).
 
-The counter does not check the NodeClass `Ready` condition. It writes `observedGeneration` and the counts for every generation, including one that leaves the NodeClass `Ready=False`. If it skipped NodeClasses that are not ready, `observedGeneration` would stay behind after an invalid edit, and consumers could not tell a broken change from a counter that is behind. `nodepool.counter` follows the same rule for NodePools. See the case of a NodeClass edit that fails validation under [Edge cases](#edge-cases).
+Each parent also gets a `NodesUpToDate` status condition (`True` when `upToDateNodes == nodes`, with `observedGeneration` set). I picked `NodesUpToDate` over Deployment's `Progressing` because `Progressing` inverts the polarity of every other Karpenter condition, where `True` is the healthy state, and the `Nodes` prefix matches `NodeClassReady` and `NodeRegistrationHealthy`. `NodesUpToDate` is not added to the `Ready` aggregate (`status.NewReadyConditions(ConditionTypeValidationSucceeded, ConditionTypeNodeClassReady)`). A pool mid-rollout is still healthy, and folding rollout state into `Ready` would break existing consumers.
 
-Each parent also gets one status condition, `NodesUpToDate`. It is `True` when `upToDateNodes == nodes`, and it sets `observedGeneration`. We chose this name over Deployment's `Progressing` because `Progressing` inverts the polarity of every other Karpenter condition, where `True` is the settled state. The `Nodes` prefix matches the existing `NodeClassReady` and `NodeRegistrationHealthy`. The condition is not part of the NodePool's `Ready` aggregate (`status.NewReadyConditions(ConditionTypeValidationSucceeded, ConditionTypeNodeClassReady)`). A pool mid-rollout is healthy, not unready, and adding the condition would change `Ready` semantics for every existing consumer without warning. The same applies to NodeClass `Ready`.
+When `upToDateNodes < nodes`, the condition reason indicates whether the rollout can make progress:
 
-While the count is short, the `NodesUpToDate` reason says whether the rollout can make progress.
+- `RolloutBlocked`: The parent's `Ready` condition is `False`. The provisioner skips unready NodePools (and NodePool `Ready` includes `NodeClassReady`), so no replacements will launch until the spec is fixed. The message includes the cause, e.g `14/21 nodes are up to date, NodeClass is not ready`.
+- `RolloutInProgress`: The parent is `Ready=True`, so Karpenter can launch replacements as disruption budgets allow.
 
-- `RolloutBlocked` when the parent's `Ready` condition is `False`. The provisioner skips NodePools that are not ready, and NodePool `Ready` includes `NodeClassReady`, so no replacements launch until someone fixes the spec. The message names the cause, for example `14/21 nodes are up to date; NodeClass is not ready`.
-- `RolloutInProgress` otherwise. Karpenter can launch replacements, and the count converges as disruption budgets allow.
+When `upToDateNodes == nodes`, `NodesUpToDate` is `True` regardless of `Ready`, since every node already matches the current spec. `NodesUpToDate` reads `Ready` without being part of the `Ready` aggregate, avoiding a dependency cycle.
 
-When `upToDateNodes == nodes`, the condition is `True` whatever `Ready` says, because every node already matches the current spec. `NodesUpToDate` reads `Ready` but is not part of the `Ready` aggregate, so the two conditions do not depend on each other in a cycle. No reason value names the axis that is behind, because the counts on each parent already show that.
-
-Consumers gate as follows, and the same Lua works on NodePool and on NodeClass. It reports `Degraded` for a blocked rollout, so Argo marks the Application `Degraded` instead of leaving it `Progressing` on a rollout that cannot finish.
+The same Argo CD Lua health check works on both NodePool and NodeClass:
 
 ```lua
 if obj.status.observedGeneration ~= obj.metadata.generation then
@@ -216,19 +214,21 @@ end
 return { status = "Healthy" }
 ```
 
-Install the check on both GVKs. Each one covers changes the other cannot see.
+Returning `Degraded` on `RolloutBlocked` marks the Argo Application `Degraded` so it does not sit in `Progressing` when a rollout is wedged.
 
-- An Application that only changes the NodeClass (AMI pin, `userData`, tags, block devices) needs the NodeClass check. A NodePool-only check cannot see the change.
-- An Application that only changes the NodePool needs the NodePool check. A NodeClass-only check cannot see the change.
-- An Application that contains both waits for both health checks, because Argo already ANDs resource health at the Application level. Folding NodeClass compatibility into NodePool `upToDateNodes` would mark a NodePool-only Application Progressing during an AMI rollout it did not apply, and would still leave a NodeClass-only Application with no signal.
+Users install this check on both GVKs:
 
-A rollout gate needs both revision agreement and workload readiness. That is why `upToDateNodes` and `readyNodes` are separate fields, the same way Deployment separates `updatedReplicas` from `readyReplicas`. Karpenter creates a replacement before it terminates the node being replaced. Near the end of a rollout there is therefore a window where every remaining node is up to date but the newest ones have not registered or initialized. A gate on `upToDateNodes` alone would report Healthy during that window and let the next Argo Application in the sequence sync too early.
+- An Application that only edits the NodeClass relies on the NodeClass check
+- An Application that only edits the NodePool relies on the NodePool check
+- An Application containing both waits for both checks, since Argo ANDs resource health at the Application level
 
-`upToDateAndReadyNodes` exists because the other two counts cannot determine the intersection. If 14 of 21 nodes are up to date and 18 of 21 are ready, anywhere from 11 to 14 can be both. If the 3 unready nodes are new replacements, only 11 are both, and the new nodes are failing to come up. If the 3 unready nodes are old ones awaiting replacement, 14 are both, and every new node is healthy. A consumer restricted to a single resource's status cannot tell these cases apart.
+Why expose `upToDateNodes`, `readyNodes`, and `upToDateAndReadyNodes` separately? Karpenter launches a replacement before terminating the old node. Near the end of a rollout, there is a window where all remaining nodes match the new spec, but the newest replacements have not registered or initialized yet. Gating on `upToDateNodes` alone would report `Healthy` during that window and kick off the next Argo Application too early.
+
+We also need `upToDateAndReadyNodes` because the other two numbers do not tell you their overlap. If 14/21 nodes are up to date and 18/21 are ready, anywhere from 11 to 14 nodes could be both. If the 3 unready nodes are new replacements failing to join, only 11 are both. If the 3 unready nodes are old nodes waiting for replacement, 14 are both and every new node is healthy. A consumer that only sees `status` on one object can not tell those two states apart without the intersection count.
 
 ### Redefining `status.nodes`
 
-The four new fields count the NodePool's NodeClaims. `status.nodes` is the natural denominator for them, and consumers already reach for it, but its current definition cannot serve that role. `nodepool.counter` reads it out of the cluster-state resource accounting.
+The four new fields count a parent's NodeClaims. `status.nodes` is the obvious denominator, and users already treat it as one, but its current implementation in `nodepool.counter` pulls from cluster state resource accounting:
 
 ```go
 nodePool.Status.Resources = lo.Assign(BaseResources, c.cluster.NodePoolResourcesFor(nodePool.Name))
@@ -236,141 +236,168 @@ nodeQuantity := nodePool.Status.Resources[resources.Node]
 nodePool.Status.Nodes = new(nodeQuantity.Value())
 ```
 
-That accounting omits two groups. NodeClaims marked for deletion contribute nothing, because `updateNodePoolResources` substitutes an empty `ResourceList` when `StateNode.MarkedForDeletion()` is true. The disruption controller sets `MarkedForDeletion` as soon as it *selects* a candidate, long before the instance is gone. NodeClaims that have not launched are also absent, because `Cluster.UpdateNodeClaim` creates a `StateNode` only once `status.providerID` is set.
+That accounting leaves out two sets of NodeClaims:
 
-Both exclusions apply at the same moment, and both understate the denominator. Take a 20-node pool near the end of a rollout with the default 10% disruption budget. Eighteen replacements are up and ready. The disruption controller has selected the last 2 outdated nodes, and they are draining. Their 2 replacements exist but have not launched. Counted over the 22 NodeClaims that exist, `upToDateAndReadyNodes` is 18 and `upToDateNodes` is 20. `status.nodes` reports 18. It excludes the 2 draining nodes because they are marked for deletion, and the 2 unlaunched replacements never became `StateNode`s.
+1. Deleting NodeClaims: `updateNodePoolResources` substitutes an empty `ResourceList` when `StateNode.MarkedForDeletion()` is true. The disruption controller sets `MarkedForDeletion` as soon as it picks a candidate, long before the instance terminates.
+2. Unlaunched NodeClaims: `Cluster.UpdateNodeClaim` only creates a `StateNode` after `status.providerID` is populated.
 
-The gate above then compares 18 against 18, returns Healthy, and releases the next Argo Application while two outdated nodes still run workloads and two replacements have yet to come up. On the NodeClaim basis it compares 18 against 22, which is 82%, and correctly reports Progressing. The same arithmetic puts `upToDateNodes` (20) above `status.nodes` (18), which makes no sense for two fields consumers are expected to divide.
+Both exclusions hit at the same time during a rollout and shrink the denominator. Consider a 20-node pool near the end of a rollout w/ the default 10% disruption budget:
 
-This RFC therefore redefines `status.nodes` to count the NodePool's NodeClaims, including ones that have not launched and ones that are terminating. The counter computes all five fields from one NodeClaim list in one status patch. Keeping terminating outdated nodes in the denominator until they are gone is what a rollout gate wants, because the pool reports incomplete until the replacement is in place. NodeClass `status.nodes` uses the same definition for the same reason.
+- 18 replacements are up and ready
+- The disruption controller has selected the last 2 outdated nodes, which are now draining (`MarkedForDeletion` is set)
+- 2 new replacements have been created, but have not launched yet (no `providerID`)
 
-One consequence needs a decision. NodePool `status.nodes` currently *is* `status.resources["nodes"]`, and decoupling them means the two can disagree by the number of unlaunched and terminating NodeClaims. The split is defensible. `status.resources` reports schedulable capacity, where excluding a draining node is correct, while `status.nodes` is a replica count. The field documentation should state this so users do not find out by surprise.
+Across the 22 NodeClaims that exist, `upToDateAndReadyNodes` is 18 and `upToDateNodes` is 20. However, `status.nodes` reports 18 because it drops the 2 draining nodes and never counted the 2 unlaunched replacements. The Lua gate compares 18 against 18, returns `Healthy`, and releases the next Argo Application while 2 outdated nodes are still running workloads and 2 replacements have not come up. Worse, `upToDateNodes` (20) is greater than `status.nodes` (18).
 
-### Which drift causes count
+Counting all NodeClaims owned by the NodePool (including unlaunched and terminating ones) gives `18/22` (~82%), which keeps the gate in `Progressing` until the replacements finish coming up and the old nodes are gone. The counter computes all five fields from a single NodeClaim list in one status patch. NodeClass `status.nodes` uses the exact same definition.
 
-The `Drifted` condition is the union of several independent causes. Collapsing that union into a parent-level number produces a signal that means different things at different times ([maintainer comment on #3071](https://github.com/kubernetes-sigs/karpenter/issues/3071#issuecomment-5170006562)).
+There is one trade-off with this change: `NodePool.status.nodes` will no longer always equal `NodePool.status.resources["nodes"]`. They will differ by the number of unlaunched and terminating NodeClaims. I think this split makes sense - `status.resources` tracks schedulable capacity (where excluding a draining node is right), while `status.nodes` is a replica count. We should call this out clearly in the field docs so it does not surprise users.
 
-The generation stamps separate *declarative* drift, where the spec in git changed, from *dynamic* drift, where the world changed under an unchanged spec. A field is "in the GitOps gate" when a change to it bumps `metadata.generation` and the corresponding `IsDrifted` or static-hash check refuses to advance the stamp.
+### Which Drift Causes Count
+
+The `Drifted` condition is a union of several independent causes, and collapsing that union into a single number on the parent produces a metric that means different things depending on what is happening in the cluster ([maintainer comment on #3071](https://github.com/kubernetes-sigs/karpenter/issues/3071#issuecomment-5170006562)).
+
+Stamping generations separates declarative drift (the spec in git changed) from dynamic drift (something in the environment changed under the same spec). A change triggers the GitOps gate only when it bumps `metadata.generation` and the corresponding drift check refuses to advance the stamp:
 
 | Drift cause | Detected by | Advances `compatibleWithNodePoolGeneration`? | Advances `compatibleWithNodeClassGeneration`? | GitOps gate waits? |
 |---|---|---|---|---|
 | NodePool `spec.template` static fields | `areStaticFieldsDrifted` (hash compare, core) | No (stays at previous) | n/a | Yes (NodePool generation bumped) |
 | NodePool `spec.template.spec.requirements` | `areRequirementsDrifted` | No | n/a | Yes, if the node is now incompatible |
-| NodePool behavioral fields (`limits`, disruption, weight) | none (not drift) | Yes (advances to new generation) | n/a | No. Nothing needs replacing. |
-| NodeClass spec change that requires replacement (AMI ID, `userData`, tags, block devices, instance profile, …) | `cloudProvider.IsDrifted` | n/a | No | Yes, on the NodeClass GVK |
-| NodeClass spec change that does not require replacement (e.g. adding a compatible AMI or subnet to a selector) | `cloudProvider.IsDrifted` returns `""` | n/a | Yes | No. The existing node still matches. |
-| Out-of-band AMI (`al2023@latest` resolves to a new image, spec unchanged) | `cloudProvider.IsDrifted` (`AMIDrift`) | n/a | No, but the generation did not bump, so the stamp still equals the current generation | No |
+| NodePool behavioral fields (`limits`, disruption, weight) | none (not drift) | Yes (advances to new generation) | n/a | No, nothing needs replacing |
+| NodeClass spec change requiring replacement (AMI ID, `userData`, tags, block devices, instance profile, etc) | `cloudProvider.IsDrifted` | n/a | No | Yes, on the NodeClass GVK |
+| NodeClass spec change not requiring replacement (e.g adding a compatible AMI or subnet to a selector) | `cloudProvider.IsDrifted` returns `""` | n/a | Yes | No, the existing node still matches |
+| Out-of-band AMI (`al2023@latest` resolves to a new image, spec unchanged) | `cloudProvider.IsDrifted` (`AMIDrift`) | n/a | No, but generation did not bump so stamp still matches current generation | No |
 | Instance type no longer offered | `instanceTypeNotFound` (core) | not consulted | n/a | No |
 
-The GitOps gate therefore covers an AMI change when the AMI is in the NodeClass spec that Argo applied. It does not cover an AMI change when Karpenter resolved a new image from an alias with no spec change. Those are different questions.
+So the GitOps gate waits for an AMI change when someone updates the AMI in the NodeClass spec in git, and ignores it when Karpenter resolves a new image from an SSM alias w/o a spec change:
 
-- Status answers "did the declarative change I applied finish propagating?" It is anchored to a revision, level-triggered, and readable by evaluators that see one resource. An AMI pin in git counts. An alias auto-update does not.
-- Metrics answer "what is the state of drift across my fleet, now and over time?" They cover the full union, sliced by reason. That is the job of #3177, extended with a `reason` label (see [Observability](#observability)).
+- Resource status answers: "did the spec change I applied finish rolling out?"
+- Prometheus metrics answer: "how much of my fleet is drifted right now, and why?" (covered by [#3177](https://github.com/kubernetes-sigs/karpenter/pull/3177) w/ a `reason` label - see [Observability](#observability))
 
-Using `IsDrifted == ""` as the *count* predicate would pull out-of-band AMI updates into the gate and stall pipelines on a weekly AMI cadence. Stamping generations, and advancing them only when `IsDrifted == ""`, gives the Argo use case NodeClass coverage without that stall.
+If we used `IsDrifted == ""` directly to count `upToDateNodes`, out-of-band AMI updates would trip the Argo health check and stall deployment pipelines on every weekly AMI publish. Using `IsDrifted == ""` only to advance the generation stamp avoids that footgun.
 
 ### How it works
 
-Disruption writes the stamps, and two counters aggregate them onto each parent. Disruption already watches NodePool and every supported NodeClass, so a spec apply reconciles NodeClaims immediately.
+Disruption writes the stamps on NodeClaims, and the two counter controllers aggregate them onto NodePool and NodeClass. Because disruption already watches NodePool and every supported NodeClass, applying a spec change triggers a NodeClaim reconcile immediately.
 
-On NodeClaim create, provisioning stamps both fields with the current parent generations. On reconcile, disruption evaluates NodePool drift and `cloudProvider.IsDrifted` independently, even if one axis has drifted. For each axis that has not drifted, it advances the matching stamp to that parent's current generation. For an axis that has drifted, it leaves the stamp unchanged.
-
-Each parent counter lists its NodeClaims, counts stamp matches and `Ready`, and writes `nodes`, `upToDateNodes`, `readyNodes`, `upToDateAndReadyNodes`, and `observedGeneration` in one status patch. `nodepool.counter` extends the existing NodePool status writer and compares only the NodePool stamp. `nodeclass.counter` is new. It lists by `spec.nodeClassRef` and patches only types that implement `NodeClassWithRolloutStatus`. Counters compare integers and do not re-derive drift.
+1. On NodeClaim creation, provisioning populates both `compatibleWith*Generation` fields from the parent objects it used.
+2. On reconcile, `nodeclaim.disruption` runs the NodePool drift check and `cloudProvider.IsDrifted` independently. For each check that returns no drift, it advances the matching stamp to that parent's current `metadata.generation`.
+3. `nodepool.counter` and `nodeclass.counter` list their NodeClaims, compare the generation stamps and `Ready` conditions, and patch `nodes`, `upToDateNodes`, `readyNodes`, `upToDateAndReadyNodes`, `observedGeneration`, and `NodesUpToDate`.
 
 ### Linearizability
 
-#3108 raised a second concern. Counts reconciled asynchronously can be arbitrarily stale under CPU starvation or client throttling, so a gate can pass on numbers computed before the change landed. Edge detection ("the drifted count went up") does not fix this, because a NodePool update does not always cause drift. Restricting requirements to prune instance types that were never in use bumps the generation and drifts nothing.
+[#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) ran into a race condition: asynchronously reconciled counts can be stale under CPU starvation or client-side throttling, letting a gate pass on numbers computed before the spec change was even observed. Watching for an edge ("the drifted count went up") does not fix this because plenty of valid spec changes cause 0 drift (e.g tightening requirements to drop instance types that no node is using).
 
-Anchoring the counts to the generation of the *same object the consumer is looking at* solves both problems. That is why NodeClass needs its own `observedGeneration` instead of bumping NodePool's. An AMI spec change does not bump `NodePool.metadata.generation`, and pretending it did would make stale NodePool counts look current.
+Tying the counts to `observedGeneration` on the same object the consumer is checking closes that gap. This is also why NodeClass needs its own `observedGeneration`: an AMI change does not bump `NodePool.metadata.generation`, so a consumer watching the NodePool would have no way to know whether the counter had run since the AMI edit landed.
 
 | Scenario | Parent `metadata.generation` | Status after counter runs (`upToDateNodes`/`nodes`) | Consumer sees |
 |---|---|---|---|
 | NodePool spec change that drifts nodes | NodePool `G+1` | NodePool `observedGeneration: G+1`, `14/20` | Progressing on NodePool |
 | Same, counter starved | NodePool `G+1` | stale `observedGeneration: G` | Progressing (generation mismatch) |
-| NodePool spec change that drifts nothing (`limits`) | NodePool `G+1` | `observedGeneration: G+1`, `20/20` (stamps advanced) | Healthy immediately, which is correct because no rollout was needed |
-| NodeClass spec change that drifts nodes (AMI pin, `userData`, …) | NodeClass `C+1` | NodeClass `observedGeneration: C+1`, `14/20`. NodePool counts unchanged (NodePool generation did not bump) | Progressing on NodeClass. NodePool Lua stays Healthy, which is correct because that Application did not apply the AMI. |
-| Same, NodeClass counter starved | NodeClass `C+1` | stale NodeClass `observedGeneration: C` | Progressing (generation mismatch on the NodeClass). This window is why the health check belongs on the NodeClass GVK, not on NodePool. Disruption already watches NodeClass, so stamp updates take one reconcile, not the 5-minute drift interval. |
-| NodeClass spec change that drifts nothing (selector widened) | NodeClass `C+1` | stamps advanced, `20/20` | Healthy immediately, which is correct |
-| Out-of-band AMI (alias, spec unchanged) | NodeClass `C` (unchanged) | stamps still equal `C`, `20/20` | Healthy, which is correct for GitOps. The `Drifted` condition and the reason-labeled metric still show `AMIDrift`. |
-| Combined Application (NodePool + NodeClass), AMI pin | NodeClass `C+1`, NodePool unchanged | NodeClass `14/20`; NodePool `20/20` | Application Progressing until the NodeClass check is Healthy |
+| NodePool spec change that drifts nothing (`limits`) | NodePool `G+1` | `observedGeneration: G+1`, `20/20` (stamps advanced) | Healthy immediately (no rollout needed) |
+| NodeClass spec change that drifts nodes (AMI pin, `userData`, etc) | NodeClass `C+1` | NodeClass `observedGeneration: C+1`, `14/20` (NodePool unchanged) | Progressing on NodeClass, NodePool stays Healthy |
+| Same, NodeClass counter starved | NodeClass `C+1` | stale NodeClass `observedGeneration: C` | Progressing (generation mismatch on NodeClass) |
+| NodeClass spec change that drifts nothing (selector widened) | NodeClass `C+1` | stamps advanced, `20/20` | Healthy immediately |
+| Out-of-band AMI (alias, spec unchanged) | NodeClass `C` (unchanged) | stamps still equal `C`, `20/20` | Healthy for GitOps (`Drifted` condition and metrics still report `AMIDrift`) |
+| Combined Application (NodePool + NodeClass), AMI pin | NodeClass `C+1`, NodePool unchanged | NodeClass `14/20`, NodePool `20/20` | Application Progressing until NodeClass check is Healthy |
 | Rollout completes | current | `20/20` on the parent that changed | Healthy |
 
-The rows where a spec change drifts nothing are the case that defeats edge-triggered designs. A level-triggered count anchored to the revision handles them without special logic. The disruption controller advances the stamp when the node still matches, and the counter recomputes on every pass. "Nothing needed to change" and "everything already changed" therefore look the same to the consumer.
+When a spec edit drifts nothing, `nodeclaim.disruption` advances the stamps on the first reconcile and the counter writes `20/20` at `G+1`. No special-casing is needed for no-op spec updates.
 
-### Interaction with existing features
+### Interaction with Existing Features
 
-- **Disruption budgets and drift back-off.** Unchanged. Budgets and back-off control *how fast* `upToDateNodes` converges, not what is counted. A pool that is backed off or blocked by a budget reports incomplete for longer.
-- **Terminating NodeClaims.** A NodeClaim with a deletion timestamp counts in `nodes` until it is gone. This changes today's behavior, as described in [Redefining `status.nodes`](#redefining-statusnodes). If the NodeClaim is outdated, the pool reports incomplete until the replacement is in place, which is what a rollout gate wants.
-- **Static NodePools (`spec.replicas`) and the scale subresource.** The same accounting applies with no special cases. The redefinition puts `status.nodes` on the same basis the static provisioning and deprovisioning controllers already use to satisfy `spec.replicas`. A pool at its replica count now reports `nodes == spec.replicas` mid-rollout instead of dipping below it.
-- **`do-not-disrupt` NodeClaims.** These can hold `upToDateNodes` below `nodes` indefinitely. That report is correct, and it is the reason the API exposes counts rather than a boolean. Consumers set a tolerance.
-- **Hash version bumps across Karpenter upgrades.** Karpenter already re-stamps NodeClaims that are not drifted. During the upgrade window `areStaticFieldsDrifted` returns `""`, because it does not treat a version mismatch as drift, so `compatibleWithNodePoolGeneration` still advances. Counts stay correct.
-- **NodeClaims with no `nodepool-hash` annotation.** This includes NodeClaims adopted or hydrated from an older version. `areStaticFieldsDrifted` returns `""` when annotations are missing, so the stamp would advance. We should confirm this against the hydration controller before implementation. If hydration lags, we should treat missing annotations as *not* compatible so that errors fall on the conservative side.
-- **Existing NodeClaims after the CRD upgrade.** `compatibleWith*` is unset (`0`) until the first disruption reconcile, so counts read low for one pass per NodeClaim. Disruption watches NodePool and NodeClass and lists every NodeClaim, so the window lasts one controller queue drain, not until the node next drifts.
-- **A NodeClass used by several NodePools.** Its counts sum NodeClaims across those pools, so it reports complete only when every pool has rolled the NodeClass spec. Each NodePool reports complete when *its* own spec has rolled, independent of the AMI axis.
-- **Out-of-band AMI concurrent with a non-drifting NodeClass edit.** `IsDrifted` still returns `AMIDrift`, so the controller does not advance `compatibleWithNodeClassGeneration`, even though the spec change alone would not require replacement. The GitOps gate stays Progressing until those nodes are replaced. This is conservative. See [Edge cases](#edge-cases).
+- Disruption budgets and drift back-off: Unchanged. Budgets and back-off control how fast `upToDateNodes` converges, so a budget-constrained pool stays in `RolloutInProgress` longer.
+- Terminating NodeClaims: A NodeClaim with a deletion timestamp stays in `nodes` until it is deleted from the API server (see [Redefining `status.nodes`](#redefining-statusnodes)).
+- Static NodePools (`spec.replicas`) and the scale subresource: Works with no special cases. Redefining `status.nodes` puts it on the same NodeClaim basis that the static provisioning and deprovisioning controllers already use to reconcile `spec.replicas`, so a static pool at its target size keeps `nodes == spec.replicas` mid-rollout.
+- `do-not-disrupt` NodeClaims: These can hold `upToDateNodes` below `nodes` indefinitely, which is why the API exposes counts so consumers can apply a threshold.
+- Hash version bumps across Karpenter upgrades: Karpenter already re-stamps NodeClaims that are not drifted. During an upgrade, `areStaticFieldsDrifted` returns `""` because a hash version mismatch is not treated as drift, so `compatibleWithNodePoolGeneration` advances normally.
+- NodeClaims missing the `nodepool-hash` annotation: This happens on adopted NodeClaims or ones hydrated from an older Karpenter version. Today `areStaticFieldsDrifted` returns `""` when the annotation is missing, which would advance the stamp. I want to verify the exact ordering against the hydration controller before implementing this - if hydration can lag behind disruption, we should treat a missing hash annotation as not compatible so we fail closed.
+- Existing NodeClaims after CRD upgrade: `compatibleWith*Generation` starts at `0` until the first disruption reconcile. Because disruption watches NodePool and NodeClass and lists all NodeClaims, populating the stamps takes one queue drain (we do not wait for the 5-minute drift interval).
+- NodeClass shared by multiple NodePools: The NodeClass counter sums NodeClaims across every pool referencing it, so the NodeClass reports complete only when all of those pools have rolled.
+- Out-of-band AMI update concurrent with a non-drifting NodeClass edit: `IsDrifted` returns `AMIDrift`, so `nodeclaim.disruption` can not tell that the spec edit itself was benign and leaves `compatibleWithNodeClassGeneration` at the old generation. The GitOps gate waits for the AMI replacement, which was going to happen anyway.
 
 ### Observability
 
-Status covers declarative rollouts, and metrics cover the rest. The complementary metric work in #3177 needs one addition, a `reason` label on the drift condition. The NodeClaim condition already carries the reason (`SetTrueWithReason(ConditionTypeDrifted, driftedReason, ...)`).
+To cover fleet-wide drift dashboards (use case 4), the metric proposed in [#3177](https://github.com/kubernetes-sigs/karpenter/pull/3177) needs a `reason` label. The NodeClaim `Drifted` condition already sets the reason via `SetTrueWithReason(ConditionTypeDrifted, driftedReason, ...)`:
 
 ```
 karpenter_nodepools_nodeclaim_condition{nodepool, condition, status, reason}
 ```
 
-That label gives use case 4 a per-cause view (`reason="NodePoolDrifted"`, `reason="AMIDrift"`, `reason="NodeClassDrifted"`) without putting the taxonomy in the API. Providers define a bounded set of reason values, so cardinality stays manageable.
+Adding `reason` lets operators slice by `NodePoolDrifted`, `AMIDrift`, `NodeClassDrifted`, etc in Prometheus without baking provider-specific drift reasons into the CRD schema. Providers already use a bounded set of reason strings, so metric cardinality stays low.
 
-### Edge cases
+### Edge Cases
 
-- **NodeClaim created from the previous revision, not yet in the informer cache.** A NodeClaim launched from spec `G` while the update to `G+1` lands can be briefly invisible, so the pool reports `20/20` before flipping to `20/21`. Watch latency bounds the window, and the result is a brief flap from Healthy to Progressing, not a gate stuck at Healthy. All other cache-lag cases err on the conservative side. An unobserved new NodeClaim gets the current generation stamp and counts as up to date, and a stale cache entry for a deleted outdated NodeClaim only makes the pool look less complete.
-- **Empty NodePool or NodeClass.** All four counts are `0` and the condition is `True`. Consumers that need "nonempty and settled" check `nodes > 0` themselves.
-- **Unready nodes that are not part of a rollout.** A NodeClaim stuck launching for unrelated reasons holds `readyNodes` below `nodes` with no rollout in flight. A Deployment with a crash-looping pod behaves the same way. The count is accurate, and the consumer's tolerance decides whether it blocks. The existing `NodeRegistrationHealthy` condition remains the signal for a NodePool that cannot launch nodes at all.
-- **NodePool with `Ready: False` from a bad NodeClass reference.** The NodePool still reports counts against the NodePool stamp, and the existing `Ready` condition signals the failure. If a NodePool rollout is in flight, `NodesUpToDate` reports `RolloutBlocked`. If the NodeClass object is missing, the NodeClass counter has nothing to patch, and those NodeClaims are absent from NodeClass counts until the reference resolves.
-- **A NodeClass edit that fails validation.** Take an AMI selector that matches nothing. Applying it bumps the generation to `C+1` and leaves the NodeClass `Ready=False`. NodePool `Ready` includes `NodeClassReady`, and the provisioner skips NodePools that are not ready, so no replacements launch. Stamps on nodes that need replacement stay at `C`, either because `IsDrifted` reports drift or because it returns an error. The counter still writes `observedGeneration: C+1`. Consumers see current counts with `upToDateNodes < nodes` that do not move, alongside a `Ready=False` condition whose own `observedGeneration` is `C+1`. `NodesUpToDate` is `False` with reason `RolloutBlocked`, and the example health check reports `Degraded` instead of `Progressing`. If the invalid edit does not make any node drift, the stamps advance, the counts read complete, and `NodesUpToDate` is `True`. Only `Ready` shows the problem in that case, so a health check that needs to catch it must read `Ready` as well. Fixing or reverting the spec bumps the generation again, and the stamps follow the normal rules.
-- **Rapid successive edits.** Each apply bumps `metadata.generation`, from G to G+1 to G+2. The Lua check fails `observedGeneration == metadata.generation` until the counter has run against the *latest* generation, so it cannot pass on counts computed for G+1 after G+2 has landed. Once the counter has observed G+2, the stamps still have to catch up. Disruption either advances them, if the latest spec does not require replacement, or leaves them at an earlier generation until replacements exist. The gate stays Progressing through both windows and does not go Healthy on an intermediate revision.
-- **Non-drifting NodeClass spec change while nodes have dynamic drift, such as an AMI alias update.** `IsDrifted` stays true, so the NodeClass stamp does not advance and the GitOps gate waits for replacement. That is conservative relative to the spec change, and the replacement was going to happen anyway.
-- **KWOK and providers where `IsDrifted` always returns `""`.** The NodeClass stamp advances whenever `IsDrifted` is empty, so on these providers every NodeClass spec edit advances every stamp on the next disruption reconcile. `upToDateNodes` then equals `nodes`. That is correct, because KWOK has no AMI, `userData`, or equivalent, so there is no NodeClass-driven replacement to wait for. The NodeClass GVK still gets `observedGeneration`, so a starved counter cannot pass. It also still gets the Ready counts, because launch and initialization still matter. NodePool stamps are unaffected and still follow the NodePool hash and requirements checks.
+- NodeClaim created from the old spec, not yet in the informer cache: If a NodeClaim is launched from generation `G` right as `G+1` lands, the counter can briefly miss it and report `20/20` before flipping to `20/21` once the watch event arrives. That window is bounded by informer watch latency and causes a brief `Healthy -> Progressing` flap, not a gate stuck at `Healthy`. Every other cache lag case fails closed (an unobserved new NodeClaim already has the `G+1` stamp, and a stale cache entry for a deleted old NodeClaim just makes the rollout look less complete).
+- Empty NodePool or NodeClass: All four counts are `0` and `NodesUpToDate` is `True`. Consumers that care about non-empty pools can check `nodes > 0`.
+- Unready nodes unrelated to a rollout: A NodeClaim stuck launching for other reasons holds `readyNodes` below `nodes` even with no rollout running (same as a crashlooping pod in a Deployment). The consumer's threshold tolerance handles single-node failures, and `NodeRegistrationHealthy` still flags pools that can not launch nodes at all.
+- NodePool with `Ready=False` due to a bad `nodeClassRef`: The NodePool counter still updates the NodePool counts, and `NodesUpToDate` sets reason `RolloutBlocked` if a rollout is incomplete. If the NodeClass object does not exist at all, `nodeclass.counter` has nothing to patch until the reference is fixed.
+- NodeClass edit that fails validation: Suppose someone applies an AMI selector at generation `C+1` that matches 0 AMIs. The NodeClass goes `Ready=False`, which makes the NodePool `Ready=False`, so the provisioner stops launching replacements. Stamps on nodes that need replacement stay at `C` (because `IsDrifted` either reports drift or errors out). `nodeclass.counter` still writes `observedGeneration: C+1` and sets `NodesUpToDate=False` w/ reason `RolloutBlocked`. The Lua check sees `RolloutBlocked` at the current generation and returns `Degraded`. Note: if the invalid edit somehow did not drift any existing nodes, the stamps would advance to `C+1` and `NodesUpToDate` would be `True` - only `Ready=False` shows the failure in that case, so health checks should also inspect `Ready`.
+- Rapid successive edits (`G -> G+1 -> G+2`): The Lua check blocks on `observedGeneration == metadata.generation` until the counter has run against `G+2`, so it will not pass on counts from `G+1`. Once the counter catches up to `G+2`, the gate waits for the NodeClaim stamps to reach `G+2`.
+- KWOK and providers where `IsDrifted` always returns `""`: On these providers, every NodeClass edit advances `compatibleWithNodeClassGeneration` on the next reconcile, so `upToDateNodes` immediately matches `nodes`. That is expected since KWOK has no AMI or `userData` to roll. The NodeClass status still tracks `observedGeneration` and `readyNodes`.
 
-## Alternatives considered
+## Alternatives Considered
 
-**Aggregate the existing `Drifted` condition onto the NodePool.** This is what the issue requested and what #3108 implemented. We rejected it as the primary mechanism for two reasons. The union semantics make the number mean different things in different clusters. The controller also writes the condition asynchronously with a 5-minute requeue and no revision anchor, so it cannot support a correct gate. The revision comparison is more precise for this use case and cheaper to compute.
+### Option 1: Aggregate the `Drifted` Condition onto the NodePool (#3108)
 
-**A NodePool-level `Drifted` condition only.** This gives a simple boolean gate, but it forces all-or-nothing semantics with no tolerance for a single `do-not-disrupt` node, and it carries the same union ambiguity. The proposed `NodesUpToDate` condition gives consumers who want a boolean one, defined against the revision instead of the union.
+This is what [#3071](https://github.com/kubernetes-sigs/karpenter/issues/3071) originally asked for and what [#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) implemented. I rejected this for two reasons:
 
-**Have the NodePool counter re-parse hashes itself.** This was the first revision of this RFC. We rejected it in favor of NodeClaim stamps. The disruption controller already has the drift inputs, including `cloudProvider.IsDrifted`, and already watches NodeClass. It is also the component that *knows* whether a NodeClass spec change requires replacement. Putting `compatibleWithNodeClassGeneration` on the NodeClaim makes a NodeClass counter possible without a cloud-provider interface change to categorize drift reasons.
+- `Drifted` is a union of declarative and dynamic causes, so a drifted count > 0 does not tell Argo CD whether a git change is rolling out or an SSM parameter updated in the background
+- `Drifted` is reconciled asynchronously on a 5-minute loop with no generation anchor, so a health check can easily read stale 0-drift counts right after a spec apply and pass prematurely
 
-**Use `nodeClassObservedGeneration` plus `IsDrifted` as a boolean on the NodePool, with no NodeClaim stamps.** `nodeClassObservedGeneration` bumps for every NodeClass spec change, including ones that do not require replacement. Combining it with a NodeClaim `Drifted==True` boolean leads to one of two errors. Either the design treats non-drifting spec changes as rollouts until something else clears Drifted, or it treats dynamically drifted nodes as in-rollout even when the generation did not change. The two generation stamps separate those cases by construction.
+### Option 2: Add a Boolean `Drifted` Condition on the NodePool
 
-**Fold NodeClass compatibility into NodePool `upToDateNodes` and skip NodeClass status.** This does not work for the Argo use case, and it puts the signal on the wrong GVK. Argo health-checks the object that changed. An Application that applies an AMI pin to `EC2NodeClass` without the NodePool would have no signal. Bumping NodePool `observedGeneration` on NodeClass edits would also make a starved NodePool counter look current. NodeClass `observedGeneration` protects against stale counts on that GVK, and Argo's Application-level AND of the two health checks combines the two signals.
+A boolean condition is simple to read, but it forces all-or-nothing semantics where a single `do-not-disrupt` node blocks a pipeline forever, and it has the same union problem as Option 1. Including `NodesUpToDate` alongside the integer counts gives simple consumers a boolean (anchored to the spec generation) without taking thresholds away from Argo CD and kro.
 
-**Metrics only (#3177).** Argo CD health checks and kro CEL expressions read Kubernetes objects and cannot query Prometheus. Metrics complement status and do not replace it, so this RFC proposes both.
+### Option 3: Have the NodePool Counter Re-Parse Hashes Directly
 
-**ControllerRevision-based accounting, like DaemonSet.** Materializing revisions would give richer history, such as which revision each NodeClaim belongs to, and would support rollback. It would also add a new persisted object per revision, plus garbage collection for those objects, to record information the generation stamp already encodes.
+In the first revision of this RFC, I had `nodepool.counter` inspect the NodeClaim hash annotations itself. I dropped that approach because `nodeclaim.disruption` already has all the drift inputs (including `cloudProvider.IsDrifted`) and already watches NodeClass. Putting `compatibleWithNodeClassGeneration` on the NodeClaim lets core run `nodeclass.counter` without changing the `CloudProvider` interface to categorize drift reasons.
 
-## Backward compatibility
+### Option 4: Combine `nodeClassObservedGeneration` with `Drifted` on the NodePool (No NodeClaim Stamps)
 
-Rollout status is gated behind the `NodeRolloutStatus` feature gate (disabled by default in Alpha). When the gate is disabled, Karpenter behaves as it does today. Provisioning and `nodeclaim.disruption` do not write the generation stamps, `nodeclaim.disruption` keeps its short-circuiting `isDrifted()` order, `nodepool.counter` keeps `status.nodes` equal to `status.resources["nodes"]` without writing rollout fields or `NodesUpToDate`, and `nodeclass.counter` does not run.
+`nodeClassObservedGeneration` bumps on every NodeClass edit, including ones that do not require replacing nodes. Pairing that with a boolean `Drifted==True` check on NodeClaims fails in one of two ways: either non-drifting NodeClass edits look like active rollouts while unrelated drift exists, or dynamically drifted nodes look like an active spec rollout when the generation never changed. Tracking the compatible generation per axis on the NodeClaim avoids both bugs.
 
-The new NodeClaim fields, NodePool fields, and condition are additive and read-only, and no YAML needs to change. Users must apply the updated CRDs to see the fields, as with any Karpenter CRD upgrade. `NodesUpToDate` is not part of the `Ready` aggregate, so `Ready` semantics stay the same for existing consumers.
+### Option 5: Fold NodeClass Compatibility into `NodePool.status.upToDateNodes` Only
 
-NodeClass status fields are also additive on each provider CRD. Providers that have not added them do not implement `NodeClassWithRolloutStatus`, and core skips them. KWOK ships the fields in the same change as the NodePool API, so the in-tree provider is a complete example.
+This breaks the Argo CD use case because Argo only checks the resource that changed. An Application that only manages `EC2NodeClass` (e.g bumping an AMI pin) does not touch the NodePool and would have no status to watch. Bumping `NodePool.status.observedGeneration` on NodeClass edits would also make a starved NodePool counter look current. Putting the status on both GVKs matches how Argo evaluates health.
+
+### Option 6: Prometheus Metrics Only (#3177)
+
+Argo CD Lua health checks and kro CEL expressions only have access to Kubernetes objects in the cluster and can not query Prometheus. We need both status fields (for orchestration gates) and metrics (for fleet dashboards).
+
+### Option 7: `ControllerRevision` Accounting (Like DaemonSet)
+
+Creating `ControllerRevision` objects for each NodePool and NodeClass change would give full revision history and rollback support, at the cost of managing and garbage-collecting a new set of API objects just to track what two `int64` generation stamps already tell us.
+
+## Backward Compatibility
+
+Everything in this proposal is gated behind the `NodeRolloutStatus` feature gate (off by default in Alpha). When disabled:
+
+- Provisioning and `nodeclaim.disruption` do not write the generation stamps
+- `nodeclaim.disruption` keeps its existing short-circuiting `isDrifted()` check
+- `nodepool.counter` keeps `status.nodes` equal to `status.resources["nodes"]` and skips the new rollout fields and `NodesUpToDate` condition
+- `nodeclass.counter` is not registered
+
+The new fields on NodeClaim, NodePool, and NodeClass are read-only status fields, so no user manifests need to change. Users will need to apply the updated CRDs during upgrade as usual. Because `NodesUpToDate` is separate from `Ready`, existing tooling watching `Ready` is unaffected.
+
+Providers can adopt `NodeClassWithRolloutStatus` incrementally in follow-up PRs (AWS, Azure, GCP). Core skips any NodeClass CRD that does not implement the interface yet, and KWOK ships with it in the initial PR as the reference implementation. Until a provider adds the NodeClass status fields, users can still read the generation stamps on NodeClaims directly.
 
 ## Graduation criteria
 
-Rollout status ships behind the `NodeRolloutStatus` feature gate (`--feature-gates NodeRolloutStatus=true` or `FEATURE_GATES=NodeRolloutStatus=true`).
+The feature ships behind `--feature-gates NodeRolloutStatus=true` (or `FEATURE_GATES=NodeRolloutStatus=true`):
 
-- **Alpha (`NodeRolloutStatus=false` by default).**
-- **Beta (`NodeRolloutStatus=true` by default).** Requires API server status-patch load validation at scale, user feedback on the `status.nodes` redefinition, and `NodeRolloutStatus` adoption in `EC2NodeClass` in the AWS provider.
-- **GA (gate removed).** Requires at least one minor release in Beta with no regressions in controller reconcile latency or API server write load.
+- Alpha (`NodeRolloutStatus=false` by default): Initial implementation in core and KWOK
+- Beta (`NodeRolloutStatus=true` by default): API server status-patch load tested at scale, user feedback gathered on the `status.nodes` change, and `NodeRolloutStatus` adopted on `EC2NodeClass` in `karpenter-provider-aws`
+- GA (gate removed): At least one minor release in Beta with no regressions in controller reconcile latency or API server write load
 
-Provider NodeClass fields can lag behind the core NodeClaim and NodePool fields. AMI, `userData`, and other NodeClass spec rollouts become visible to Argo on the NodeClass GVK once each provider adds the CRD fields, in follow-up PRs for AWS, Azure, and GCP. Until then, users can already query the NodeClaim stamps, and KWOK is the in-tree example. A NodePool health check does not wait for NodeClass compatibility, so an AMI Application must health-check the NodeClass GVK.
+## Open Questions
 
-## Open questions
+1. Should we keep `status.nodes` and `status.resources["nodes"]` in sync during rollouts? This proposal leaves `status.resources` on cluster state and moves `status.nodes` to count NodeClaims. Moving both to NodeClaims would keep them equal, at the cost of `status.resources` including the capacity of nodes that are draining or have not launched yet.
 
-1. **Should `status.nodes` and `status.resources["nodes"]` be reconciled rather than allowed to diverge?** The proposal keeps `status.resources` on cluster state and moves only `status.nodes`. Moving both to the NodeClaim basis would be more consistent, but `status.resources` would then report the capacity of nodes that are draining or have not launched.
 ## References
 
 - Issue: [Surface NodeClaim drift/rollout progress in NodePool status (#3071)](https://github.com/kubernetes-sigs/karpenter/issues/3071)
-- Prior implementation attempts: [#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) (status), [#3177](https://github.com/kubernetes-sigs/karpenter/pull/3177) (metrics)
-- Maintainer feedback this RFC responds to: [#3071 (comment)](https://github.com/kubernetes-sigs/karpenter/issues/3071#issuecomment-5170006562), [#3216 (NodeClass generation)](https://github.com/kubernetes-sigs/karpenter/pull/3216#discussion_r3857866911), [#3216 (AMI / Argo)](https://github.com/kubernetes-sigs/karpenter/pull/3216#discussion_r3876142714), [#3216 (NodeClaim stamps)](https://github.com/kubernetes-sigs/karpenter/pull/3216#discussion_r3898578138)
-- Drift semantics: [`designs/drift.md`](./drift.md), [`designs/drift-hash-versioning.md`](./drift-hash-versioning.md)
-- Precedent: Deployment `status.updatedReplicas`/`observedGeneration`; Cluster API `MachineDeployment.status.upToDateReplicas` and the Machine `UpToDate` condition; [`kstatus`](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus)
+- Prior PRs: [#3108](https://github.com/kubernetes-sigs/karpenter/pull/3108) (status), [#3177](https://github.com/kubernetes-sigs/karpenter/pull/3177) (metrics)
+- Maintainer feedback: [#3071 (comment)](https://github.com/kubernetes-sigs/karpenter/issues/3071#issuecomment-5170006562), [#3216 (NodeClass generation)](https://github.com/kubernetes-sigs/karpenter/pull/3216#discussion_r3857866911), [#3216 (AMI / Argo)](https://github.com/kubernetes-sigs/karpenter/pull/3216#discussion_r3876142714), [#3216 (NodeClaim stamps)](https://github.com/kubernetes-sigs/karpenter/pull/3216#discussion_r3898578138)
+- Drift design docs: [`designs/drift.md`](./drift.md), [`designs/drift-hash-versioning.md`](./drift-hash-versioning.md)
+- Prior art: Deployment `status.updatedReplicas` / `observedGeneration`, Cluster API `MachineDeployment.status.upToDateReplicas` + Machine `UpToDate` condition, [`kstatus`](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus)
