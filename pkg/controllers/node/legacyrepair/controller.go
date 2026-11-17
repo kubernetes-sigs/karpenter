@@ -63,7 +63,7 @@ type Controller struct {
 	recorder      events.Recorder
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	policies      ReplacePolicies
+	policies      []replacePolicy
 }
 
 // replacePolicy is a ReplaceNode RepairPolicy. The legacy controller can only replace nodes, so it ignores policies with
@@ -73,39 +73,24 @@ type replacePolicy struct {
 	reasonRegex *regexp.Regexp
 }
 
-// ReplacePolicies are the policies the legacy controller repairs nodes with.
-type ReplacePolicies struct {
-	policies []replacePolicy
-}
-
-// NewReplacePolicies picks out the ReplaceNode policies and compiles their reason regexes. It panics on an invalid regex.
-func NewReplacePolicies(policies []cloudprovider.RepairPolicy) ReplacePolicies {
-	var replacePolicies []replacePolicy
-	for _, policy := range policies {
+// NewController constructs a controller instance
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock, recorder events.Recorder) *Controller {
+	var policies []replacePolicy
+	for _, policy := range cloudProvider.RepairPolicies() {
 		if policy.Action != cloudprovider.ReplaceNode {
 			continue
 		}
-		replacePolicies = append(replacePolicies, replacePolicy{
+		policies = append(policies, replacePolicy{
 			RepairPolicy: policy,
 			reasonRegex:  lo.Ternary(policy.ReasonRegex == "", nil, regexp.MustCompile(policy.ReasonRegex)),
 		})
 	}
-	return ReplacePolicies{policies: replacePolicies}
-}
-
-// ConditionTypes returns the condition types the policies repair.
-func (p ReplacePolicies) ConditionTypes() []corev1.NodeConditionType {
-	return lo.Map(p.policies, func(policy replacePolicy, _ int) corev1.NodeConditionType { return policy.ConditionType })
-}
-
-// NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock, recorder events.Recorder) *Controller {
 	return &Controller{
 		clock:         clock,
 		recorder:      recorder,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		policies:      NewReplacePolicies(cloudProvider.RepairPolicies()),
+		policies:      policies,
 	}
 }
 
@@ -167,13 +152,14 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	unhealthyNodeCondition, terminationTime := c.policies.UnhealthyCondition(node)
+	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
 	if unhealthyNodeCondition == nil {
 		return reconcile.Result{}, nil
 	}
 
 	// If the Node is unhealthy, but has not reached its full toleration disruption
 	// requeue at the termination time of the unhealthy node
+	terminationTime := unhealthyNodeCondition.LastTransitionTime.Add(policyTerminationDuration)
 	if c.clock.Now().Before(terminationTime) {
 		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
@@ -245,20 +231,24 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	return reconcile.Result{}, nil
 }
 
-// UnhealthyCondition returns the node condition the controller repairs the node for, which is the matching one whose
-// toleration ends first, and when that toleration ends. It returns nil when no policy matches.
-func (p ReplacePolicies) UnhealthyCondition(node *corev1.Node) (condition *corev1.NodeCondition, tolerationEnd time.Time) {
-	for _, policy := range p.policies {
+// Find a node with a condition that matches one of the unhealthy conditions defined by the cloud provider
+// If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
+func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.NodeCondition, cpTerminationDuration time.Duration) {
+	requeueTime := time.Time{}
+	for _, policy := range c.policies {
 		// check the status, type, and reason on the condition
 		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
-		if !policy.matches(nodeCondition) {
-			continue
-		}
-		if end := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration); condition == nil || end.Before(tolerationEnd) {
-			condition, tolerationEnd = new(nodeCondition), end
+		if policy.matches(nodeCondition) {
+			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
+			// Determine requeue time
+			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
+				nc = new(nodeCondition)
+				cpTerminationDuration = policy.TolerationDuration
+				requeueTime = terminationTime
+			}
 		}
 	}
-	return condition, tolerationEnd
+	return nc, cpTerminationDuration
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
@@ -300,7 +290,7 @@ func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOpt
 		return false, err
 	}
 	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
-		return lo.ContainsBy(c.policies.policies, func(policy replacePolicy) bool {
+		return lo.ContainsBy(c.policies, func(policy replacePolicy) bool {
 			return policy.matches(nodeutils.GetCondition(new(node), policy.ConditionType))
 		})
 	})

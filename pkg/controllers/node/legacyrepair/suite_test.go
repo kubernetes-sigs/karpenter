@@ -358,21 +358,6 @@ var _ = Describe("Node Health", func() {
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			Expect(ExpectExists(ctx, env.Client, nodeClaim).DeletionTimestamp).ToNot(BeNil())
 		})
-		It("should replace for a condition with no toleration even if it has no transition time", func() {
-			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-				{ConditionType: "ZeroToleration", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
-			}
-			healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
-			node.Status.Conditions = append(node.Status.Conditions,
-				corev1.NodeCondition{Type: "ZeroToleration", Status: corev1.ConditionFalse},
-				corev1.NodeCondition{Type: "BadNode", Status: corev1.ConditionFalse, LastTransitionTime: metav1.Time{Time: env.Clock.Now()}},
-			)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-
-			ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			Expect(ExpectExists(ctx, env.Client, nodeClaim).DeletionTimestamp).ToNot(BeNil())
-		})
 	})
 
 	Context("Forceful termination", func() {

@@ -38,7 +38,6 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -189,26 +188,26 @@ type Controller struct {
 	clock       clock.Clock
 	cluster     *state.Cluster
 	metricStore *metrics.Store
-	// pastDueRepairs is nil when node repair is off.
+	// pastDueRepairs is nil when the repair disruption method doesn't run.
 	pastDueRepairs *pastDueRepairs
 }
 
 // initializeMetricsOnce lets tests build more than one controller, since registering a metric twice panics.
 var initializeMetricsOnce sync.Once
 
-func NewController(ctx context.Context, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
+func NewController(clk clock.Clock, cluster *state.Cluster) *Controller {
 	initializeMetricsOnce.Do(initializeMetrics)
 	return &Controller{
 		clock:          clk,
 		cluster:        cluster,
 		metricStore:    metrics.NewStore(),
-		pastDueRepairs: newPastDueRepairs(ctx, cloudProvider),
+		pastDueRepairs: newPastDueRepairs(cluster.RepairPolicyMatcher()),
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-	// Cluster state may miss nodes until it first syncs, and a 0 then would wrongly say no repair is late.
+	// Cluster state may miss nodes until it first syncs, and a 0 then would wrongly say no node is past due.
 	reportPastDue := c.pastDueRepairs != nil && (c.cluster.HasSynced() || c.cluster.Synced(ctx))
 
 	nodes := lo.Reject(c.cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) bool {
@@ -223,7 +222,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// Build cluster level metric
 	metricsMap["clusterUtilization"] = buildClusterUtilizationMetric(nodes)
 	if reportPastDue {
-		metricsMap["repairPastDue"] = c.pastDueRepairs.buildPastDueMetrics(nodes, c.clock.Now())
+		metricsMap["repairPastDue"] = c.pastDueRepairs.update(nodes, c.clock.Now())
 	}
 
 	c.metricStore.ReplaceAll(metricsMap)

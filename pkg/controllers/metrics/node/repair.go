@@ -17,7 +17,6 @@ limitations under the License.
 package node
 
 import (
-	"context"
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -26,70 +25,99 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/legacyrepair"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
-// RepairPastDue counts the nodes whose repair is late.
-var RepairPastDue = opmetrics.NewPrometheusGauge(
-	crmetrics.Registry,
-	prometheus.GaugeOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: metrics.NodeSubsystem,
-		Name:      "repair_past_due",
-		Help:      "Number of unhealthy nodes whose repair is late: a repair condition has outlasted its policy's toleration plus the time repair gets to act, which is the node registration timeout plus the drain bound repair applies. Nodes that repair holds back, such as for disruption budgets, still count. Labeled by the repair condition.",
-	},
-	[]opmetrics.Label{disruption.RepairCondition},
-	opmetrics.Alpha,
+var (
+	// RepairPastDue counts the nodes that are past due on repair now.
+	RepairPastDue = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due",
+			Help:      "Number of unhealthy nodes whose repair is past due: for one of the node's eligible repair policies, the toleration ended longer ago than the time repair gets to act. That time is the 15 minute node registration timeout plus the drain bound, the shorter of the policy's and the NodeClaim's termination grace period, or nothing if neither sets one. Nodes that repair holds back, such as for disruption budgets, still count. Labeled by the condition repair acts on. Not reported when node repair is off, with --legacy-node-repair, or before cluster state first syncs.",
+		},
+		[]opmetrics.Label{disruption.RepairCondition},
+		opmetrics.Alpha,
+	)
+	// RepairPastDueDurationSeconds records how long a node was past due each time it stops being past due.
+	RepairPastDueDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due_duration_seconds",
+			Help:      "How long a node was past due on repair, recorded each time it stops being past due: it is removed, repair starts a reboot, it recovers, or repair stops acting on it, such as for do-not-repair. Labeled by the condition repair acted on last. Not recorded when node repair is off or with --legacy-node-repair.",
+			Buckets:   prometheus.ExponentialBuckets(60, 2, 12), // 1m, 2m, 4m, ... up to about 34h
+		},
+		[]opmetrics.Label{disruption.RepairCondition},
+		opmetrics.Alpha,
+	)
 )
 
-// pastDueRepairs finds the nodes whose repair is late. It decides the way the running repair does: the repair
-// disruption method, or the legacy controller under --legacy-node-repair.
+// pastDueRepairs reports the nodes that are past due on repair, as disruption.RepairPastDueSince decides.
 type pastDueRepairs struct {
-	// labels maps each repair condition to its label value. All are reported, so a condition with no late node shows 0
-	// rather than disappearing.
+	// labels maps each repair condition to its label value. Every condition reports 0 while no node is past due on it, so
+	// the series don't disappear.
 	labels map[corev1.NodeConditionType]string
-	// legacy is set when --legacy-node-repair runs the legacy controller in place of repair.
-	legacy         bool
-	legacyPolicies legacyrepair.ReplacePolicies
+	// pastDue holds the nodes the last pass found past due, by provider ID, so each is recorded once when it stops. It is
+	// in memory, so a node that stops being past due while Karpenter is down isn't recorded.
+	pastDue map[string]pastDueNode
+	// lastPass is when the last pass ran, or zero before the first one.
+	lastPass time.Time
 }
 
-// newPastDueRepairs returns nil when node repair is off, since then no node is ever late.
-func newPastDueRepairs(ctx context.Context, cloudProvider cloudprovider.CloudProvider) *pastDueRepairs {
-	if !options.FromContext(ctx).FeatureGates.NodeRepair {
+// pastDueNode is a node's current past-due stretch, which began at since.
+type pastDueNode struct {
+	label string
+	since time.Time
+}
+
+// newPastDueRepairs returns nil when the matcher is nil, since cluster state only has one while the repair disruption
+// method runs.
+func newPastDueRepairs(matcher *health.RepairPolicyMatcher) *pastDueRepairs {
+	if matcher == nil {
 		return nil
 	}
-	policies := cloudProvider.RepairPolicies()
-	r := &pastDueRepairs{legacy: options.FromContext(ctx).LegacyNodeRepair}
-	conditionTypes := lo.Map(policies, func(policy cloudprovider.RepairPolicy, _ int) corev1.NodeConditionType {
-		return policy.ConditionType
-	})
-	if r.legacy {
-		r.legacyPolicies = legacyrepair.NewReplacePolicies(policies)
-		// The legacy controller only replaces nodes, so a condition with only other actions is never repaired.
-		conditionTypes = r.legacyPolicies.ConditionTypes()
-	}
-	r.labels = lo.SliceToMap(conditionTypes, func(conditionType corev1.NodeConditionType) (corev1.NodeConditionType, string) {
+	return &pastDueRepairs{labels: lo.SliceToMap(matcher.ConditionTypes(), func(conditionType corev1.NodeConditionType) (corev1.NodeConditionType, string) {
 		return conditionType, pretty.ToSnakeCase(string(conditionType))
-	})
-	return r
+	})}
 }
 
-// buildPastDueMetrics counts each late node once, under the condition whose repair is late.
-func (r *pastDueRepairs) buildPastDueMetrics(nodes state.StateNodes, now time.Time) []*metrics.StoreMetric {
+// update counts the nodes that are past due now. For each node whose past-due stretch ended since the last pass, it
+// records how long the stretch was.
+func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time) []*metrics.StoreMetric {
 	counts := lo.SliceToMap(lo.Values(r.labels), func(label string) (string, int) { return label, 0 })
+	pastDue := map[string]pastDueNode{}
 	for _, n := range nodes {
-		if condition, ok := r.lateCondition(n, now); ok {
-			counts[r.labels[condition]]++
+		result, since, ok := disruption.RepairPastDueSince(n, now)
+		if !ok {
+			continue
+		}
+		if previous, found := r.pastDue[n.ProviderID()]; found {
+			// The stretch goes on, even if the condition that started it has recovered since.
+			since = previous.since
+		} else if !r.lastPass.IsZero() {
+			// The node wasn't past due at the last pass, such as while do-not-repair blocked repair, so its stretch can't
+			// have started before then.
+			since = lo.Latest(since, r.lastPass)
+		}
+		label := r.labels[result.Condition]
+		counts[label]++
+		pastDue[n.ProviderID()] = pastDueNode{label: label, since: since}
+	}
+	for providerID, previous := range r.pastDue {
+		if _, found := pastDue[providerID]; !found {
+			// since comes from API times, so a wall clock that steps back could make this negative.
+			RepairPastDueDurationSeconds.Observe(max(now.Sub(previous.since), 0).Seconds(), map[string]string{disruption.RepairCondition.Name: previous.label})
 		}
 	}
+	r.pastDue, r.lastPass = pastDue, now
 	return lo.MapToSlice(counts, func(condition string, count int) *metrics.StoreMetric {
 		return &metrics.StoreMetric{
 			GaugeMetric: RepairPastDue,
@@ -97,43 +125,4 @@ func (r *pastDueRepairs) buildPastDueMetrics(nodes state.StateNodes, now time.Ti
 			Labels:      prometheus.Labels{disruption.RepairCondition.Name: condition},
 		}
 	})
-}
-
-// lateCondition returns the condition whose repair is late on the node, if any.
-func (r *pastDueRepairs) lateCondition(n *state.StateNode, now time.Time) (corev1.NodeConditionType, bool) {
-	if !n.Managed() {
-		return "", false
-	}
-	if r.legacy {
-		return r.legacyLateCondition(n.Node, now)
-	}
-	// Repair needs a NodePool, and do-not-repair vetoes it.
-	if n.Labels()[v1.NodePoolLabelKey] == "" || disruption.DoNotRepair(n) {
-		return "", false
-	}
-	// A reboot in progress is repair acting. The reboot controller bounds it, and the toleration restarts once it ends.
-	if n.RebootInProgress() {
-		return "", false
-	}
-	current := n.GetRepairResult(now)
-	if current.Action == "" {
-		return "", false
-	}
-	// Repair gets the node registration timeout to act, plus the drain bound to drain the node.
-	allowance := lifecycle.RegistrationTimeout + lo.FromPtr(disruption.RepairDrainBound(n.NodeClaim, current))
-	// The node is late if a policy was already eligible that long ago.
-	late := n.GetRepairResult(now.Add(-allowance))
-	return late.Condition, late.Action != ""
-}
-
-// legacyLateCondition follows the legacy controller. It deletes the node without waiting on a drain once the toleration
-// ends, so it only gets the node registration timeout to remove the node.
-func (r *pastDueRepairs) legacyLateCondition(node *corev1.Node, now time.Time) (corev1.NodeConditionType, bool) {
-	condition, tolerationEnd := r.legacyPolicies.UnhealthyCondition(node)
-	if condition == nil {
-		return "", false
-	}
-	// The controller can't act before the node exists, so count from no earlier than its creation.
-	eligibleAt := lo.Latest(tolerationEnd, node.CreationTimestamp.Time)
-	return condition.Type, !now.Before(eligibleAt.Add(lifecycle.RegistrationTimeout))
 }
