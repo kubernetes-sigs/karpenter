@@ -13,8 +13,6 @@ on:
         type: string
         required: false
         description: "Samples per test. Overrides PERF_ITERATIONS for one run."
-permissions:
-  contents: read
 env:
   PERF_ITERATIONS: "1"
 jobs:
@@ -81,7 +79,6 @@ jobs:
     needs: plan
     permissions:
       issues: write
-      contents: read # a called workflow's jobs cannot exceed the caller's grant
     strategy:
       fail-fast: false
       matrix:
