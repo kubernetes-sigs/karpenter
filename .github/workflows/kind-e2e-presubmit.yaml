@@ -1,0 +1,102 @@
+name: kind-e2e-presubmit
+# One k8s version of the Regression and Disruption suites on every PR that changes more than docs.
+# kind-e2e keeps the full version matrix on push to main.
+on:
+  pull_request:
+permissions:
+  contents: read
+# A new push to a pull request cancels that pull request's in-flight run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  changes:
+    name: kind-e2e-presubmit (changes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+      repeat: ${{ steps.changes.outputs.repeat }}
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        # The PR merge commit and its first parent, the current base.
+        fetch-depth: 2
+        persist-credentials: false
+    - id: changes
+      shell: bash
+      run: hack/kind-e2e-presubmit-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
+  suite:
+    name: kind-e2e-presubmit (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each suite is split in two by spec file to roughly halve wall clock. The second shard
+        # skips what the first focuses, so a new spec file always runs. Top-level setup nodes must
+        # stay in suite_test.go. One in a focused file pulls every spec into the first shard, and
+        # --ginkgo.fail-on-empty, which make adds for file filters, fails the emptied second shard.
+        include:
+        - name: regression-1
+          suite: Regression
+          focus_file: suites/regression/(nodeclaim|staticcapacity|defaultconstraints)_test.go
+        - name: regression-2
+          suite: Regression
+          skip_file: suites/regression/(nodeclaim|staticcapacity|defaultconstraints)_test.go
+        - name: disruption-1
+          suite: Disruption
+          focus_file: suites/disruption/(drift|vpaprediction|terminatefirst)_test.go
+        - name: disruption-2
+          suite: Disruption
+          skip_file: suites/disruption/(drift|vpaprediction|terminatefirst)_test.go
+    uses: ./.github/workflows/e2e.yaml
+    with:
+      # Matches the envtest cache key of the kind-e2e 1.36.x legs. The kind node image is the
+      # kind-action default either way.
+      k8s_version: "1.36.x"
+      suite: ${{ matrix.suite }}
+      focus_file: ${{ matrix.focus_file }}
+      skip_file: ${{ matrix.skip_file }}
+      test_name: ${{ matrix.name }}
+      # Below the job timeout, after about 10 minutes of setup, so a hang ends with a ginkgo report.
+      ginkgo_timeout: 70m
+      timeout_minutes: 90
+  repeat:
+    name: kind-e2e-presubmit (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && needs.changes.outputs.repeat != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.repeat) }}
+    uses: ./.github/workflows/e2e.yaml
+    with:
+      k8s_version: "1.36.x"
+      suite: ${{ matrix.suite }}
+      focus_file: ${{ matrix.focus_file }}
+      # With the shard's run, three passing runs, to catch a new spec that races.
+      runs: 2
+      # Two passes, setup and the 15m grace period fit under the job timeout.
+      ginkgo_timeout: 50m
+      test_name: ${{ matrix.name }}
+      timeout_minutes: 130
+  result:
+    # One stable check name for tide, like presubmit-result.
+    name: kind-e2e-presubmit-result
+    if: always()
+    needs: [changes, suite, repeat]
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - env:
+        CHANGES: ${{ needs.changes.result }}
+        RUN: ${{ needs.changes.outputs.run }}
+        SUITE: ${{ needs.suite.result }}
+        REPEAT: ${{ needs.repeat.result }}
+      run: |
+        echo "changes: ${CHANGES} (run=${RUN}), suite: ${SUITE}, repeat: ${REPEAT}"
+        test "${CHANGES}" = success
+        if [ "${RUN}" = true ]; then test "${SUITE}" = success; fi
+        case "${REPEAT}" in success | skipped) ;; *) exit 1 ;; esac

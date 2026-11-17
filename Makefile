@@ -85,16 +85,24 @@ delete-kind-dra: ## Delete DRA Kind cluster
 	kind delete cluster --name $(KIND_CLUSTER_NAME)
 
 JUNIT_REPORT := $(if $(ARTIFACT_DIR), --ginkgo.junit-report="$(ARTIFACT_DIR)/junit_report.xml")
+# go test's timeout kills the suite without a ginkgo report, so a lower GINKGO_TIMEOUT is the one to fire.
+GINKGO_TIMEOUT ?= 2h
+GO_TEST_TIMEOUT ?= 2h
+# FOCUS_FILE and SKIP_FILE take space-separated ginkgo file filters (file regexp, optionally :lines).
+# A file filter that matches no spec is a mistake, so it fails the run.
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
 		-count 1 \
-		-timeout 2h \
+		-timeout $(GO_TEST_TIMEOUT) \
 		-v \
 		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
 		$(JUNIT_REPORT) \
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.skip="${SKIP}" \
-		--ginkgo.timeout=2h \
+		$(foreach f,$(FOCUS_FILE),--ginkgo.focus-file="$(f)") \
+		$(foreach f,$(SKIP_FILE),--ginkgo.skip-file="$(f)") \
+		$(if $(FOCUS_FILE)$(SKIP_FILE),--ginkgo.fail-on-empty) \
+		--ginkgo.timeout=$(GINKGO_TIMEOUT) \
 		--ginkgo.grace-period=15m \
 		--ginkgo.vv
 
