@@ -44,6 +44,7 @@ import (
 
 var _ = Describe("Repair Past Due", func() {
 	var repairCtx context.Context
+	var repairCluster *state.Cluster
 	var repairNodeController *informer.NodeController
 	var repairNodeClaimController *informer.NodeClaimController
 	var repairMetricsController *node.Controller
@@ -79,10 +80,12 @@ var _ = Describe("Repair Past Due", func() {
 		cloudProvider.RepairPolicy = policies
 		repairCtx = options.ToContext(ctx, test.Options(fields))
 		matcher := lo.Must(health.NewRepairPolicyMatcher(repairCtx, cloudProvider))
-		repairCluster := state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(matcher))
+		repairCluster = state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(matcher))
 		repairNodeController = informer.NewNodeController(env.Client, repairCluster)
 		repairNodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, repairCluster, cost.NewClusterCost(repairCtx, cloudProvider, env.Client))
 		repairMetricsController = node.NewController(env.Clock, repairCluster)
+		// The metrics controller never sets cluster state's synced flag, so set it as another controller would.
+		Expect(repairCluster.Synced(repairCtx)).To(BeTrue(), "startRepair needs an empty cluster to mark cluster state synced")
 	}
 	nodePoolNodeClaim := func() *v1.NodeClaim {
 		return test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: "default"}}})
@@ -200,14 +203,36 @@ var _ = Describe("Repair Past Due", func() {
 			Expect(ExpectMetricName(node.RepairPastDueDurationSeconds.(*opmetrics.PrometheusHistogram))).To(Equal("karpenter_nodes_repair_past_due_duration_seconds"))
 			expectPastDue(map[string]int{"bad_node": 0, "bad_disk": 0})
 		})
-		It("should not report the metric until cluster state syncs", func() {
-			// Cluster state hasn't seen this NodeClaim yet, so it may be missing nodes.
-			nodeClaim := nodePoolNodeClaim()
-			ExpectApplied(repairCtx, env.Client, nodeClaim)
+		It("should not emit any series until another controller marks cluster state synced", func() {
+			// Clear the synced flag that startRepair set.
+			repairCluster.SetSynced(false)
+			unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			env.Clock.Step(2 * time.Hour)
 			expectNoSeries()
+			// A node that stops being past due before cluster state is marked synced isn't recorded.
+			applyCondition(n, healthyNodeCondition)
+			expectNoSeries()
+			// Cluster state has every NodeClaim and Node, but the metrics controller doesn't set the flag itself.
+			Expect(repairCluster.HasSynced()).To(BeFalse())
 
-			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			expectPastDue(map[string]int{"bad_node": 0, "bad_disk": 0})
+			Expect(repairCluster.Synced(repairCtx)).To(BeTrue())
+			expectPastDue(map[string]int{"bad_node": 1, "bad_disk": 0})
+			expectRecorded("bad_node", 0, 0)
+		})
+		It("should keep reporting while NodeClaims are still launching", func() {
+			unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			env.Clock.Step(2 * time.Hour)
+			expectPastDue(map[string]int{"bad_node": 1})
+			// Neither NodeClaim has a node yet, and the sync check fails until the one with no provider ID launches.
+			launched, launching := nodePoolNodeClaim(), nodePoolNodeClaim()
+			launching.Status.ProviderID = ""
+			ExpectApplied(repairCtx, env.Client, launched, launching)
+			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(launched))
+			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(launching))
+			Expect(repairCluster.Synced(repairCtx)).To(BeFalse())
+			Expect(repairCluster.HasSynced()).To(BeTrue())
+			expectPastDue(map[string]int{"bad_node": 1})
 		})
 		DescribeTable("should count a node once its condition outlasts the toleration, the registration timeout and the drain bound",
 			func(policyBound, nodeClaimBound *time.Duration, drainBound time.Duration) {

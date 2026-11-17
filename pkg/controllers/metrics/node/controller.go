@@ -206,9 +206,9 @@ func NewController(clk clock.Clock, cluster *state.Cluster) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, c.Name())
-	// Cluster state may miss nodes until it first syncs, and a 0 then would wrongly say no node is past due.
-	reportPastDue := c.pastDueRepairs != nil && (c.cluster.HasSynced() || c.cluster.Synced(ctx))
+	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
+	// Cluster state may miss nodes until another controller, such as disruption, marks it synced.
+	reportPastDue := c.pastDueRepairs != nil && c.cluster.HasSynced()
 
 	nodes := lo.Reject(c.cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
