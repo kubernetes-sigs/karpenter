@@ -212,8 +212,22 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		env.ExpectExists(nodes[0])
 	})
 
-	It("respects disruption budgets", func() {
+	It("repairs through a reason-less budget of 0", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+		appLabels := map[string]string{"app": "repair-budget-floor"}
+		dep := test.Deployment(test.DeploymentOptions{Replicas: 1, PodOptions: test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: appLabels}}})
+		selector := labels.SelectorFromSet(appLabels)
+		env.ExpectCreated(nodeClass, nodePool, dep)
+		env.EventuallyExpectHealthyPodCount(selector, 1)
+		node := env.EventuallyExpectNodeCount("==", 1)[0]
+
+		env.ExpectRepairFaultInjected(node)
+		env.EventuallyExpectNotFound(node)
+		env.EventuallyExpectHealthyPodCount(selector, 1)
+	})
+
+	It("respects a disruption budget that names Unhealthy", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		appLabels := map[string]string{"app": "repair-budget"}
 		dep := test.Deployment(test.DeploymentOptions{Replicas: 1, PodOptions: test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: appLabels}}})
 		selector := labels.SelectorFromSet(appLabels)
@@ -224,7 +238,6 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		env.ExpectRepairFaultInjected(node)
 		env.ConsistentlyExpectNoDisruptions(1, time.Minute)
 
-		// Lifting the budget releases the repair, so it was the budget holding it back
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		env.ExpectUpdated(nodePool)
 		env.EventuallyExpectNotFound(node)

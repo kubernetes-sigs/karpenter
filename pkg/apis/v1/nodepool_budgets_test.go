@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	clock "k8s.io/utils/clock/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -133,7 +134,7 @@ var _ = Describe("Budgets", func() {
 			for _, reason := range allKnownDisruptionReasons {
 				allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
 				Expect(err).To(BeNil())
-				Expect(allowedDisruption).To(Equal(10))
+				Expect(allowedDisruption).To(Equal(lo.Ternary(reason == DisruptionReasonUnhealthy, 20, 10)))
 			}
 		})
 
@@ -145,8 +146,42 @@ var _ = Describe("Budgets", func() {
 			for _, reason := range allKnownDisruptionReasons {
 				allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
 				Expect(err).To(BeNil())
-				Expect(allowedDisruption).To(Equal(10))
+				Expect(allowedDisruption).To(Equal(lo.Ternary(reason == DisruptionReasonUnhealthy, 20, 10)))
 			}
+		})
+
+		DescribeTable("should floor reason-less budgets at 20% for Unhealthy",
+			func(nodes string, numNodes, expected int) {
+				nodePool.Spec.Disruption.Budgets = []Budget{{Nodes: nodes}}
+				allowed, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, numNodes, DisruptionReasonUnhealthy)
+				Expect(err).To(BeNil())
+				Expect(allowed).To(Equal(expected))
+				allowed, err = nodePool.GetAllowedDisruptionsByReason(fakeClock, numNodes, DisruptionReasonDrifted)
+				Expect(err).To(BeNil())
+				Expect(allowed).To(Equal(lo.Must(intstr.GetScaledValueFromIntOrPercent(new(GetIntStrFromValue(nodes)), numNodes, true))))
+			},
+			Entry("0 on 1 node", "0", 1, 1),
+			Entry("0% on 10 nodes", "0%", 10, 2),
+			Entry("default 10% on 100 nodes", "10%", 100, 20),
+			Entry("50% on 100 nodes", "50%", 100, 50),
+		)
+		It("should floor an active scheduled reason-less budget of 0 for Unhealthy", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{Nodes: "0", Schedule: new("* * * * *"), Duration: new(metav1.Duration{Duration: time.Hour})}}
+			allowed, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 10, DisruptionReasonUnhealthy)
+			Expect(err).To(BeNil())
+			Expect(allowed).To(Equal(2))
+		})
+		It("should honor a budget of 0 that names Unhealthy", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{Nodes: "10%"}, {Nodes: "0", Reasons: []DisruptionReason{DisruptionReasonUnhealthy}}}
+			allowed, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, DisruptionReasonUnhealthy)
+			Expect(err).To(BeNil())
+			Expect(allowed).To(Equal(0))
+		})
+		It("should fail closed for Unhealthy on an invalid reason-less budget", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{Nodes: "10%", Schedule: new("@wrongly"), Duration: new(metav1.Duration{Duration: time.Hour})}}
+			allowed, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, DisruptionReasonUnhealthy)
+			Expect(err).ToNot(BeNil())
+			Expect(allowed).To(Equal(0))
 		})
 
 		It("should get the minimum budget for each reason", func() {
