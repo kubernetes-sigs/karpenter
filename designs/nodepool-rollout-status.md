@@ -348,17 +348,19 @@ That label gives use case 4 a per-cause view (`reason="NodePoolDrifted"`, `reaso
 
 ## Backward compatibility
 
+Rollout status is gated behind the `NodeRolloutStatus` feature gate (disabled by default in Alpha). When the gate is disabled, Karpenter behaves as it does today. Provisioning and `nodeclaim.disruption` do not write the generation stamps, `nodeclaim.disruption` keeps its short-circuiting `isDrifted()` order, `nodepool.counter` keeps `status.nodes` equal to `status.resources["nodes"]` without writing rollout fields or `NodesUpToDate`, and `nodeclass.counter` does not run.
+
 The new NodeClaim fields, NodePool fields, and condition are additive and read-only, and no YAML needs to change. Users must apply the updated CRDs to see the fields, as with any Karpenter CRD upgrade. `NodesUpToDate` is not part of the `Ready` aggregate, so `Ready` semantics stay the same for existing consumers.
 
 NodeClass status fields are also additive on each provider CRD. Providers that have not added them do not implement `NodeClassWithRolloutStatus`, and core skips them. KWOK ships the fields in the same change as the NodePool API, so the in-tree provider is a complete example.
 
-`status.nodes` is the one field whose meaning changes. It is read-only, so nothing breaks on the wire, but its value shifts. It now includes NodeClaims that have not launched and NodeClaims that are terminating, so it reads higher than before during provisioning and disruption. For a steady-state pool it is unchanged.
-
-Inlining `NodeRolloutStatus` preserves the existing JSON path and ordinary Go selectors such as `nodePool.Status.Nodes`. Go callers that use keyed composite literals need a source change. `NodePoolStatus{Nodes: value}` must become `NodePoolStatus{NodeRolloutStatus: NodeRolloutStatus{Nodes: value}}`. Karpenter does not use such literals internally, but external Go consumers may need this mechanical update.
-
 ## Graduation criteria
 
-We propose no feature gate. The change is additive and read-only, uses data Karpenter already maintains, and does not affect provisioning or disruption behavior. The main risk is the API shape, which this RFC exists to settle.
+Rollout status ships behind the `NodeRolloutStatus` feature gate (`--feature-gates NodeRolloutStatus=true` or `FEATURE_GATES=NodeRolloutStatus=true`).
+
+- **Alpha (`NodeRolloutStatus=false` by default).**
+- **Beta (`NodeRolloutStatus=true` by default).** Requires API server status-patch load validation at scale, user feedback on the `status.nodes` redefinition, and `NodeRolloutStatus` adoption in `EC2NodeClass` in the AWS provider.
+- **GA (gate removed).** Requires at least one minor release in Beta with no regressions in controller reconcile latency or API server write load.
 
 Provider NodeClass fields can lag behind the core NodeClaim and NodePool fields. AMI, `userData`, and other NodeClass spec rollouts become visible to Argo on the NodeClass GVK once each provider adds the CRD fields, in follow-up PRs for AWS, Azure, and GCP. Until then, users can already query the NodeClaim stamps, and KWOK is the in-tree example. A NodePool health check does not wait for NodeClass compatibility, so an AMI Application must health-check the NodeClass GVK.
 
