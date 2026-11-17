@@ -1002,7 +1002,8 @@ var _ = Describe("Ranking", func() {
 				nodePool.Name: {pricedIT: &cloudprovider.InstanceType{
 					Name: pricedIT,
 					Offerings: cloudprovider.Offerings{{
-						Available: true,
+						Available:  true,
+						Compatible: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  ct,
 							corev1.LabelTopologyZone: zone,
@@ -1113,7 +1114,8 @@ var _ = Describe("Ranking", func() {
 				nodePool.Name: {it: &cloudprovider.InstanceType{
 					Name: it,
 					Offerings: cloudprovider.Offerings{{
-						Available: true,
+						Available:  true,
+						Compatible: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  ct,
 							corev1.LabelTopologyZone: zone,

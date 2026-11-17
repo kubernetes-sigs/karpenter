@@ -576,6 +576,7 @@ var _ = Describe("Disruption Taints", func() {
 		currentInstance := fake.NewInstanceType("current-on-demand",
 			fake.WithOfferings(cloudprovider.Offering{
 				Available:    false,
+				Compatible:   true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 				Price:        1.5,
 			}),
@@ -584,16 +585,19 @@ var _ = Describe("Disruption Taints", func() {
 			fake.WithOfferings(
 				cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        1.0,
 				},
 				cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 					Price:        0.2,
 				},
 				cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 					Price:        0.4,
 				},

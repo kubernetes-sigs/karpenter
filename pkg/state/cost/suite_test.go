@@ -107,8 +107,9 @@ var _ = Describe("ClusterCost", func() {
 				v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 				corev1.LabelTopologyZone: "test-zone-1",
 			}),
-			Price:     1.50,
-			Available: true,
+			Price:      1.50,
+			Available:  true,
+			Compatible: true,
 		}
 
 		onDemandOffering = &cloudprovider.Offering{
@@ -116,8 +117,9 @@ var _ = Describe("ClusterCost", func() {
 				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 				corev1.LabelTopologyZone: "test-zone-1",
 			}),
-			Price:     3.00,
-			Available: true,
+			Price:      3.00,
+			Available:  true,
+			Compatible: true,
 		}
 
 		testInstanceType = &cloudprovider.InstanceType{
@@ -360,8 +362,9 @@ var _ = Describe("ClusterCost", func() {
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 					corev1.LabelTopologyZone: "test-zone-1",
 				}),
-				Price:     2.50, // Changed from 1.50 to 2.50
-				Available: true,
+				Price:      2.50, // Changed from 1.50 to 2.50
+				Available:  true,
+				Compatible: true,
 			}
 
 			updatedInstanceType := &cloudprovider.InstanceType{

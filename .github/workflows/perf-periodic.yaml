@@ -3,11 +3,11 @@ on:
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   perf-periodic:
     if: github.event_name != 'schedule' || github.repository == 'kubernetes-sigs/karpenter'
-    permissions:
-      issues: write
     strategy:
       fail-fast: false
       matrix:

@@ -6,10 +6,10 @@ on:
         description: "Sweep grid for the nodepools scenario"
         type: string
         default: '{"nodepools":[1,10,100,1000],"pods":[100,1000]}'
+permissions:
+  contents: read
 jobs:
   perf-release:
-    permissions:
-      issues: write
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performancev2

@@ -13,6 +13,8 @@ on:
         type: string
         required: false
         description: "Samples per test. Overrides PERF_ITERATIONS for one run."
+permissions:
+  contents: read
 env:
   PERF_ITERATIONS: "1"
 jobs:
@@ -77,8 +79,6 @@ jobs:
         } >> "$GITHUB_OUTPUT"
   kind-perf-e2e:
     needs: plan
-    permissions:
-      issues: write
     strategy:
       fail-fast: false
       matrix:
