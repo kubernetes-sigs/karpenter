@@ -5,7 +5,6 @@ on:
   pull_request:
 permissions:
   contents: read
-# A new push to a pull request cancels that pull request's in-flight run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -33,10 +32,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each suite is split in two by spec file to roughly halve wall clock. The second shard
-        # skips what the first focuses, so a new spec file always runs. Top-level setup nodes must
-        # stay in suite_test.go. One in a focused file pulls every spec into the first shard, and
-        # --ginkgo.fail-on-empty, which make adds for file filters, fails the emptied second shard.
+        # The second shard skips what the first focuses, so a new spec file always runs. Keep top-level
+        # setup nodes in suite_test.go: one in a focused file empties the second shard and fails it.
         include:
         - name: regression-1
           suite: Regression
@@ -52,14 +49,13 @@ jobs:
           skip_file: suites/disruption/(drift|vpaprediction|terminatefirst)_test.go
     uses: ./.github/workflows/e2e.yaml
     with:
-      # Matches the envtest cache key of the kind-e2e 1.36.x legs. The kind node image is the
-      # kind-action default either way.
+      # Matches the kind-e2e 1.36.x envtest cache. The kind node image is the kind-action default either way.
       k8s_version: "1.36.x"
       suite: ${{ matrix.suite }}
       focus_file: ${{ matrix.focus_file }}
       skip_file: ${{ matrix.skip_file }}
       test_name: ${{ matrix.name }}
-      # Below the job timeout, after about 10 minutes of setup, so a hang ends with a ginkgo report.
+      # Below the job timeout minus setup, so a hang ends with a ginkgo report.
       ginkgo_timeout: 70m
       timeout_minutes: 90
   repeat:
@@ -75,9 +71,9 @@ jobs:
       k8s_version: "1.36.x"
       suite: ${{ matrix.suite }}
       focus_file: ${{ matrix.focus_file }}
-      # With the shard's run, three passing runs, to catch a new spec that races.
+      # Plus the shard's run, three passes to catch a racy new spec.
       runs: 2
-      # Two passes, setup and the 15m grace period fit under the job timeout.
+      # Two passes, setup and the 15m grace period fit under timeout_minutes.
       ginkgo_timeout: 50m
       test_name: ${{ matrix.name }}
       timeout_minutes: 130

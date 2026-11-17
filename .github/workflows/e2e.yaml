@@ -155,7 +155,7 @@ jobs:
         while IFS= read -r kv; do [ -n "$kv" ] && export "${kv?}"; done <<< "$PERF_ENV"
         # An empty GINKGO_TIMEOUT would override the Makefile's ?= default.
         [ -n "$GINKGO_TIMEOUT" ] || unset GINKGO_TIMEOUT
-        # A loop because go test can't rerun a ginkgo suite and --ginkgo.repeat is ginkgo CLI only.
+        # go test can't rerun a ginkgo suite, and --ginkgo.repeat is ginkgo CLI only.
         for _ in $(seq "$RUNS"); do TEST_SUITE="$SUITE" make e2etests; done
     - name: plot performance results
       if: always() && inputs.plot && env.OUTPUT_DIR != ''
