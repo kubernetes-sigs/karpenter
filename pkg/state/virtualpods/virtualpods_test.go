@@ -236,6 +236,28 @@ var _ = Describe("VirtualPodCache", func() {
 			}
 		})
 
+		It("should read scalableRef workloads from the direct reader", func() {
+			cb := test.ReadyScalableRefBuffer("scalable", 2)
+			// The cached client has the buffer and nothing else. Resolution has to
+			// use the direct reader or the workload is missing.
+			cache := NewVirtualPodCache(fakeClient(cb))
+			cache.SetWorkloadReader(fakeClient(deploymentFor(cb)))
+
+			Expect(cache.hydrateCache(ctx)).To(Succeed())
+			cache.warmed = true
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
+		})
+
+		It("should keep resolving podTemplateRef from the cached client when a direct reader is set", func() {
+			cb := test.ReadyBuffer("web", 2)
+			cache := NewVirtualPodCache(fakeClient(cb, podTemplateFor(cb)))
+			cache.SetWorkloadReader(fakeClient())
+
+			Expect(cache.hydrateCache(ctx)).To(Succeed())
+			cache.warmed = true
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
+		})
+
 		It("should return an empty cache when there are no buffers", func() {
 			cache := NewVirtualPodCache(fakeClient())
 			Expect(cache.hydrateCache(ctx)).To(Succeed())
@@ -251,7 +273,7 @@ var _ = Describe("VirtualPodCache", func() {
 			// Treat the cache as warmed so concurrent GetAll calls read the map
 			// rather than racing to lazily hydrate an empty cluster.
 			cache.warmed = true
-			spec, err := resolveVirtualPodSpec(ctx, cache.kubeClient, cb)
+			spec, err := resolveVirtualPodSpec(ctx, cache.kubeClient, cache.workloadReader, cb)
 			Expect(err).ToNot(HaveOccurred())
 
 			var wg sync.WaitGroup
@@ -281,7 +303,7 @@ func fakeClient(objs ...client.Object) client.Client {
 // the cache's own client), then hand it to the cache. Resolution is expected to
 // succeed.
 func resolveAndUpdate(ctx context.Context, cache *Cache, cb *autoscalingv1beta1.CapacityBuffer) {
-	spec, err := resolveVirtualPodSpec(ctx, cache.kubeClient, cb)
+	spec, err := resolveVirtualPodSpec(ctx, cache.kubeClient, cache.workloadReader, cb)
 	Expect(err).ToNot(HaveOccurred())
 	cache.UpdateEntry(cb, spec)
 }

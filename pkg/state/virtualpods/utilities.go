@@ -65,8 +65,16 @@ func isBufferReadyForProvisioning(cb *autoscalingv1beta1.CapacityBuffer) bool {
 // resolveVirtualPodSpec fetches the pod spec for a buffer using the shared
 // workload resolution utilities. Reads from spec (not status) to avoid stale
 // references when users switch between podTemplateRef and scalableRef.
-func resolveVirtualPodSpec(ctx context.Context, kubeClient client.Client, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodTemplateSpec, error) {
-	result, err := apps.ResolveCapacityBuffer(ctx, kubeClient, cb)
+//
+// workloads, when set, reads scalableRef targets. Passing the API reader keeps
+// hydration from starting a cluster-wide informer for that kind. PodTemplates
+// stay on kubeClient, which already watches them.
+func resolveVirtualPodSpec(ctx context.Context, kubeClient client.Client, workloads client.Reader, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodTemplateSpec, error) {
+	reader := client.Reader(kubeClient)
+	if cb.Spec.ScalableRef != nil && workloads != nil {
+		reader = workloads
+	}
+	result, err := apps.ResolveCapacityBuffer(ctx, reader, cb)
 	if err != nil {
 		return corev1.PodTemplateSpec{}, err
 	}
