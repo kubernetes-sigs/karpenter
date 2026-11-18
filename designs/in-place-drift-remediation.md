@@ -84,18 +84,19 @@ sequenceDiagram
 2. **Reuse the reboot lifecycle.** Core commits the node to the existing reboot controller with `DisruptionReason=Drifted`, skipping scheduling simulation and replacement. `Reboot` has no action field: the provider reads `DisruptionReason` and the `Drifted` condition to choose its in-place operation, and re-checks that it is still safe. Any other reason stays a plain reboot. `operationID` is the provider's idempotency key.
 3. **Keep the reboot lifecycle reason-agnostic.** The reboot controller completes on a new boot ID and `Ready`, as it does for any reboot. It does not read the image back or ask about drift, so it never encodes why the node rebooted. Keeping `Status.ImageID` current after an in-place change is the provider's job, because only the provider can confirm when its APIs reflect the new image.
 4. **Confirm the drift is resolved on the next drift pass.** A new boot ID and `Ready` prove the node restarted, not that the drift was resolved. A failed operation that reboots on the old image looks the same. The drift method calls `GetDriftStatus` again, as it does for every node, and the provider answers from its own record of the operation rather than from eventually consistent read APIs: `NoOp` when the change landed, `Replace` when it failed. `Replace` takes today's drift path, so the replacement launches before the node is drained.
-5. **Backstop a provider that keeps asking for `Reboot`.** The provider's `Replace` is what escalates a failed operation. `RebootHistory` only covers a provider that returns `Reboot` again after its operation reported success. Today it lives in repair: it keeps committed reboots per NodeClaim in memory and escalates the next reboot to replacement once 2 were committed within 24 hours. Drift shares that history and records each in-place reboot it commits, so a NodeClaim that asks for another `Reboot` after 2 in 24 hours, from drift or repair, is replaced through today's drift path. Like repair's, the history resets when the controller restarts.
+5. **Leave escalation to the provider.** The provider's `Replace` is what escalates a failed operation, and the provider decides when to stop resolving drift in place. Drift does not use repair's `RebootHistory`, so a node can take several image rollouts within 24 hours, and drift and repair signals stay separate. Repair keeps its history and escalation unchanged.
 
 ### Interaction with Existing Features
 
 - **Disruption budgets.** In-place nodes count against the `Drifted` budget until they are `Initialized` again, as every rebooted node does since [#3497](https://github.com/kubernetes-sigs/karpenter/pull/3497). A `Drifted` budget of `0` stops in-place remediation and replacements alike.
+- **Static NodePools.** Static drift goes through `StaticDrift`, not `Drift`, and takes the same `Reboot` path. A reboot keeps the node count, so the `replicas` and `limits.nodes` checks that gate a pre-spun replacement do not apply. The `Drifted` budget still does.
 - **Blocking pods.** Drift admits nodes with PDB or `do-not-disrupt` blockers only when the NodeClaim has a `terminationGracePeriod`.
 - **Pod downtime.** In-place remediation keeps the instance at the cost of a longer pod outage.
   Replacement pre-spins a node, so evicted pods schedule and start right away.
   A reboot first drains the node or waits out its `terminationGracePeriod`, then reboots, and only after it is `Ready` again can pods schedule on it.
   User-facing docs must lead with this tradeoff.
 - **Repair.** `ValidateNodeDisruptable` already blocks all other disruption while a node is rebooting. Repair reboots stay plain reboots. Resolving drift during a repair reboot would spend the `Unhealthy` budget on drift, even when the `Drifted` budget is `0`. An `Unhealthy` node that is also drifted is repaired first and resolved in place on a later drift pass, under the `Drifted` budget.
-- **Failure.** The reboot controller already escalates a failed reboot after disruption to NodeClaim replacement, with the drain bounded by the committed grace period. No new failure state is added.
+- **Failure.** The reboot controller already deletes the NodeClaim when a reboot after disruption fails, with the drain bounded by the committed grace period. No replacement is pre-spun: pods go through normal provisioning, and a static NodePool refills to its replicas. No new failure state is added.
 - **Consolidation.** Unchanged. A node that finishes in-place remediation is no longer drifted and is evaluated normally.
 
 ### Observability
@@ -109,7 +110,7 @@ sequenceDiagram
 - **More than one drift reason.** The provider returns `Replace` unless it can resolve every reason in place.
 - **Controller restart mid-operation.** `Reboot` is called again with the same `operationID`, so the provider joins the existing operation.
 - **Operation fails and the node reboots on the old image.** The reboot succeeds, the next `GetDriftStatus` returns `Replace`, and the node is replaced through today's drift path.
-- **Operation fails before the node reboots.** No new boot ID appears, so the reboot fails when the observation window ends and the node is replaced. The node stays drained for that window.
+- **Operation fails before the node reboots.** A provider that sees the operation rejected returns `NodeRebootFailedError`, so the reboot fails right away. Otherwise no new boot ID appears and the reboot fails when the observation window ends, and the node stays drained for that window. Either way the NodeClaim is deleted.
 
 ## Alternatives Considered
 
@@ -129,7 +130,7 @@ The provider can resolve the image from its NodeClass, so core never needs to kn
 
 Keep `IsDrifted`, add `DriftRemediation` to choose between in-place and replace, and add `RebootStatus` so core polls the provider for the operation's state.
 Rejected because `GetDriftStatus` answers both questions with one method: before the reboot it picks the action, and on the next drift pass it confirms the drift is gone.
-The cost is fail-fast: an operation that fails before the node reboots is detected when the observation window ends rather than immediately.
+The cost is fail-fast: an operation that fails before the node reboots, without the provider rejecting it, is detected when the observation window ends rather than immediately.
 
 ### A dedicated `terminationGracePeriod` for reboots
 
