@@ -287,6 +287,120 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		})
 	})
 
+	// https://github.com/kubernetes-sigs/karpenter/issues/3525: an instance type that can only launch into a full reservation can't launch, so it mustn't be a NodeClaim's option or count toward minValues.
+	Context("minValues with an instance type that only offers a full reservation", func() {
+		instanceTypeNames := func(nc *scheduling.NodeClaim) []string {
+			return lo.Map(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })
+		}
+		minValuesNodePool := func(minValues int, instanceTypes ...string) *v1.NodePool {
+			return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: instanceTypes, MinValues: new(minValues)},
+				},
+			}}}})
+		}
+		BeforeEach(func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("full-reservation-only", fake.WithOfferings(*reservedOffering("r-full", true, 0))),
+				fake.NewInstanceType("on-demand-type"),
+			}
+		})
+
+		It("doesn't count toward minValues when provisioning", func() {
+			ExpectApplied(ctx, env.Client, minValuesNodePool(2, "full-reservation-only", "on-demand-type"))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.NewNodeClaims).To(BeEmpty())
+			Expect(results.PodErrors).To(HaveKey(pod))
+			Expect(results.PodErrors[pod].Error()).To(ContainSubstring("minValues requirement is not met"))
+		})
+
+		It("doesn't count toward minValues in fallback mode", func() {
+			ExpectApplied(ctx, env.Client, minValuesNodePool(2, "full-reservation-only", "on-demand-type"))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}) // default fallback mode
+
+			Expect(results.NewNodeClaims).To(BeEmpty())
+			Expect(results.PodErrors).To(HaveKey(pod))
+			Expect(results.PodErrors[pod].Error()).To(ContainSubstring("minValues requirement is not met"))
+		})
+
+		It("isn't an instance type option when minValues is met without it", func() {
+			ExpectApplied(ctx, env.Client, minValuesNodePool(1, "full-reservation-only", "on-demand-type"))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(instanceTypeNames(results.NewNodeClaims[0])).To(ConsistOf("on-demand-type"))
+		})
+
+		It("relaxes minValues without it under the BestEffort policy", func() {
+			ExpectApplied(ctx, env.Client, minValuesNodePool(2, "full-reservation-only", "on-demand-type"))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback, scheduling.MinValuesPolicy(options.MinValuesPolicyBestEffort))
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(instanceTypeNames(results.NewNodeClaims[0])).To(ConsistOf("on-demand-type"))
+			Expect(results.NewNodeClaims[0].Annotations).To(HaveKeyWithValue(v1.NodeClaimMinValuesRelaxedAnnotationKey, "true"))
+			Expect(results.NewNodeClaims[0].Requirements.Get(corev1.LabelInstanceTypeStable).MinValues()).To(HaveValue(Equal(1)))
+		})
+
+		It("counts toward minValues once a slot in the reservation is credited back", func() {
+			// Both types only offer reservations, so the NodeClaim, once narrowed to its reservations, can launch either.
+			cloudProvider.InstanceTypes = append(cloudProvider.InstanceTypes,
+				fake.NewInstanceType("reservation-with-capacity", fake.WithOfferings(*reservedOffering("r-has-cap", true, 2))))
+			ExpectApplied(ctx, env.Client, minValuesNodePool(2, "full-reservation-only", "reservation-with-capacity"))
+
+			pod := smallPod()
+			Expect(solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback).PodErrors).To(HaveKey(pod))
+
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity("r-full", 1))
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(instanceTypeNames(results.NewNodeClaims[0])).To(ConsistOf("full-reservation-only", "reservation-with-capacity"))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-full", "r-has-cap"))
+		})
+
+		It("still counts an instance type that has a launchable offering besides its full reservation", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				newReservedType(reservedOffering("r-full", true, 0)),
+				fake.NewInstanceType("on-demand-type"),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(2, "reserved-type", "on-demand-type"))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(instanceTypeNames(results.NewNodeClaims[0])).To(ConsistOf("reserved-type", "on-demand-type"))
+		})
+
+		// fits stops at the first compatible offering, so the full reservation is listed first here.
+		// A launchable offering that comes after it must still count.
+		It("still counts an instance type whose full reservation is listed before its launchable offering", func() {
+			it := newReservedType(reservedOffering("r-full", true, 0))
+			it.Offerings = append(cloudprovider.Offerings{it.Offerings[len(it.Offerings)-1]}, it.Offerings[:len(it.Offerings)-1]...)
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{it, fake.NewInstanceType("on-demand-type")}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(2, "reserved-type", "on-demand-type"))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(instanceTypeNames(results.NewNodeClaims[0])).To(ConsistOf("reserved-type", "on-demand-type"))
+		})
+	})
+
 	// https://github.com/kubernetes-sigs/karpenter/issues/3451: under PreferencePolicy=Respect, a preferred
 	// capacity-type=reserved is treated as required on the first pass, which hides the on-demand/spot fallback once the
 	// reservation is full. The scheduler must relax the preference or fall through to another NodePool instead of
