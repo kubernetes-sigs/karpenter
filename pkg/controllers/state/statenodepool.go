@@ -89,7 +89,7 @@ func (n *NodePoolState) MarkNodeClaimDeleting(npName, ncName string) {
 	n.nodePoolNameToNodeClaimState[npName].Active.Delete(ncName)
 }
 
-// Marks the given NodeClaim as Deleting in NodePoolState
+// Marks the given NodeClaim as PendingDisruption in NodePoolState
 func (n *NodePoolState) MarkNodeClaimPendingDisruption(npName, ncName string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -112,7 +112,7 @@ func (n *NodePoolState) Cleanup(ncName string) {
 		npState.Active.Delete(ncName)
 		npState.PendingDisruption.Delete(ncName)
 
-		if npState.Active.Len() == 0 && npState.Deleting.Len() == 0 {
+		if npState.Active.Len() == 0 && npState.Deleting.Len() == 0 && npState.PendingDisruption.Len() == 0 {
 			delete(n.nodePoolNameToNodeClaimState, npName)
 			delete(n.nodePoolNameToNodePoolLimit, npName)
 		}

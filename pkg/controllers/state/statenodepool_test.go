@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -47,6 +48,24 @@ var _ = Describe("NodePoolState", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
+	})
+
+	Context("Cleanup", func() {
+		It("should keep tracking a NodePool whose remaining NodeClaims are pending disruption", func() {
+			npState := state.NewNodePoolState()
+			npState.SetNodeClaimMapping(nodePool.Name, "pending")
+			npState.SetNodeClaimMapping(nodePool.Name, "active")
+			npState.MarkNodeClaimPendingDisruption(nodePool.Name, "pending")
+			npState.MarkNodeClaimActive(nodePool.Name, "active")
+
+			npState.Cleanup("active")
+			active, deleting, pendingDisruption := npState.GetNodeCount(nodePool.Name)
+			Expect([]int{active, deleting, pendingDisruption}).To(Equal([]int{0, 0, 1}))
+
+			npState.Cleanup("pending")
+			active, deleting, pendingDisruption = npState.GetNodeCount(nodePool.Name)
+			Expect([]int{active, deleting, pendingDisruption}).To(Equal([]int{0, 0, 0}))
+		})
 	})
 
 	Context("ReserveNodeCount", func() {
