@@ -193,6 +193,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		// Blocked (not silently skipped): a NotReady pool can't be refilled, so terminating first would strand the workload.
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		Expect(recorder.DetectedEvent("static NodePool is at its node limit and cannot stage a replacement, and terminate-first is skipped because the NodePool is not ready")).To(BeTrue())
 	})
 
 	// Repair doesn't disrupt a static pool mid scale-down (mirrors StaticDrift): with more nodes running than the desired
@@ -545,6 +546,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		Expect(recorder.DetectedEvent("static NodePool is at its node limit and cannot stage a replacement, and terminate-first is skipped because the NodePool is being deleted")).To(BeTrue())
 	})
 
 	// A static NodePool whose replacement can only land in a full capacity reservation can't pre-spin even below
@@ -676,7 +678,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			repairReservedNode(nodePool)
 
 			Expect(queue.GetCommands()).To(HaveLen(0))
-			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement, and terminate-first is skipped because the NodePool is not ready")).To(BeTrue())
 		})
 
 		// A node whose reservation is no longer offered frees no slot a refill could launch into, and a pre-spun

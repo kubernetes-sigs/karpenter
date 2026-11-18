@@ -210,11 +210,11 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			if reservationsFull || r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
 				// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand
 				// the workload with no replacement.
-				refillable := np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
+				refillable := staticRefillBlocker(np) == ""
 				if !terminateFirstEnabled || !refillable {
-					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, withTerminateFirstBlocker(lo.Ternary(reservationsFull,
 						"static NodePool's capacity reservations are full and cannot stage a replacement",
-						"static NodePool is at its node limit and cannot stage a replacement"))...)
+						"static NodePool is at its node limit and cannot stage a replacement"), terminateFirstEnabled, np))...)
 					continue
 				}
 				return []Command{{

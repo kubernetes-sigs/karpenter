@@ -386,7 +386,7 @@ func (n *NodeClaim) offeringsToReserve(
 	// PreferencePolicy=Respect, which hides an on-demand/spot fallback). This reproduces the pre-decouple behavior, where a
 	// full reservation was Available=false and simply wasn't offered here.
 	if onlyFullReservations {
-		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
+		return nil, fmt.Errorf("the only compatible reserved offering is full")
 	}
 
 	// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,

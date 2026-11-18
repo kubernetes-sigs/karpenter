@@ -154,7 +154,9 @@ func (d *StaticDrift) unreplaceableCommands(ctx context.Context, np *v1.NodePool
 	reason TerminateFirstReason, blockedReason string) []Command {
 	// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand the workload
 	// with no replacement.
-	terminateFirst := options.FromContext(ctx).FeatureGates.TerminateFirstDrift && np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
+	terminateFirstEnabled := options.FromContext(ctx).FeatureGates.TerminateFirstDrift
+	terminateFirst := terminateFirstEnabled && staticRefillBlocker(np) == ""
+	blockedReason = withTerminateFirstBlocker(blockedReason, terminateFirstEnabled, np)
 	var cmds []Command
 	for _, c := range candidates {
 		if terminateFirst && canTerminateFirst(c) {

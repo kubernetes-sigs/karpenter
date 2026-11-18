@@ -475,6 +475,28 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 
 // holdsOfferedReservation reports whether the candidate holds a slot in a reservation that's still offered, so
 // terminating it frees a slot its refill can launch into.
+// staticRefillBlocker says why static provisioning won't refill a NodePool, so terminate-first can't run for it, or is
+// empty when the NodePool can be refilled. Static provisioning refuses NotReady or deleting NodePools.
+func staticRefillBlocker(np *v1.NodePool) string {
+	switch {
+	case !np.DeletionTimestamp.IsZero():
+		return "the NodePool is being deleted"
+	case !np.StatusConditions().Root().IsTrue():
+		return "the NodePool is not ready"
+	default:
+		return ""
+	}
+}
+
+// withTerminateFirstBlocker appends why terminate-first was skipped to a Blocked message, when that is the reason the
+// node is blocked.
+func withTerminateFirstBlocker(msg string, terminateFirstEnabled bool, np *v1.NodePool) string {
+	if blocker := staticRefillBlocker(np); terminateFirstEnabled && blocker != "" {
+		return fmt.Sprintf("%s, and terminate-first is skipped because %s", msg, blocker)
+	}
+	return msg
+}
+
 func holdsOfferedReservation(c *Candidate, offered sets.Set[string]) bool {
 	return c.capacityType == v1.CapacityTypeReserved && offered.Has(c.Labels()[cloudprovider.ReservationIDLabel])
 }
