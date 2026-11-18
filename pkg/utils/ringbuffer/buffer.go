@@ -47,6 +47,14 @@ func (b *RingBuffer[T]) Reset() {
 	b.head = 0
 }
 
+// Clone returns an independent copy of the buffer that keeps track of which entry is the oldest, so the next Insert on
+// the copy replaces the same entry it would replace on the original.
+func (b *RingBuffer[T]) Clone() *RingBuffer[T] {
+	values := make([]T, len(b.values), cap(b.values))
+	copy(values, b.values)
+	return &RingBuffer[T]{values: values, head: b.head}
+}
+
 func (b *RingBuffer[T]) Items() []T {
 	return b.values
 }

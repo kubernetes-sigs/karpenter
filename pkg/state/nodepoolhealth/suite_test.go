@@ -107,6 +107,19 @@ var _ = Describe("NodePoolHealthState", func() {
 		Expect(npState.DryRun(npUUID, false).Status()).To(Equal(nodepoolhealth.StatusUnhealthy))
 		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusHealthy))
 	})
+	It("should predict the same status as the real update once the buffer has wrapped", func() {
+		// Five updates into a buffer of four: [false, true, true, true] with the oldest entry (true) at index 1.
+		for _, launched := range []bool{false, true, true, true, false} {
+			npState.Update(npUUID, launched)
+		}
+		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusHealthy))
+
+		// Another failure replaces the oldest entry, leaving two failures out of four.
+		Expect(npState.DryRun(npUUID, false).Status()).To(Equal(nodepoolhealth.StatusUnhealthy))
+		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusHealthy))
+		npState.Update(npUUID, false)
+		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusUnhealthy))
+	})
 	It("should reset the buffer first when setting status", func() {
 		npState.Update(npUUID, false)
 		npState.Update(npUUID, false)

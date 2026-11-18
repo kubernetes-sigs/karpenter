@@ -55,4 +55,22 @@ var _ = Describe("RingBufferUtils", func() {
 		Expect(boolBuffer.Items()[0]).To(Equal(false))
 		Expect(boolBuffer.Items()[1]).To(Equal(true))
 	})
+	It("should clone a wrapped buffer so the next insert replaces the same oldest entry", func() {
+		buffer := ringbuffer.New[int](3)
+		for i := range 4 {
+			buffer.Insert(i) // [3, 1, 2], oldest is 1
+		}
+		clone := buffer.Clone()
+		Expect(clone.Items()).To(Equal([]int{3, 1, 2}))
+		Expect(cap(clone.Items())).To(Equal(3))
+
+		clone.Insert(4)
+		buffer.Insert(4)
+		Expect(clone.Items()).To(Equal([]int{3, 4, 2}))
+		Expect(clone.Items()).To(Equal(buffer.Items()))
+
+		// The clone doesn't share storage with the original.
+		clone.Insert(5)
+		Expect(buffer.Items()).To(Equal([]int{3, 4, 2}))
+	})
 })

@@ -143,13 +143,12 @@ func (s *State) SetStatus(nodePoolUID types.UID, status Status) {
 }
 
 func (s *State) DryRun(nodePoolUID types.UID, launchStatus bool) *Tracker {
-	trackerCopy := NewTracker(BufferSize)
 	originalTracker := s.nodePoolNodeRegistration(nodePoolUID)
 
+	// Clone rather than re-insert the items: once the buffer has wrapped, Items() isn't in insertion order, and
+	// re-inserting would make the dry-run update replace a different entry than the real update would.
 	originalTracker.RLock()
-	for _, item := range originalTracker.buffer.Items() {
-		trackerCopy.buffer.Insert(item)
-	}
+	trackerCopy := &Tracker{buffer: *originalTracker.buffer.Clone()}
 	originalTracker.RUnlock()
 
 	trackerCopy.Update(launchStatus)
