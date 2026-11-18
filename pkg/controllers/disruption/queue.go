@@ -223,9 +223,9 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// We use the number of commands in the queue as a proxy for cloud provider traffic.
 	// As the number of commands increase, we expect more delays and scale the retry duration accordingly.
 	retryDuration := q.GetMaxRetryDuration()
-	// Wrap an error in an unrecoverable error if it timed out
+	// Wrap an error in an unrecoverable error if it timed out. A command that succeeds on its last attempt still succeeded.
 	defer func() {
-		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
+		if err != nil && q.clock.Since(cmd.CreationTimestamp) > retryDuration {
 			err = NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout, %w", err), "duration", q.clock.Since(cmd.CreationTimestamp)))
 		}
 	}()

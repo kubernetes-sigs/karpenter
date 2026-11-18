@@ -297,6 +297,48 @@ var _ = Describe("Queue", func() {
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
 		})
+		It("should succeed a command whose replacements finish initializing after the timeout", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			replacements := []*disruption.Replacement{
+				{
+					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
+				},
+			}
+
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements:      replacements,
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+
+			replacementNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim)).To(Succeed())
+			replacementNodeClaim, replacementNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
+
+			// This metric isn't reset between specs, so clear it to isolate this command.
+			disruption.DisruptionQueueFailuresTotal.Reset()
+
+			// The replacement is initialized, but the queue first observes it after the retry duration has elapsed.
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			Expect(cmd.Succeeded).To(BeTrue())
+			_, found := FindMetricWithLabelValues("karpenter_voluntary_disruption_queue_failures_total", map[string]string{})
+			Expect(found).To(BeFalse())
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
+		})
 		It("should only finish a command when all replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
