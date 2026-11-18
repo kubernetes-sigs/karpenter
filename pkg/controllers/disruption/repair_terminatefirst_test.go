@@ -402,8 +402,6 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 
-	// kubernetes-sigs/karpenter#3415: a dynamic reserved + on-demand NodePool whose reservation is full. Repair waits
-	// (Blocked), like a static NodePool, only if the on-demand fallback is transiently unavailable.
 	DescribeTable("a dynamic reserved + on-demand NodePool whose reservation is full",
 		func(mutate func(), decision disruption.Decision) {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))

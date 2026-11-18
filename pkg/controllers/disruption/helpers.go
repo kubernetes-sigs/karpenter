@@ -186,7 +186,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
 //     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
 //     uselessly. Even then, if the NodePool's non-reserved fallback is only transiently unavailable (e.g. ICE), we wait
-//     for it rather than terminating first, as a static NodePool does (see awaitsTransientCapacity).
+//     for it rather than terminating first, as a static NodePool does.
 //
 // A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, unchanged.
 func SimulateSchedulingWithReservedFallback(
@@ -449,19 +449,19 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	})
 }
 
-// templateOfferings yields the offerings a NodePool template could launch into, with their instance types.
-// GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements. An offering outside its
-// instance type's zones (e.g. one the type isn't offered in, or the NodeClass has no subnet in) can never launch, so it
-// isn't yielded.
-func templateOfferings(its []*cloudprovider.InstanceType, nct *scheduling.NodeClaimTemplate) iter.Seq2[*cloudprovider.InstanceType, *cloudprovider.Offering] {
+// templateOfferings yields the offerings a NodePool template could launch into, with their instance types, that match
+// include. GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements. An offering
+// outside its instance type's zones (e.g. one the type isn't offered in, or the NodeClass has no subnet in) can never
+// launch, so it isn't yielded. include is checked first, so a cheap field filter skips the requirement checks.
+func templateOfferings(its []*cloudprovider.InstanceType, nct *scheduling.NodeClaimTemplate, include func(*cloudprovider.Offering) bool) iter.Seq2[*cloudprovider.InstanceType, *cloudprovider.Offering] {
 	return func(yield func(*cloudprovider.InstanceType, *cloudprovider.Offering) bool) {
 		for _, it := range its {
-			if !nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) {
+			if !lo.ContainsBy(it.Offerings, include) || !nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) {
 				continue
 			}
 			zones := it.Requirements.Get(corev1.LabelTopologyZone)
-			for _, o := range it.Offerings.Compatible(nct.Requirements) {
-				if zones.Has(o.Zone()) && !yield(it, o) {
+			for _, o := range it.Offerings {
+				if include(o) && zones.Has(o.Zone()) && nct.Requirements.IsCompatible(o.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) && !yield(it, o) {
 					return
 				}
 			}
@@ -481,11 +481,11 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 		return false, nil, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
 	}
 	offered := sets.New[string]()
-	for _, o := range templateOfferings(its, nct) {
-		// A non-reserved offering that isn't Compatible can never launch, so it isn't a fallback worth waiting for.
-		if o.CapacityType() != v1.CapacityTypeReserved && !o.Compatible {
-			continue
-		}
+	// A non-reserved offering that isn't Compatible can never launch, so it isn't a fallback worth waiting for.
+	launchableOrReserved := func(o *cloudprovider.Offering) bool {
+		return o.Compatible || o.CapacityType() == v1.CapacityTypeReserved
+	}
+	for _, o := range templateOfferings(its, nct, launchableOrReserved) {
 		if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
 			return false, nil, nil
 		}
@@ -501,12 +501,15 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 // launch without the candidate's reservation slot once that capacity comes back. It's the dynamic counterpart of
 // staticReservations' non-reserved fallback check.
 func awaitsTransientCapacity(c *Candidate) bool {
-	podReqs := lo.Map(c.reschedulablePods, func(p *corev1.Pod, _ int) pkgscheduling.Requirements {
-		return pkgscheduling.NewStrictPodRequirements(p)
-	})
-	for it, o := range templateOfferings(lo.Values(c.nodePoolInstanceTypes), scheduling.NewNodeClaimTemplate(c.NodePool)) {
-		if o.CapacityType() == v1.CapacityTypeReserved || o.Available || !o.Compatible {
-			continue
+	transient := func(o *cloudprovider.Offering) bool {
+		return !o.Available && o.Compatible && o.CapacityType() != v1.CapacityTypeReserved
+	}
+	var podReqs []pkgscheduling.Requirements
+	for it, o := range templateOfferings(lo.Values(c.nodePoolInstanceTypes), scheduling.NewNodeClaimTemplate(c.NodePool), transient) {
+		if podReqs == nil {
+			podReqs = lo.Map(c.reschedulablePods, func(p *corev1.Pod, _ int) pkgscheduling.Requirements {
+				return pkgscheduling.NewStrictPodRequirements(p)
+			})
 		}
 		if lo.EveryBy(podReqs, func(r pkgscheduling.Requirements) bool {
 			return r.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) && r.IsCompatible(o.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels)

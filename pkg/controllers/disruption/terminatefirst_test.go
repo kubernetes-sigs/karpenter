@@ -714,6 +714,51 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Entry("terminates first when the pod can't use on-demand", func() {}, map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}, true),
 		)
 
+		// The transient fallback is a different instance type than the candidate's, so only the NodePool's full instance
+		// type set (not Candidate.instanceType) sees it.
+		It("waits when only another instance type in the NodePool has transiently unavailable on-demand", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available, o.Compatible = false, false // the candidate's own type has no on-demand fallback, ever
+			}
+			for _, o := range leastExpensiveInstance.Offerings {
+				o.Available = false // another type in the NodePool is ICE'd, but may come back
+			}
+			setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
+			nodePool.Spec.Template.Spec.Requirements[0].Values = []string{mostExpensiveInstance.Name, leastExpensiveInstance.Name}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		})
+
+		It("terminates first when another instance type in the NodePool has on-demand that's not Compatible", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available, o.Compatible = false, false
+			}
+			for _, o := range leastExpensiveInstance.Offerings {
+				o.Available, o.Compatible = false, false
+			}
+			setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
+			nodePool.Spec.Template.Spec.Requirements[0].Values = []string{mostExpensiveInstance.Name, leastExpensiveInstance.Name}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+		})
+
 		It("replaces-first when the reservation still has a spare slot", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(5, true, v1.CapacityTypeReserved) // spare reservation capacity -> can grow in place
