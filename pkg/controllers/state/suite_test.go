@@ -2779,6 +2779,24 @@ var _ = Describe("NodePoolState Tracking", func() {
 				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeFalse())
 			})
 
+			It("should not track a NodeClaim that is marked after it was removed", func() {
+				ExpectDeleted(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				// Static deprovisioning marks a NodeClaim Deleting after its Delete call returns, which can be after the
+				// informer has already removed it.
+				cluster.NodePoolState.MarkNodeClaimDeleting(nodePool.Name, nodeClaim.Name)
+				cluster.NodePoolState.MarkNodeClaimPendingDisruption(nodePool.Name, nodeClaim.Name)
+				cluster.NodePoolState.MarkNodeClaimActive(nodePool.Name, nodeClaim.Name)
+
+				running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(pendingdisruption).To(Equal(0))
+				// A NodeClaim that no longer exists must not hold a slot against limits.nodes
+				Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 1, 1)).To(Equal(int64(1)))
+			})
+
 		})
 
 		Context("MarkForDeletion", func() {

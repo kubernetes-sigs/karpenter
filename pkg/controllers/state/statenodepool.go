@@ -71,6 +71,9 @@ func (n *NodePoolState) SetNodeClaimMapping(npName, ncName string) {
 func (n *NodePoolState) MarkNodeClaimActive(npName, ncName string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if !n.isTracked(npName, ncName) {
+		return
+	}
 	n.ensureNodePoolEntry(npName)
 
 	n.nodePoolNameToNodeClaimState[npName].PendingDisruption.Delete(ncName)
@@ -82,6 +85,9 @@ func (n *NodePoolState) MarkNodeClaimActive(npName, ncName string) {
 func (n *NodePoolState) MarkNodeClaimDeleting(npName, ncName string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if !n.isTracked(npName, ncName) {
+		return
+	}
 	n.ensureNodePoolEntry(npName)
 
 	n.nodePoolNameToNodeClaimState[npName].PendingDisruption.Delete(ncName)
@@ -89,10 +95,13 @@ func (n *NodePoolState) MarkNodeClaimDeleting(npName, ncName string) {
 	n.nodePoolNameToNodeClaimState[npName].Active.Delete(ncName)
 }
 
-// Marks the given NodeClaim as Deleting in NodePoolState
+// Marks the given NodeClaim as PendingDisruption in NodePoolState
 func (n *NodePoolState) MarkNodeClaimPendingDisruption(npName, ncName string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if !n.isTracked(npName, ncName) {
+		return
+	}
 	n.ensureNodePoolEntry(npName)
 
 	n.nodePoolNameToNodeClaimState[npName].Active.Delete(ncName)
@@ -201,6 +210,14 @@ func (n *NodePoolState) UpdateNodeClaim(nodeClaim *v1.NodeClaim, markedForDeleti
 	} else {
 		n.MarkNodeClaimActive(npName, nodeClaim.Name)
 	}
+}
+
+// isTracked reports whether ncName is still mapped to npName. Callers can mark a NodeClaim after Cleanup has already
+// dropped it, e.g. static deprovisioning marks a NodeClaim Deleting after its Delete call returns, and the informer may
+// have processed the delete in between. Marking it then would leave a NodeClaim that no longer exists counted against
+// the NodePool's limits.nodes until the controller restarts.
+func (n *NodePoolState) isTracked(npName, ncName string) bool {
+	return npName != "" && n.nodeClaimNameToNodePoolName[ncName] == npName
 }
 
 func (n *NodePoolState) ensureNodePoolEntry(np string) {
