@@ -101,7 +101,8 @@ type RepairPolicy struct {
 	// TolerationDuration is added to the NodeCondition LastTransitionTime to determine when this policy becomes eligible.
 	TolerationDuration time.Duration
 	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
-	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
+	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod. If the NodeClaim sets none either, a node
+	//               with pods that block eviction (PDBs or karpenter.sh/do-not-disrupt) is not repaired at all.
 	//   non-zero -> min(this, nodeclaim.TerminationGracePeriod) — bound the drain even on a pool that set none,
 	//               so repair cannot wait indefinitely on eviction.
 	//   0        -> forceful: skip the drain for conditions the kubelet can't evict through (wedged kernel,
@@ -667,10 +668,17 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 type Offering struct {
 	Requirements scheduling.Requirements
 	Price        float64
-	Available    bool
+	// Available reports the offering's health: whether the provider can currently launch it at all (e.g. it is not
+	// suffering an ICE or an outage). It is independent of reservation capacity: a reserved offering whose reservation is
+	// full must stay Available with a ReservationCapacity of 0. Core reads Available=false as "something other than
+	// capacity is wrong", so a provider that marks a full reservation unavailable loses behavior such as terminate-first.
+	// Use Launchable to check whether a new node can be launched into the offering right now.
+	Available bool
 	// Compatible reports whether the offering can launch with the NodePool's NodeClass. Providers must set it to true for every
 	// offering they can launch; an offering that leaves it false is never Launchable.
-	Compatible          bool
+	Compatible bool
+	// ReservationCapacity is the number of free slots remaining in the offering's capacity reservation. It is only
+	// meaningful for reserved offerings (see IsReserved); 0 means the reservation is full, not that it is unhealthy.
 	ReservationCapacity int
 
 	// CapacityOverride specifies resource overrides for this offering's capacity.
@@ -855,7 +863,9 @@ func IgnoreNodeClaimNotFoundError(err error) error {
 
 // NodeRebootNotImplementedError is returned by CloudProviders that do not support in-place reboot.
 // The reboot controller treats it as a terminal, non-retryable signal that reboot is unavailable
-// for this provider (so a reboot policy that requires it is rejected at startup validation).
+// for this provider and fails the reboot. There is no startup validation against it: a provider that returns this
+// error must not list RebootNode repair policies, because each reboot would fail only after the node has been
+// drained, and the node is then replaced.
 type NodeRebootNotImplementedError struct{}
 
 func NewNodeRebootNotImplementedError() *NodeRebootNotImplementedError {
