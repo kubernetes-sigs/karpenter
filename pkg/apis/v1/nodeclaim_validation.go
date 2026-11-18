@@ -74,7 +74,7 @@ func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}
 	for _, taint := range taints {
 		// Validate OwnerKey
 		if len(taint.Key) == 0 {
-			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in %s", errs, fieldName))
+			errs = multierr.Append(errs, fmt.Errorf("invalid value: taint key must not be empty in %s", fieldName))
 		}
 		for _, err := range validation.IsQualifiedName(taint.Key) {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %s in %s", err, fieldName))

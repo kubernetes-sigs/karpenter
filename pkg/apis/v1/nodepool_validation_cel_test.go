@@ -393,6 +393,18 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 			Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
+		It("should describe an empty taint key at runtime without repeating earlier errors", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{
+				{Key: "???", Effect: v1.TaintEffectNoSchedule},
+				{Key: "", Effect: v1.TaintEffectNoSchedule},
+			}
+			err := nodePool.RuntimeValidate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("taint key must not be empty in taints"))
+			Expect(err.Error()).ToNot(ContainSubstring("%!"))
+			// The "???" key's error is reported once, not re-wrapped into the empty key's error.
+			Expect(err.Error()).ToNot(ContainSubstring("invalid value: invalid value"))
+		})
 		It("should fail at runtime for taint keys that are too long", func() {
 			oldNodePool := nodePool.DeepCopy()
 			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: v1.TaintEffectNoSchedule}}
