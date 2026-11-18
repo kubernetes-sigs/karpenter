@@ -154,6 +154,16 @@ var _ = Describe("Command.EstimatedSavings", func() {
 		Expect(savings).To(BeNumerically("~", expectedSavings, floatComparisonDelta), "verifying multi-NodeClaim cost summing")
 	})
 
+	It("reports no savings for reboot and terminate-first commands", func() {
+		candidate := mockCandidate("node-1")
+		candidate.Price = 0.50
+
+		Expect(Command{Candidates: []*Candidate{candidate}}.EstimatedSavings()).To(BeNumerically("~", 0.50, floatComparisonDelta))
+		Expect(Command{Candidates: []*Candidate{candidate}, Reboot: true}.EstimatedSavings()).To(BeZero())
+		Expect(Command{Candidates: []*Candidate{candidate}, TerminateFirstReason: TerminateFirstNoReservedCapacity}.EstimatedSavings()).To(BeZero())
+		Expect(Command{Candidates: []*Candidate{candidate}, TerminateFirstReason: TerminateFirstStaticAtLimit}.EstimatedSavings()).To(BeZero())
+	})
+
 	It("only considers offerings valid for an on-demand-only NodePool", func() {
 		// This test verifies that EstimatedSavings only considers offerings that are valid for the NodePool under
 		// consideration (e.g. on-demand-only NodePool)

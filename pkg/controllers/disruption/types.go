@@ -418,8 +418,9 @@ func (c Command) SourceCost() float64 {
 // replacement with no available compatible offering contributes 0 to
 // destination cost and inflates them.
 func (c Command) EstimatedSavings() float64 {
-	// A reboot keeps the instance, so it saves nothing.
-	if c.Reboot {
+	// A reboot keeps the instance, so it saves nothing. A terminate-first command frees a slot that reactive provisioning
+	// refills right away with equivalent capacity, so it saves nothing either.
+	if c.Reboot || c.TerminateFirstReason != "" {
 		return 0
 	}
 	sourcePrice := c.SourceCost()
