@@ -18,6 +18,7 @@ package garbagecollection_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -136,6 +137,31 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
+	It("shouldn't delete the NodeClaim when the Node lookup fails and the instance is gone", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		nodeClaim, _, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Step forward to move past the cache eventual consistency timeout
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
+
+		// Delete the nodeClaim from the cloudprovider
+		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
+
+		// The Node is Ready, but GC can't see that because listing Nodes fails
+		gc := nodeclaimgarbagecollection.NewController(env.Clock, &nodeListErrorClient{Client: env.Client}, cloudProvider)
+		_, err = gc.Reconcile(ctx)
+		Expect(err).To(HaveOccurred())
+		ExpectExists(ctx, env.Client, nodeClaim)
+	})
 	It("should delete many NodeClaims when the Nodes are there in a NotReady state and the instances are gone", func() {
 		var nodeClaims []*v1.NodeClaim
 		for range 100 {
@@ -224,3 +250,15 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 })
+
+// nodeListErrorClient fails every Node List, so callers can't look up the Node for a NodeClaim
+type nodeListErrorClient struct {
+	client.Client
+}
+
+func (c *nodeListErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*corev1.NodeList); ok {
+		return fmt.Errorf("injected node list error")
+	}
+	return c.Client.List(ctx, list, opts...)
+}
