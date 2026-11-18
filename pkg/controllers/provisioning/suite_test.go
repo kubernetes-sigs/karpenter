@@ -2873,6 +2873,99 @@ var _ = Describe("Provisioning", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 			})
+			Context("Equal Weights", func() {
+				instanceTypeWithPrice := func(name string, cpu string, price float64) *cloudprovider.InstanceType {
+					return fake.NewInstanceType(name,
+						fake.WithResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu)}),
+						fake.WithOfferings(cloudprovider.Offering{
+							Available:  true,
+							Compatible: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: price,
+						}),
+					)
+				}
+				weightedNodePool := func(name string, weight int32, instanceType *cloudprovider.InstanceType) *v1.NodePool {
+					cloudProvider.InstanceTypesForNodePool[name] = []*cloudprovider.InstanceType{instanceType}
+					return test.NodePool(v1.NodePool{
+						ObjectMeta: metav1.ObjectMeta{Name: name},
+						Spec:       v1.NodePoolSpec{Weight: lo.EmptyableToPtr(weight)},
+					})
+				}
+
+				It("should schedule to the cheapest nodepool across all nodepools with the same weight", func() {
+					// Equal weight nodepools are ordered by name descending, so the cheapest nodepool is neither first nor last
+					nodePools := []client.Object{
+						weightedNodePool("nodepool-a", 10, instanceTypeWithPrice("instance-type-a", "4", 2.0)),
+						weightedNodePool("nodepool-b", 10, instanceTypeWithPrice("instance-type-b", "4", 1.0)),
+						weightedNodePool("nodepool-c", 10, instanceTypeWithPrice("instance-type-c", "4", 3.0)),
+					}
+					ExpectApplied(ctx, env.Client, nodePools...)
+					pods := []*corev1.Pod{
+						test.UnschedulablePod(), test.UnschedulablePod(), test.UnschedulablePod(),
+					}
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+					for _, pod := range pods {
+						node := ExpectScheduled(ctx, env.Client, pod)
+						Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal("nodepool-b"))
+						Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-b"))
+					}
+				})
+				It("should schedule to a higher weight nodepool even if a lower weight nodepool is cheaper", func() {
+					ExpectApplied(ctx, env.Client,
+						weightedNodePool("nodepool-cheap", 10, instanceTypeWithPrice("instance-type-cheap", "4", 1.0)),
+						weightedNodePool("nodepool-expensive", 100, instanceTypeWithPrice("instance-type-expensive", "4", 3.0)),
+						weightedNodePool("nodepool-unweighted", 0, instanceTypeWithPrice("instance-type-unweighted", "4", 0.5)),
+					)
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal("nodepool-expensive"))
+				})
+				It("should only compare prices across equal weight nodepools that can fit the pod", func() {
+					ExpectApplied(ctx, env.Client,
+						weightedNodePool("nodepool-small", 10, instanceTypeWithPrice("instance-type-small", "1", 1.0)),
+						weightedNodePool("nodepool-large", 10, instanceTypeWithPrice("instance-type-large", "4", 3.0)),
+					)
+					pod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")},
+					}})
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal("nodepool-large"))
+				})
+				It("should schedule to a more expensive equal weight nodepool once the cheapest reaches its limits", func() {
+					cheapNodePool := weightedNodePool("nodepool-cheap", 10, instanceTypeWithPrice("instance-type-cheap", "4", 1.0))
+					cheapNodePool.Spec.Limits = v1.Limits{corev1.ResourceCPU: resource.MustParse("4")}
+					ExpectApplied(ctx, env.Client, cheapNodePool,
+						weightedNodePool("nodepool-expensive", 10, instanceTypeWithPrice("instance-type-expensive", "4", 3.0)),
+					)
+					// Each pod needs its own node, so only the first fits within the cheap nodepool's limits
+					pods := lo.Times(2, func(_ int) *corev1.Pod {
+						return test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")},
+						}})
+					})
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+					nodePoolNames := lo.Map(pods, func(p *corev1.Pod, _ int) string {
+						return ExpectScheduled(ctx, env.Client, p).Labels[v1.NodePoolLabelKey]
+					})
+					Expect(nodePoolNames).To(ConsistOf("nodepool-cheap", "nodepool-expensive"))
+				})
+				It("should fall back to name order between equal weight nodepools with the same price", func() {
+					ExpectApplied(ctx, env.Client,
+						weightedNodePool("nodepool-a", 10, instanceTypeWithPrice("instance-type-a", "4", 1.0)),
+						weightedNodePool("nodepool-z", 10, instanceTypeWithPrice("instance-type-z", "4", 1.0)),
+					)
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal("nodepool-z"))
+				})
+			})
 		})
 	})
 

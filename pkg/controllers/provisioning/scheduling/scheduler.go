@@ -735,101 +735,154 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod, volu
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
 }
 
+// newNodeClaimCandidate is the result of simulating the addition of a pod to a new NodeClaim for a NodeClaimTemplate
+type newNodeClaimCandidate struct {
+	nodeClaim          *NodeClaim
+	requirements       scheduling.Requirements
+	instanceTypes      []*cloudprovider.InstanceType
+	offeringsToReserve []*cloudprovider.Offering
+	allocationResult   *dynamicresources.AllocationResult
+}
+
+// launchPrice is the price of the cheapest offering the candidate NodeClaim could launch with. Reserved offerings are
+// only considered when the candidate holds a reservation for them.
+func (c *newNodeClaimCandidate) launchPrice() float64 {
+	if len(c.offeringsToReserve) != 0 {
+		return cloudprovider.Offerings(c.offeringsToReserve).Cheapest().Price
+	}
+	price := math.MaxFloat64
+	for _, it := range c.instanceTypes {
+		for _, o := range it.Offerings {
+			if o.Price < price && o.Launchable() && o.CapacityType() != v1.CapacityTypeReserved && c.requirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				price = o.Price
+			}
+		}
+	}
+	return price
+}
+
+// addToNewNodeClaim adds the pod to a new NodeClaim for the highest weight NodeClaimTemplate that can fit it. When
+// several NodeClaimTemplates share that weight, the one with the cheapest launch price is chosen, and NodeClaimTemplate
+// order only breaks ties between equal prices.
 func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
-	idx := math.MaxInt
+	candidates, errs := s.simulateNewNodeClaims(ctx, pod, volumes)
+	selected := s.selectNewNodeClaimCandidate(candidates, errs)
+	if selected == nil {
+		return multierr.Combine(errs...)
+	}
+
+	newNodeClaim := selected.nodeClaim
+	_, minValuesRelaxed := lo.Find(newNodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
+		updated := selected.requirements.Get(k).MinValues()
+		original := newNodeClaim.Requirements.Get(k).MinValues()
+		return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
+	})
+	if minValuesRelaxed {
+		newNodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "true"
+	} else {
+		newNodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "false"
+	}
+	// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
+	newNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], selected.requirements, selected.instanceTypes, volumes, selected.offeringsToReserve, selected.allocationResult, s.allocator)
+	s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
+	s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
+	return nil
+}
+
+// simulateNewNodeClaims simulates adding the pod to a new NodeClaim for each NodeClaimTemplate, returning the candidate
+// or error for each NodeClaimTemplate by index. Once a NodeClaimTemplate can fit the pod or returns a
+// ReservedOfferingError, NodeClaimTemplates with a lower weight can't be selected and are skipped.
+func (s *Scheduler) simulateNewNodeClaims(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) ([]*newNodeClaimCandidate, []error) {
 	var mu sync.Mutex
+	var topWeight int32
+	topWeightFound := false
 
-	var newNodeClaim *NodeClaim
-	var updatedRequirements scheduling.Requirements
-	var updatedInstanceTypes []*cloudprovider.InstanceType
-	var offeringsToReserve []*cloudprovider.Offering
-	var allocationResult *dynamicresources.AllocationResult
-
+	candidates := make([]*newNodeClaimCandidate, len(s.nodeClaimTemplates))
 	errs := make([]error, len(s.nodeClaimTemplates))
 	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
-		its := s.nodeClaimTemplates[i].InstanceTypeOptions
-		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
-		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
-			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
-			nodesRemaining, ok := remaining[resources.Node]
-			if ok && nodesRemaining.IsZero() {
-				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
-				return true
-			}
-			its = filterByRemainingResources(its, remaining)
-			if len(its) == 0 {
-				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
-				return true
-			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
-				log.FromContext(ctx).V(1).WithValues(
-					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
-				).Info("instance types were excluded because they would breach limits",
-					"excluded", len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
-					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
-			}
-		}
-		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode, s.creditReservationCapacity)
-		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
-		if err != nil {
-			errs[i] = err
-
-			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
-			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
-			// reserved capacity in the future if scheduling latency becomes an issue.
-			if IsReservedOfferingError(err) {
-				mu.Lock()
-				defer mu.Unlock()
-
-				// A reserved offering error means that any subsequent successful after this NodeClaimTemplate isn't valid
-				if i >= idx {
-					return false
-				}
-				newNodeClaim = nil
-				updatedRequirements = nil
-				updatedInstanceTypes = nil
-				offeringsToReserve = nil
-				allocationResult = nil
-				idx = i
-				return false
-			}
+		weight := s.nodeClaimTemplates[i].NodePoolWeight
+		mu.Lock()
+		skip := topWeightFound && weight < topWeight
+		mu.Unlock()
+		if skip {
 			return true
 		}
-		mu.Lock()
-		defer mu.Unlock()
-
-		// Ensure that we always take an earlier successful schedule to keep consistent ordering
-		// We care about this particularly with NewNodeClaims because NodeClaims should be evaluated by weight
-		if i >= idx {
-			return false
+		candidates[i], errs[i] = s.simulateNewNodeClaim(ctx, s.nodeClaimTemplates[i], pod, volumes)
+		if candidates[i] != nil || IsReservedOfferingError(errs[i]) {
+			mu.Lock()
+			if !topWeightFound || weight > topWeight {
+				topWeight, topWeightFound = weight, true
+			}
+			mu.Unlock()
 		}
-
-		_, minValuesRelaxed := lo.Find(nodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
-			updated := r.Get(k).MinValues()
-			original := nodeClaim.Requirements.Get(k).MinValues()
-			return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
-		})
-		if minValuesRelaxed {
-			nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "true"
-		} else {
-			nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "false"
-		}
-
-		newNodeClaim = nodeClaim
-		updatedRequirements = r
-		updatedInstanceTypes = its
-		offeringsToReserve = ofs
-		allocationResult = result
-		idx = i
-		return false
+		return true
 	})
-	if newNodeClaim != nil {
-		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		newNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, volumes, offeringsToReserve, allocationResult, s.allocator)
-		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
-		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
+	return candidates, errs
+}
+
+// selectNewNodeClaimCandidate returns the cheapest candidate among the highest weight NodeClaimTemplates that can fit
+// the pod or returned a ReservedOfferingError, or nil if there is no such candidate.
+func (s *Scheduler) selectNewNodeClaimCandidate(candidates []*newNodeClaimCandidate, errs []error) *newNodeClaimCandidate {
+	// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
+	// with a lower weight, or to a NodePool with an equal weight which would launch without reserved capacity.
+	eligible := lo.Filter(lo.Range(len(s.nodeClaimTemplates)), func(i int, _ int) bool {
+		return candidates[i] != nil || IsReservedOfferingError(errs[i])
+	})
+	if len(eligible) == 0 {
 		return nil
 	}
-	return multierr.Combine(errs...)
+	topWeight := lo.Max(lo.Map(eligible, func(i int, _ int) int32 { return s.nodeClaimTemplates[i].NodePoolWeight }))
+	eligible = lo.Filter(eligible, func(i int, _ int) bool { return s.nodeClaimTemplates[i].NodePoolWeight == topWeight })
+	if lo.ContainsBy(eligible, func(i int) bool { return IsReservedOfferingError(errs[i]) }) {
+		eligible = lo.Filter(eligible, func(i int, _ int) bool {
+			return candidates[i] != nil && len(candidates[i].offeringsToReserve) != 0
+		})
+	}
+
+	var selected *newNodeClaimCandidate
+	selectedPrice := math.MaxFloat64
+	for _, i := range eligible {
+		if price := candidates[i].launchPrice(); selected == nil || price < selectedPrice {
+			selected, selectedPrice = candidates[i], price
+		}
+	}
+	return selected
+}
+
+// simulateNewNodeClaim simulates adding the pod to a new NodeClaim for the NodeClaimTemplate, respecting the NodePool's
+// remaining limits
+func (s *Scheduler) simulateNewNodeClaim(ctx context.Context, nct *NodeClaimTemplate, pod *corev1.Pod, volumes scheduling.Volumes) (*newNodeClaimCandidate, error) {
+	its := nct.InstanceTypeOptions
+	// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
+	if remaining, ok := s.remainingResources[nct.NodePoolName]; ok {
+		// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
+		nodesRemaining, ok := remaining[resources.Node]
+		if ok && nodesRemaining.IsZero() {
+			return nil, serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", nct.NodePoolName))
+		}
+		its = filterByRemainingResources(its, remaining)
+		if len(its) == 0 {
+			return nil, serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", nct.NodePoolName))
+		} else if len(nct.InstanceTypeOptions) != len(its) {
+			log.FromContext(ctx).V(1).WithValues(
+				"NodePool", klog.KRef("", nct.NodePoolName),
+			).Info("instance types were excluded because they would breach limits",
+				"excluded", len(nct.InstanceTypeOptions)-len(its),
+				"total", len(nct.InstanceTypeOptions))
+		}
+	}
+	nodeClaim := NewNodeClaim(nct, s.topology, s.daemonOverheadGroups[nct], its, s.reservationManager, s.reservedOfferingMode, s.creditReservationCapacity)
+	r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
+	if err != nil {
+		return nil, err
+	}
+	return &newNodeClaimCandidate{
+		nodeClaim:          nodeClaim,
+		requirements:       r,
+		instanceTypes:      its,
+		offeringsToReserve: ofs,
+		allocationResult:   result,
+	}, nil
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
