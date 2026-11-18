@@ -45,10 +45,6 @@ type RebootHistory struct {
 	recent *cache.Cache
 }
 
-func NewRebootHistory() *RebootHistory {
-	return newRebootHistory(clock.RealClock{})
-}
-
 func newRebootHistory(clk clock.Clock) *RebootHistory {
 	return &RebootHistory{
 		clock:  clk,

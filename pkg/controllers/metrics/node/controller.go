@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -183,13 +184,15 @@ func nodeLabelNames() []opmetrics.Label {
 }
 
 type Controller struct {
+	clock       clock.Clock
 	cluster     *state.Cluster
 	metricStore *metrics.Store
 }
 
-func NewController(cluster *state.Cluster) *Controller {
+func NewController(clk clock.Clock, cluster *state.Cluster) *Controller {
 	initializeMetrics()
 	return &Controller{
+		clock:       clk,
 		cluster:     cluster,
 		metricStore: metrics.NewStore(),
 	}
@@ -204,7 +207,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	// Build per-node metrics
 	metricsMap := lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
-		return client.ObjectKeyFromObject(n.Node).String(), buildMetrics(n)
+		return client.ObjectKeyFromObject(n.Node).String(), c.buildMetrics(n)
 	})
 
 	// Build cluster level metric
@@ -263,7 +266,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 	return res
 }
 
-func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
+func (c *Controller) buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
 		TotalPodRequests:    n.PodRequests(),
@@ -283,7 +286,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	return append(res,
 		&metrics.StoreMetric{
 			GaugeMetric: Lifetime,
-			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+			Value:       c.clock.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
 			Labels:      getNodeLabels(n),
 		})
 }
