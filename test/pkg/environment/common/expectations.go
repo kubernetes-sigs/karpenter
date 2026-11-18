@@ -1314,7 +1314,7 @@ func (env *Environment) ForcePodsToSpread(nodes ...*corev1.Node) {
 		}).WithTimeout(5 * time.Second).Should(Succeed())
 
 		// TODO: Consider moving this time check to an Eventually poll. This gets a little tricker with helper functions
-		// since you need to make sure that your Expectation helper functions are scoped to to your "g Gomega" scope
+		// since you need to make sure that your Expectation helper functions are scoped to your "g Gomega" scope
 		// so that you don't fail the first time you get a failure on your expectation
 		if time.Since(start) > time.Minute*15 {
 			Fail("forcing pods to spread failed due to a timeout")

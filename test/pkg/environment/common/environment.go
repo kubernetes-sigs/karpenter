@@ -56,7 +56,7 @@ type ContextKey string
 
 const GitRefContextKey = ContextKey("gitRef")
 
-// I need to add the the default kwok nodeclass path
+// I need to add the default kwok nodeclass path
 // That way it's not defined in code but we use it when we initialize the nodeclass
 var (
 	//go:embed default_kowknodeclass.yaml

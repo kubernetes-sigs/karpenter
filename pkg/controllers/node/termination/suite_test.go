@@ -807,7 +807,7 @@ var _ = Describe("Termination", func() {
 			podCritical = ExpectExists(ctx, env.Client, podCritical)
 			Expect(podCritical.DeletionTimestamp.IsZero()).To(BeFalse())
 		})
-		It("should only delete pods when their terminationGracePeriodSeconds is less than the the node's remaining terminationGracePeriod", func() {
+		It("should only delete pods when their terminationGracePeriodSeconds is less than the node's remaining terminationGracePeriod", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 			nodeClaim.Annotations = map[string]string{
 				v1.NodeClaimTerminationTimestampAnnotationKey: env.Clock.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),

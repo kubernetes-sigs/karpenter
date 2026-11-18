@@ -110,7 +110,7 @@ func initializeMetrics() {
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "total_daemon_requests",
-			Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
+			Help:      "Node total daemon requests are the resources requested by DaemonSet pods bound to nodes.",
 		},
 		nodeLabelNamesWithResourceType(),
 		opmetrics.Beta,
