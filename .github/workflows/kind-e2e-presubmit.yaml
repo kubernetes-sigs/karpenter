@@ -49,7 +49,7 @@ jobs:
           skip_file: suites/disruption/(drift|vpaprediction|terminatefirst)_test.go
     uses: ./.github/workflows/e2e.yaml
     with:
-      # Matches the kind-e2e 1.36.x envtest cache. The kind node image is the kind-action default either way.
+      # The same version as the kind-e2e 1.36.x legs, so both share an envtest cache and node image.
       k8s_version: "1.36.x"
       suite: ${{ matrix.suite }}
       focus_file: ${{ matrix.focus_file }}
