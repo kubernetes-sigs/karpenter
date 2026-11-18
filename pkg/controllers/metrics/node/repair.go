@@ -58,6 +58,18 @@ var (
 		[]opmetrics.Label{disruption.RepairCondition},
 		opmetrics.Alpha,
 	)
+	// RepairPastDueTimeSeconds reports how long each past-due node has been past due.
+	RepairPastDueTimeSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due_time_seconds",
+			Help:      "How long a node has been past due on repair, reported while it is still past due. Labeled by the node name and the condition repair acts on. Not reported when node repair is off, with --legacy-node-repair, or before cluster state first syncs.",
+		},
+		[]opmetrics.Label{nodeNameLabel, disruption.RepairCondition},
+		opmetrics.Alpha,
+	)
 )
 
 // pastDueRepairs reports the nodes that are past due on repair, as disruption.RepairPastDueSince decides.
@@ -65,8 +77,8 @@ type pastDueRepairs struct {
 	// labels maps each repair condition to its label value. Every condition reports 0 while no node is past due on it, so
 	// the series don't disappear.
 	labels map[corev1.NodeConditionType]string
-	// pastDue holds the nodes the last pass found past due, by provider ID, so each is recorded once when it stops. It is
-	// in memory, so a node that stops being past due while Karpenter is down isn't recorded.
+	// pastDue holds each node's stretch from the last pass, by provider ID. It is in memory, so after a restart a stretch
+	// is measured again from the node's conditions, and one that ends while Karpenter is down isn't recorded.
 	pastDue map[string]pastDueNode
 	// lastPass is when the last pass ran, or zero before the first one.
 	lastPass time.Time
@@ -76,6 +88,11 @@ type pastDueRepairs struct {
 type pastDueNode struct {
 	label string
 	since time.Time
+}
+
+// durationAt returns how long the stretch has lasted as of now, or zero if the clock stepped back.
+func (p pastDueNode) durationAt(now time.Time) time.Duration {
+	return max(now.Sub(p.since), 0)
 }
 
 // newPastDueRepairs returns nil when the matcher is nil, since cluster state only has one while the repair disruption
@@ -89,11 +106,12 @@ func newPastDueRepairs(matcher *health.RepairPolicyMatcher) *pastDueRepairs {
 	})}
 }
 
-// update counts the nodes that are past due now. For each node whose past-due stretch ended since the last pass, it
-// records how long the stretch was.
-func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time) []*metrics.StoreMetric {
+// update counts the nodes that are past due now and reports how long each has been past due. For each node whose
+// past-due stretch ended since the last pass, it records how long the stretch was.
+func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time) map[string][]*metrics.StoreMetric {
 	counts := lo.SliceToMap(lo.Values(r.labels), func(label string) (string, int) { return label, 0 })
 	pastDue := map[string]pastDueNode{}
+	res := map[string][]*metrics.StoreMetric{}
 	for _, n := range nodes {
 		result, since, ok := disruption.RepairPastDueSince(n, now)
 		if !ok {
@@ -107,22 +125,29 @@ func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time) []*metric
 			// have started before then.
 			since = lo.Latest(since, r.lastPass)
 		}
-		label := r.labels[result.Condition]
-		counts[label]++
-		pastDue[n.ProviderID()] = pastDueNode{label: label, since: since}
+		current := pastDueNode{label: r.labels[result.Condition], since: since}
+		counts[current.label]++
+		pastDue[n.ProviderID()] = current
+		// Each node gets its own store key, since the store compares every old series under a key with every new one,
+		// which gets slow when many nodes are past due.
+		res["repairPastDue/"+n.Node.Name] = []*metrics.StoreMetric{{
+			GaugeMetric: RepairPastDueTimeSeconds,
+			Value:       current.durationAt(now).Seconds(),
+			Labels:      prometheus.Labels{nodeNameLabel.Name: n.Node.Name, disruption.RepairCondition.Name: current.label},
+		}}
 	}
 	for providerID, previous := range r.pastDue {
 		if _, found := pastDue[providerID]; !found {
-			// since comes from API times, so a wall clock that steps back could make this negative.
-			RepairPastDueDurationSeconds.Observe(max(now.Sub(previous.since), 0).Seconds(), map[string]string{disruption.RepairCondition.Name: previous.label})
+			RepairPastDueDurationSeconds.Observe(previous.durationAt(now).Seconds(), map[string]string{disruption.RepairCondition.Name: previous.label})
 		}
 	}
 	r.pastDue, r.lastPass = pastDue, now
-	return lo.MapToSlice(counts, func(condition string, count int) *metrics.StoreMetric {
+	res["repairPastDue"] = lo.MapToSlice(counts, func(condition string, count int) *metrics.StoreMetric {
 		return &metrics.StoreMetric{
 			GaugeMetric: RepairPastDue,
 			Value:       float64(count),
 			Labels:      prometheus.Labels{disruption.RepairCondition.Name: condition},
 		}
 	})
+	return res
 }
