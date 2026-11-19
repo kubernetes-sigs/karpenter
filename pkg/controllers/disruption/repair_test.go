@@ -1039,6 +1039,44 @@ var _ = Describe("Repair", func() {
 		Expect(recorder.DetectedEvent("repair requires a termination grace period to bypass blocking pods")).To(BeTrue())
 	})
 
+	It("should bypass a blocking pod when only the NodeClaim bounds the drain, without stamping a deadline", func() {
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 5 * time.Minute}
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer") // survive Delete so we can read the annotations
+		initNode(nodeClaim, node)
+		bindBlockingPod(node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(recorder.DetectedEvent("repair requires a termination grace period to bypass blocking pods")).To(BeFalse())
+		// The policy sets no bound, so the queue stamps no deadline.
+		Expect(cmds[0].Candidates[0].TerminationGracePeriod).To(BeNil())
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		current := ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(current.DeletionTimestamp.IsZero()).To(BeFalse())
+		Expect(current.Annotations).ToNot(HaveKey(v1.NodeClaimTerminationTimestampAnnotationKey))
+	})
+
+	It("should bypass a blocking pod when a forceful policy bounds the drain at zero", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Action: cloudprovider.ReplaceNode},
+		})
+		newRepairController()
+		initNode(nodeClaim, node)
+		bindBlockingPod(node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(recorder.DetectedEvent("repair requires a termination grace period to bypass blocking pods")).To(BeFalse())
+		Expect(cmds[0].Candidates[0].TerminationGracePeriod).To(HaveValue(BeZero()))
+	})
+
 	It("should size replacement capacity for a blocking pod when the drain is bounded", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
 			{

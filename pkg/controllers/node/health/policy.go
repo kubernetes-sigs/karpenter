@@ -63,7 +63,8 @@ type RepairPolicyMatcher struct {
 
 // RepairResult merges all eligible policies for one Node. Condition, ConditionStatus, Reason, ReasonRegex, Fallback,
 // and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
-// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it.
+// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it. FirstEligibleAt is
+// when the earliest of the eligible policies became eligible, or zero if none is eligible.
 type RepairResult struct {
 	Action                           cloudprovider.RepairAction
 	Condition                        corev1.NodeConditionType
@@ -72,6 +73,7 @@ type RepairResult struct {
 	ReasonRegex                      string
 	Fallback                         bool
 	SelectedEligibleAt               time.Time
+	FirstEligibleAt                  time.Time
 	TerminationGracePeriod           *time.Duration
 	TerminationGracePeriodCondition  corev1.NodeConditionType
 	selectedPriority                 int
@@ -81,11 +83,6 @@ type RepairResult struct {
 	// the same rate, so the highest one stays the highest.
 	scoreRank       int
 	scoreEligibleAt time.Time
-	// DrainDueAt reads these: the earliest eligibility across the eligible policies, the earliest eligibility plus
-	// termination grace period across those that set one, and the earliest eligibility across those that don't.
-	firstEligibleAt          time.Time
-	firstBoundedDrainEnd     *time.Time
-	firstUnboundedEligibleAt *time.Time
 }
 
 // ScoreAt returns the result's repair score as of now: the highest rank + age/agingConstant across its eligible
@@ -96,26 +93,6 @@ func (r RepairResult) ScoreAt(now time.Time) float64 {
 		return 0
 	}
 	return float64(r.scoreRank) + now.Sub(r.scoreEligibleAt).Minutes()/agingConstant.Minutes()
-}
-
-// DrainDueAt returns the earliest time that an eligible policy's drain ends, if repair acts as soon as the policy is
-// eligible. The drain is bounded by the shorter of the policy's termination grace period and nodeClaimTGP, and with
-// neither it adds no time. It is zero when no policy is eligible.
-func (r RepairResult) DrainDueAt(nodeClaimTGP *time.Duration) time.Time {
-	if r.Action == "" {
-		return time.Time{}
-	}
-	var ends []time.Time
-	if r.firstBoundedDrainEnd != nil {
-		ends = append(ends, *r.firstBoundedDrainEnd)
-	}
-	if nodeClaimTGP != nil {
-		// The NodeClaim's bound caps every policy's drain, including the ones without a bound of their own.
-		ends = append(ends, r.firstEligibleAt.Add(*nodeClaimTGP))
-	} else if r.firstUnboundedEligibleAt != nil {
-		ends = append(ends, *r.firstUnboundedEligibleAt)
-	}
-	return slices.MinFunc(ends, time.Time.Compare)
 }
 
 // NewRepairPolicyMatcher compiles the cloud provider's repair policies once, for cluster state and node repair to
@@ -409,7 +386,9 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, eligibleAt, 
 	}
 	// Read this before anything below changes the result: no Action yet means no eligible policy has been merged.
 	isFirstEligiblePolicy := r.Action == ""
-	r.mergeDrainDue(policy.TerminationGracePeriod, eligibleAt, isFirstEligiblePolicy)
+	if isFirstEligiblePolicy || eligibleAt.Before(r.FirstEligibleAt) {
+		r.FirstEligibleAt = eligibleAt
+	}
 	r.mergeScore(rank, eligibleAt, now, isFirstEligiblePolicy)
 	if policy.TerminationGracePeriod != nil && r.shorterTerminationGracePeriod(*policy.TerminationGracePeriod, condition.Type, eligibleAt) {
 		r.TerminationGracePeriod = policy.TerminationGracePeriod
@@ -447,22 +426,6 @@ func (r *RepairResult) mergeScore(rank int, eligibleAt, now time.Time, isFirstEl
 	if isFirstEligiblePolicy || score > r.ScoreAt(now) {
 		r.scoreRank = rank
 		r.scoreEligibleAt = eligibleAt
-	}
-}
-
-// mergeDrainDue keeps the earliest eligibility and drain ends that DrainDueAt needs.
-func (r *RepairResult) mergeDrainDue(bound *time.Duration, eligibleAt time.Time, isFirstEligiblePolicy bool) {
-	if isFirstEligiblePolicy || eligibleAt.Before(r.firstEligibleAt) {
-		r.firstEligibleAt = eligibleAt
-	}
-	if bound == nil {
-		if r.firstUnboundedEligibleAt == nil || eligibleAt.Before(*r.firstUnboundedEligibleAt) {
-			r.firstUnboundedEligibleAt = &eligibleAt
-		}
-		return
-	}
-	if end := eligibleAt.Add(*bound); r.firstBoundedDrainEnd == nil || end.Before(*r.firstBoundedDrainEnd) {
-		r.firstBoundedDrainEnd = &end
 	}
 }
 

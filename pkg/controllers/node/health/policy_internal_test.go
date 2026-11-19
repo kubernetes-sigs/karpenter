@@ -280,14 +280,13 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.ScoreAt(now.Add(35 * time.Minute))).To(BeNumerically("~", 25.0/30.0))
 		})
 
-		It("finds the earliest drain end whatever the policy order, even when a later policy is selected", func() {
+		It("keeps FirstEligibleAt at the earliest eligibility whatever the policy order, even when a later policy is selected", func() {
 			reversed := slices.Clone(policies)
 			slices.Reverse(reversed)
 			for _, orderedPolicies := range [][]cloudprovider.RepairPolicy{policies, reversed} {
 				result := evaluate(newMatcher(orderedPolicies), now.Add(35*time.Minute), condition)
 				Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
-				Expect(result.DrainDueAt(nil)).To(Equal(now.Add(10 * time.Minute)))
-				Expect(result.DrainDueAt(new(5 * time.Minute))).To(Equal(now.Add(15 * time.Minute)))
+				Expect(result.FirstEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			}
 		})
 
@@ -636,31 +635,7 @@ var _ = Describe("Repair Policies", func() {
 		result := Resolve(matches, notBefore.Add(10*time.Minute), notBefore)
 		Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 		Expect(result.SelectedEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
-		Expect(result.DrainDueAt(nil)).To(Equal(notBefore.Add(10 * time.Minute)))
-	})
-
-	DescribeTable("finds when the earliest drain of an eligible policy ends",
-		func(boundFirst *time.Duration, tolerationFirst time.Duration, boundLater *time.Duration, at time.Duration, nodeClaimTGP *time.Duration, drainEnd time.Duration) {
-			matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
-				{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: tolerationFirst, TerminationGracePeriod: boundFirst, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "StorageReady", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Failed$", TolerationDuration: 50 * time.Minute, TerminationGracePeriod: boundLater, Action: cloudprovider.ReplaceNode},
-			}, supportedActions))
-			start := time.Unix(0, 0).UTC()
-			result := Resolve(matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
-				{Type: "AcceleratorReady", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(start)},
-				{Type: "StorageReady", Status: corev1.ConditionFalse, Reason: "Failed", LastTransitionTime: metav1.NewTime(start)},
-			}}}), start.Add(at), time.Time{})
-			Expect(result.DrainDueAt(nodeClaimTGP)).To(Equal(start.Add(drainEnd)))
-		},
-		Entry("using the only eligible policy's bound", new(2*time.Hour), 5*time.Minute, new(time.Minute), 49*time.Minute, nil, 2*time.Hour+5*time.Minute),
-		Entry("using a later policy whose drain ends sooner", new(2*time.Hour), 5*time.Minute, new(time.Minute), 50*time.Minute, nil, 51*time.Minute),
-		Entry("capping every drain at the NodeClaim's bound", new(2*time.Hour), 5*time.Minute, new(time.Minute), 50*time.Minute, new(30*time.Minute), 35*time.Minute),
-		Entry("adding no time for a policy without a bound", nil, 10*time.Minute, new(time.Hour), 51*time.Minute, nil, 10*time.Minute),
-		Entry("capping a policy without a bound at the NodeClaim's bound", nil, 10*time.Minute, new(time.Hour), 51*time.Minute, new(30*time.Minute), 40*time.Minute),
-	)
-
-	It("has no drain end when no policy is eligible", func() {
-		Expect(Resolve(nil, time.Unix(0, 0), time.Time{}).DrainDueAt(new(time.Minute))).To(BeZero())
+		Expect(result.FirstEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
 	})
 
 	It("lists each condition type the policies cover once, sorted", func() {
