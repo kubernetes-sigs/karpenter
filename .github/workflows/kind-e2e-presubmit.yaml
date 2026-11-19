@@ -1,8 +1,9 @@
 name: kind-e2e-presubmit
-# One k8s version of the Regression and Disruption suites on every PR that changes more than docs.
+# One k8s version of the Regression and Disruption suites on every ready PR whose changes can affect e2e.
 # kind-e2e keeps the full version matrix on push to main.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 permissions:
   contents: read
 concurrency:
@@ -24,7 +25,15 @@ jobs:
         persist-credentials: false
     - id: changes
       shell: bash
-      run: hack/kind-e2e-presubmit-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
+      env:
+        DRAFT: ${{ github.event.pull_request.draft }}
+      # Drafts report a skip so the result check stays green, and run once marked ready for review
+      run: |
+        if [[ "${DRAFT}" == "true" ]]; then
+          printf 'run=false\nrepeat=[]\n' | tee -a "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        hack/kind-e2e-presubmit-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
   suite:
     name: kind-e2e-presubmit (${{ matrix.name }})
     needs: changes

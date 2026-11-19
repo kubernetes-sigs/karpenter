@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints the kind-e2e-presubmit GITHUB_OUTPUT lines for the diff BASE..HEAD:
-#   run=true|false  false when every changed file is documentation
+#   run=true|false  false when no changed file can affect the e2e run (docs, unit tests, other workflows, lint config)
 #   repeat=<json>   [{"name","suite","focus_file"}] for each suite with changed e2e specs
 #
 # A changed spec is an It or Entry whose body holds a changed line in
@@ -22,6 +22,11 @@ while IFS= read -r f; do
   [ -z "${f}" ] && continue
   case "${f}" in
     *.md | designs/* | OWNERS | */OWNERS | OWNERS_ALIASES | LICENSE | NOTICE | SECURITY_CONTACTS | SECURITY-INSIGHTS.yml) ;;
+    # The e2e specs live under test/, so a _test.go anywhere else is a unit test
+    test/*) run=true ;;
+    *_test.go) ;;
+    .github/workflows/e2e.yaml | .github/workflows/kind-e2e-presubmit.yaml) run=true ;;
+    .github/workflows/* | .github/ISSUE_TEMPLATE/* | .github/dependabot.yaml | .github/actionlint-matcher.json | .golangci*.yaml) ;;
     *) run=true ;;
   esac
 done <<< "${changed}"
