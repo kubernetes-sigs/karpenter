@@ -56,9 +56,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "reboots_total",
-			Help:      "Number of node reboots carried out by Karpenter, labeled by terminal result (succeeded, provider_error, recovery_timeout).",
+			Help:      "Number of node reboots carried out by Karpenter, labeled by disruption reason and terminal result (succeeded, provider_error, recovery_timeout).",
 		},
-		[]opmetrics.Label{Result},
+		[]opmetrics.Label{metrics.DisruptionReason, Result},
 		opmetrics.Beta,
 	)
 	// Measures the full reboot lifecycle from request to terminal outcome.
@@ -68,10 +68,10 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "reboot_duration_seconds",
-			Help:      "Duration of the full reboot action from request to terminal outcome, labeled by result.",
+			Help:      "Duration of the full reboot action from request to terminal outcome, labeled by disruption reason and result.",
 			Buckets:   rebootDurationBuckets,
 		},
-		[]opmetrics.Label{Result},
+		[]opmetrics.Label{metrics.DisruptionReason, Result},
 		opmetrics.Beta,
 	)
 	// Measures issuance-to-recovery time for successful reboots.
@@ -81,10 +81,10 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "reboot_recovery_duration_seconds",
-			Help:      "Time from issuing a reboot until the node proved a new boot and rejoined (bootID changed + Ready). Recorded on successful reboots only.",
+			Help:      "Time from issuing a reboot until the node proved a new boot and rejoined (bootID changed + Ready), labeled by disruption reason. Recorded on successful reboots only.",
 			Buckets:   rebootDurationBuckets,
 		},
-		[]opmetrics.Label{},
+		[]opmetrics.Label{metrics.DisruptionReason},
 		opmetrics.Beta,
 	)
 )

@@ -23,6 +23,7 @@ package reboot
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +49,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	rebootevents "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/reboot/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -344,10 +346,10 @@ func (c *Controller) transitionToSucceeded(ctx context.Context, nodeClaim *v1.No
 		return reconcile.Result{}, err
 	}
 	// Record metrics only after the terminal state is persisted.
-	recordTerminalMetrics(resultSucceeded, duration)
+	recordTerminalMetrics(nodeClaim, resultSucceeded, duration)
 	if hasRecovery {
 		// Recovery time is measured from issuance to rejoin.
-		RebootRecoveryDurationSeconds.Observe(recovery.Seconds(), map[string]string{})
+		RebootRecoveryDurationSeconds.Observe(recovery.Seconds(), map[string]string{metrics.ReasonLabel: disruptionReason(nodeClaim)})
 	}
 	return reconcile.Result{}, nil
 }
@@ -381,7 +383,7 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 	}
 	// Record events and metrics only after the terminal write succeeds.
 	c.recorder.Publish(rebootevents.RebootFailed(nodeClaim, msg))
-	recordTerminalMetrics(result, duration)
+	recordTerminalMetrics(nodeClaim, result, duration)
 	return reconcile.Result{}, nil
 }
 
@@ -515,7 +517,17 @@ func rebootOperationID(nodeClaim *v1.NodeClaim) string {
 }
 
 // Records the terminal result and total reboot duration.
-func recordTerminalMetrics(result string, duration time.Duration) {
-	RebootsTotal.Inc(map[string]string{resultLabel: result})
-	RebootDurationSeconds.Observe(duration.Seconds(), map[string]string{resultLabel: result})
+func recordTerminalMetrics(nodeClaim *v1.NodeClaim, result string, duration time.Duration) {
+	labels := map[string]string{metrics.ReasonLabel: disruptionReason(nodeClaim), resultLabel: result}
+	RebootsTotal.Inc(labels)
+	RebootDurationSeconds.Observe(duration.Seconds(), labels)
+}
+
+// Returns the metric value of the disruption reason that committed the reboot.
+func disruptionReason(nodeClaim *v1.NodeClaim) string {
+	cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+	if cond == nil {
+		return ""
+	}
+	return strings.ToLower(cond.Reason)
 }
