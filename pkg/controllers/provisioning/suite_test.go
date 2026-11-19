@@ -1460,6 +1460,36 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
+		DescribeTable("should count daemon overhead for every nodepool matching any node affinity term",
+			func(terms []corev1.NodeSelectorTerm) {
+				apps := test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "apps"}, Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"role": "apps"}}}}})
+				dediserver := test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "dediserver"}, Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"role": "dediserver"}}}}})
+				daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+				}})
+				daemonSet.Spec.Template.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: terms},
+				}}
+				ExpectApplied(ctx, env.Client, daemonSet, apps, dediserver)
+				pod := test.UnschedulablePod(test.PodOptions{
+					NodeSelector:         map[string]string{"role": "apps"},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue("role", "apps"))
+				allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
+				Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+				Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+			},
+			Entry("single term", []corev1.NodeSelectorTerm{
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"apps", "dediserver"}}}},
+			}),
+			Entry("one term per nodepool", []corev1.NodeSelectorTerm{
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"apps"}}}},
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"dediserver"}}}},
+			}),
+		)
 		It("should consider a daemonset schedulable with an incompatible node affinity preference", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
