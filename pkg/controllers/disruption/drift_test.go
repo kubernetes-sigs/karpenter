@@ -1177,6 +1177,135 @@ var _ = Describe("Drift", func() {
 		})
 	})
 
+	Context("In-Place Remediation", func() {
+		var pod *corev1.Pod
+		BeforeEach(func() {
+			cloudProvider.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Reboot, Reason: "drifted"}
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDrifted, "drifted", "drifted")
+			Expect(nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)).To(BeNil())
+			pod = test.Pod()
+		})
+		It("should reboot a drifted node instead of replacing it when the cloud provider resolves the drift in place", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Reboot is in-place, so nothing is queued and no replacement is launched.
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+			cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+			Expect(cond.IsTrue()).To(BeTrue())
+			Expect(cond.Reason).To(Equal(v1.RebootReasonRequested))
+			Expect(cond.Message).To(Equal("rebooting for Drifted/drifted"))
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).Reason).To(Equal(string(v1.DisruptionReasonDrifted)))
+			Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.RebootTerminationGracePeriodAnnotationKey))
+			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
+				"decision":          string(disruption.RebootDecision),
+				metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonDrifted)),
+			})
+
+			// The next pass must not recommit the reboot or clear its DisruptionReason.
+			ExpectSingletonReconciled(ctx, disruptionController)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
+			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
+				"decision":          string(disruption.RebootDecision),
+				metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonDrifted)),
+			})
+		})
+		It("should bound the reboot drain by the NodeClaim's TerminationGracePeriod", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 7 * time.Minute}
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.RebootTerminationGracePeriodAnnotationKey, "7m0s"))
+		})
+		It("should not reboot a node with blocking pods when the NodeClaim has no TerminationGracePeriod", func() {
+			pod.Annotations = lo.Assign(pod.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)).To(BeNil())
+		})
+		It("should reboot a node with blocking pods when the NodeClaim has a TerminationGracePeriod", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 5 * time.Minute}
+			pod.Annotations = lo.Assign(pod.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.RebootTerminationGracePeriodAnnotationKey, "5m0s"))
+		})
+		It("should not reboot when the Drifted budget is 0", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted}}}
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)).To(BeNil())
+		})
+		It("should not disrupt a drifted node once the cloud provider reports its drift resolved", func() {
+			cloudProvider.DriftStatus = cloudprovider.DriftStatus{}
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)).To(BeNil())
+		})
+		It("should replace a node with drift Karpenter detects without asking the cloud provider", func() {
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDrifted, "NodePoolDrifted", "NodePoolDrifted")
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)).To(BeNil())
+		})
+		It("should replace a drifted node when the cloud provider can't resolve the drift in place", func() {
+			cloudProvider.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)).To(BeNil())
+		})
+	})
 	Context("Static NodePool", func() {
 		It("should not consider static nodepool for drift", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{
