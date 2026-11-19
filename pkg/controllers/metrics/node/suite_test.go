@@ -22,8 +22,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -125,6 +128,46 @@ var _ = Describe("Node Metrics", func() {
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
+		}
+	})
+	It("should expose descriptive node labels once on the node info metric", func() {
+		node = test.Node(test.NodeOptions{
+			Allocatable: resources,
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				corev1.LabelTopologyZone:       "test-zone-1",
+				corev1.LabelInstanceTypeStable: "test-instance-type",
+				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+			}},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		info, found := FindMetricWithLabelValues("karpenter_nodes_info", map[string]string{
+			"node_name":     node.GetName(),
+			"zone":          "test-zone-1",
+			"instance_type": "test-instance-type",
+			"capacity_type": v1.CapacityTypeOnDemand,
+			"managed":       "false",
+		})
+		Expect(found).To(BeTrue())
+		Expect(info.GetGauge().GetValue()).To(BeNumerically("==", 1))
+	})
+	It("should keep only identity labels on the per-node resource and lifetime metrics", func() {
+		node = test.Node(test.NodeOptions{
+			Allocatable: resources,
+			ObjectMeta:  metav1.ObjectMeta{Labels: map[string]string{corev1.LabelTopologyZone: "test-zone-1"}},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		for _, name := range []string{"karpenter_nodes_allocatable", "karpenter_nodes_current_lifetime_seconds"} {
+			metric, found := FindMetricWithLabelValues(name, map[string]string{"node_name": node.GetName()})
+			Expect(found).To(BeTrue())
+			names := lo.Map(metric.GetLabel(), func(l *dto.LabelPair, _ int) string { return l.GetName() })
+			Expect(names).ToNot(ContainElements("zone", "instance_type", "capacity_type", "phase"))
+			Expect(names).To(ContainElements("node_name", "nodepool", "managed"))
 		}
 	})
 	It("should update the node lifetime and cluster utilization metrics", func() {
