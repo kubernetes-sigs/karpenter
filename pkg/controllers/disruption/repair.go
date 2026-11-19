@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -38,6 +39,7 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -263,11 +265,23 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 	return []Command{}, nil
 }
 
-// commitReboot hands the candidate to the reboot controller and returns false if it is already rebooting or deleting.
+// commitReboot hands the candidate to the reboot controller and records the committed reboot in the repair history.
 func (r *Repair) commitReboot(ctx context.Context, candidate *Candidate) (bool, error) {
+	committed, err := commitReboot(ctx, r.kubeClient, r.cluster, r.clock, candidate, r.Reason(),
+		fmt.Sprintf("rebooting for %s/%s", candidate.RepairPolicyResult.Condition, candidate.RepairPolicyResult.Reason))
+	if committed {
+		r.rebootHistory.RecordCommittedReboot(candidate.NodeClaim.UID)
+	}
+	return committed, err
+}
+
+// commitReboot hands the candidate to the reboot controller with the disruption reason that committed it, and returns
+// false if it is already rebooting or deleting.
+func commitReboot(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, clk clock.Clock, candidate *Candidate,
+	reason v1.DisruptionReason, message string) (bool, error) {
 	// Re-read in case cluster state lags the API server.
 	nodeClaim := &v1.NodeClaim{}
-	if err := r.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate.NodeClaim), nodeClaim); err != nil {
+	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate.NodeClaim), nodeClaim); err != nil {
 		return false, client.IgnoreNotFound(err)
 	}
 	if nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue() || !nodeClaim.DeletionTimestamp.IsZero() {
@@ -288,22 +302,20 @@ func (r *Repair) commitReboot(ctx context.Context, candidate *Candidate) (bool, 
 		delete(nodeClaim.Annotations, v1.RebootTerminationGracePeriodAnnotationKey)
 	}
 	if !equality.Semantic.DeepEqual(stored.Annotations, nodeClaim.Annotations) {
-		if err := r.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+		if err := kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return false, err
 		}
 	}
 	stored = nodeClaim.DeepCopy()
-	// Attribute reboot drain evictions to repair.
-	nodeClaim.StatusConditions(status.WithClock(r.clock)).SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(r.Reason()), string(r.Reason()))
-	nodeClaim.StatusConditions(status.WithClock(r.clock)).SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested,
-		fmt.Sprintf("rebooting for %s/%s", candidate.RepairPolicyResult.Condition, candidate.RepairPolicyResult.Reason))
-	if err := r.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+	// Attribute reboot drain evictions to the disruption reason.
+	nodeClaim.StatusConditions(status.WithClock(clk)).SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(reason), string(reason))
+	nodeClaim.StatusConditions(status.WithClock(clk)).SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, message)
+	if err := kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 		return false, err
 	}
 	// Make the reboot visible before the informer catches up.
-	r.cluster.UpdateNodeClaim(nodeClaim)
-	r.rebootHistory.RecordCommittedReboot(nodeClaim.UID)
-	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)).Info("committed node reboot")
+	cluster.UpdateNodeClaim(nodeClaim)
+	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim), "reason", reason).Info("committed node reboot")
 	return true, nil
 }
 
