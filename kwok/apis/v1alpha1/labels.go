@@ -36,6 +36,10 @@ const (
 
 	// LaunchPriceAnnotationKey records the hourly price an on-demand-alt NodeClaim launched at.
 	LaunchPriceAnnotationKey = apis.Group + "/launch-price"
+
+	// RebootNoRecoveryAnnotationKey on a Node makes KWOK accept a reboot without simulating a new boot, so the node
+	// never recovers and e2e tests can exercise the reboot recovery timeout.
+	RebootNoRecoveryAnnotationKey = apis.Group + "/reboot-no-recovery"
 )
 
 func init() {

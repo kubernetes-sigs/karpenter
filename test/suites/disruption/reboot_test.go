@@ -29,7 +29,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	kwokv1alpha1 "sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -139,6 +141,42 @@ var _ = Describe("Reboot", func() {
 		Expect(boots).To(HaveLen(2), "expected exactly two reboots before replacement")
 
 		env.EventuallyExpectNotFound(nodeClaim, node)
+		env.EventuallyExpectHealthyPodCount(selector, 1)
+		replacement := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+		Expect(replacement.Name).ToNot(Equal(nodeClaim.Name))
+	})
+
+	It("should replace a node that doesn't recover from a reboot", func() {
+		if !env.IsDefaultNodeClassKWOK() {
+			Skip("requires KWOK to simulate a node that never comes back from a reboot")
+		}
+		env.ExpectCreated(nodeClass, nodePool, dep)
+		env.EventuallyExpectHealthyPodCount(selector, 1)
+		node := env.EventuallyExpectInitializedNodeCount("==", 1)[0]
+		nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+
+		stored := node.DeepCopy()
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{kwokv1alpha1.RebootNoRecoveryAnnotationKey: "true"})
+		Expect(env.Client.Patch(env, node, client.MergeFrom(stored))).To(Succeed())
+		env.ExpectRebootFaultInjected(node)
+		Eventually(func(g Gomega) {
+			cond := rebooting(g, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting)
+			g.Expect(cond).ToNot(BeNil())
+			g.Expect(cond.Reason).To(Equal(v1.RebootReasonIssued))
+		}).Should(Succeed())
+
+		// The node never shows a new boot, so the reboot fails once the 20m observation window from issuance elapses,
+		// and the NodeClaim is replaced. The rest of the timeout is slack for the replacement.
+		env.EventuallyExpectNotFoundAssertion(nodeClaim, node).WithTimeout(25 * time.Minute).Should(Succeed())
+		Eventually(func(g Gomega) {
+			eventList := &corev1.EventList{}
+			g.Expect(env.Client.List(env, eventList, client.MatchingFields{"involvedObject.kind": "NodeClaim"})).To(Succeed())
+			g.Expect(eventList.Items).To(ContainElement(SatisfyAll(
+				HaveField("InvolvedObject.UID", nodeClaim.UID),
+				HaveField("Reason", events.RebootFailed),
+				HaveField("Message", ContainSubstring("did not recover")),
+			)))
+		}).Should(Succeed())
 		env.EventuallyExpectHealthyPodCount(selector, 1)
 		replacement := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
 		Expect(replacement.Name).ToNot(Equal(nodeClaim.Name))
