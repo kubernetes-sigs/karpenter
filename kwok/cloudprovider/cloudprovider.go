@@ -166,7 +166,10 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 }
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {
-	nodeName := strings.ReplaceAll(providerID, kwokProviderPrefix, "")
+	nodeName, ok := strings.CutPrefix(providerID, kwokProviderPrefix)
+	if !ok {
+		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("providerID %q isn't a kwok instance", providerID))
+	}
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		if errors.IsNotFound(err) {

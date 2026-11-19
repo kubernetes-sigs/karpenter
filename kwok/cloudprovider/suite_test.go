@@ -113,6 +113,20 @@ var _ = Describe("Delete", func() {
 
 		Expect(cp.Delete(ctx, nodeClaim)).To(Satisfy(cloudprovider.IsNodeClaimNotFoundError))
 	})
+	It("should return NodeClaimNotFound from Get for a providerID KWOK does not own", func() {
+		cp, _ := newCloudProvider(0, interceptor.Funcs{
+			// The fake client skips the name check client-go does before sending a request
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if msgs := rest.IsValidPathSegmentName(key.Name); len(msgs) != 0 {
+					return fmt.Errorf("invalid resource name %q: %v", key.Name, msgs)
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		})
+
+		_, err := cp.Get(ctx, "Provider:///AZ/i-01234567890123456")
+		Expect(err).To(Satisfy(cloudprovider.IsNodeClaimNotFoundError))
+	})
 	It("should not create the Node when Delete runs before the registration delay elapses", func() {
 		cp, kubeClient := newCloudProvider(200*time.Millisecond, interceptor.Funcs{})
 		launch(cp)
