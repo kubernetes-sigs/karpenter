@@ -12,8 +12,6 @@ aliases:
   karpenter-maintainers:
     - ellistarn
     - jonathan-innis
-    - tzneal
-    - njtran
     - jmdeal
     - DerekFrank
     - engedaam
@@ -24,3 +22,5 @@ aliases:
     - AndrewSirenko
   emeritus-karpenter-maintainers:
     - bwagner5
+    - tzneal
+    - njtran
