@@ -115,7 +115,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 test: ## Run tests
-	go test ./pkg/... \
+	go test ./pkg/... ./kwok/... \
 		-race \
 		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
