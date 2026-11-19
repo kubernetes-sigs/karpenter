@@ -151,7 +151,7 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 	// Core deletes Nodes only for Registered NodeClaims and relies on the CCM for the rest.
 	// KWOK has no CCM, so delete the Node behind the providerID here.
 	c.launches.cancel(nodeClaim.Name)
-	if nodeName := strings.ReplaceAll(nodeClaim.Status.ProviderID, kwokProviderPrefix, ""); nodeName != "" {
+	if nodeName, ok := strings.CutPrefix(nodeClaim.Status.ProviderID, kwokProviderPrefix); ok && nodeName != "" {
 		if err := c.kubeClient.Delete(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}); client.IgnoreNotFound(err) != nil {
 			return serrors.Wrap(fmt.Errorf("deleting node, %w", err), "Node", klog.KRef("", nodeName))
 		}
@@ -166,7 +166,10 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 }
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {
-	nodeName := strings.ReplaceAll(providerID, kwokProviderPrefix, "")
+	nodeName, ok := strings.CutPrefix(providerID, kwokProviderPrefix)
+	if !ok {
+		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("providerID %q isn't a kwok instance", providerID))
+	}
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		if errors.IsNotFound(err) {
