@@ -31,6 +31,7 @@ const (
 	CandidatesIneligible         = "candidates_ineligible"
 	policyLabel                  = "policy"
 	terminateFirstReasonLabel    = "terminate_first_reason"
+	TimeoutScopeLabel            = "timeout_scope"
 )
 
 var (
@@ -49,10 +50,26 @@ var (
 )
 
 var (
+	CandidateLoopTimeoutScope = opmetrics.Value{
+		Name: "candidate_loop",
+		Help: "The algorithm's overall wall-clock budget was exhausted between candidates, so the remaining candidates were not evaluated.",
+	}
+	SchedulingSimulationTimeoutScope = opmetrics.Value{
+		Name: "scheduling_simulation",
+		Help: "A single candidate's scheduling simulation hit its own deadline before finishing, so that candidate was not evaluated.",
+	}
+)
+
+var (
 	ConsolidationType = opmetrics.Label{
 		Name:   ConsolidationTypeLabel,
 		Help:   "The consolidation algorithm that produced the decision.",
 		Values: []opmetrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType, EmptyConsolidationType},
+	}
+	TimeoutScope = opmetrics.Label{
+		Name:   TimeoutScopeLabel,
+		Help:   "Which timeout the consolidation algorithm hit.",
+		Values: []opmetrics.Value{CandidateLoopTimeoutScope, SchedulingSimulationTimeoutScope},
 	}
 	// DecisionDim is the `decision` dimension for the voluntary-disruption decision
 	// counters, whose value is the command's action.
@@ -123,9 +140,17 @@ func init() {
 	// Initialize the consolidation_type series that can time out to 0. Only the
 	// multi- and single-node algorithms run a bounded search that can hit a timeout;
 	// empty-node consolidation does not, so it is not pre-initialized here.
-	for _, ct := range []opmetrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType} {
-		ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: ct.Name})
+	// Multi-node has no between-candidates budget, so it has no candidate_loop series.
+	for _, ts := range []opmetrics.Value{CandidateLoopTimeoutScope, SchedulingSimulationTimeoutScope} {
+		ConsolidationTimeoutsTotal.Add(0, map[string]string{
+			ConsolidationTypeLabel: SingleNodeConsolidationType.Name,
+			TimeoutScopeLabel:      ts.Name,
+		})
 	}
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{
+		ConsolidationTypeLabel: MultiNodeConsolidationType.Name,
+		TimeoutScopeLabel:      SchedulingSimulationTimeoutScope.Name,
+	})
 }
 
 var (
@@ -191,9 +216,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "consolidation_timeouts_total",
-			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
+			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type and which timeout was hit.",
 		},
-		[]opmetrics.Label{ConsolidationType},
+		[]opmetrics.Label{ConsolidationType, TimeoutScope},
 		opmetrics.Beta,
 	)
 	FailedValidationsTotal = opmetrics.NewPrometheusCounter(
