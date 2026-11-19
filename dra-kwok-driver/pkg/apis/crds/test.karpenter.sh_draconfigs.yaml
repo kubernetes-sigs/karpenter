@@ -168,6 +168,7 @@ spec:
                             x-kubernetes-list-type: atomic
                         type: object
                         x-kubernetes-map-type: atomic
+                      maxItems: 100
                       minItems: 1
                       type: array
                       x-kubernetes-list-type: atomic
@@ -706,3 +707,8 @@ spec:
     storage: true
     subresources:
       status: {}
+                            maxItems: 128
+                      maxItems: 100
+                maxItems: 100
+            minProperties: 0
+                maxItems: 100

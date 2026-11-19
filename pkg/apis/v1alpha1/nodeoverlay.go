@@ -61,6 +61,7 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'NotIn' must have a value defined",rule="self.all(x, x.operator == 'NotIn' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte' or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
+	// +kubebuilder:validation:MinItems=0
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
 	// +listType=atomic

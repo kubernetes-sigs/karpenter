@@ -39,6 +39,7 @@ type DRAConfigSpec struct {
 	// Pool names are auto-generated as <driver>/<node> to prevent overlap across nodes.
 	//
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	// +required
 	// +listType=atomic
 	Pools []Pool `json:"pools,omitempty"`
@@ -63,6 +64,7 @@ type Pool struct {
 	// Follows standard Kubernetes NodeSelectorTerm format.
 	//
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	// +required
 	// +listType=atomic
 	NodeSelectorTerms []corev1.NodeSelectorTerm `json:"nodeSelectorTerms,omitempty"`
@@ -76,6 +78,7 @@ type Pool struct {
 	//
 	// +required
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	// +listType=atomic
 	ResourceSlices []ResourceSliceTemplate `json:"resourceSlices,omitempty"`
 }
@@ -86,23 +89,26 @@ type ResourceSliceTemplate struct {
 	//
 	// +required
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=128
 	// +listType=atomic
 	Devices []resourcev1.Device `json:"devices,omitempty"`
 }
 
 // DRAConfigStatus defines the observed state of DRAConfig
+// +kubebuilder:validation:MinProperties=0
 type DRAConfigStatus struct {
 	// conditions represent the latest available observations of the config's state.
 	// Supported condition types:
 	// - "Ready": Indicates the config has been successfully processed
 	// - "ValidationSucceeded": Indicates the config passed validation
 	//
+	// +kubebuilder:validation:MaxItems=100
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	// +patchStrategy=merge
 	// +patchMergeKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"` //nolint:kubeapilinter // an empty conditions list is valid
 
 	// resourceSliceCount is the number of ResourceSlices currently created by this config.
 	// This may span multiple nodes if the config's selectors match multiple nodes.
