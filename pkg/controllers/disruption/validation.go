@@ -209,6 +209,9 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 		return fmt.Errorf("validating candidates, %w", err)
 	}
 	if err := c.validateCommand(ctx, cmd, validatedCandidates); err != nil {
+		if IsValidationError(err) {
+			FailedValidationsTotal.Add(float64(len(cmd.Candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
+		}
 		return fmt.Errorf("validating command, %w", err)
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
