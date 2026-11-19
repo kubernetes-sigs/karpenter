@@ -576,7 +576,8 @@ var _ = Describe("Drift", func() {
 				}
 			}
 			reservedOffering := &cloudprovider.Offering{
-				Available: true,
+				Available:  true,
+				Compatible: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeReserved,
 					corev1.LabelTopologyZone: "test-zone-1a",

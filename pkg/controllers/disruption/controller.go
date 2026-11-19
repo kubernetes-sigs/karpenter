@@ -112,9 +112,9 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
-		NewStaticDrift(cluster, provisioner, cp, recorder),
+		NewStaticDrift(cluster, provisioner, cp, recorder, queue.backoff),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-		NewDrift(kubeClient, cluster, provisioner, recorder, clk),
+		NewDrift(kubeClient, cluster, provisioner, recorder, clk, queue.backoff),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 		NewMultiNodeConsolidation(c),
 		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
@@ -174,6 +174,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if options.FromContext(ctx).FeatureGates.PredictionEnabled && !c.provisioner.PredictionStoreHydrated(ctx) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
+
+	clearUndriftedNodePoolBackoffs(ctx, c.cluster, c.queue.backoff)
 
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {

@@ -1,0 +1,13 @@
+diff --git a/pkg/controllers/state/cluster.go b/pkg/controllers/state/cluster.go
+index c762d1cb..d13b69f6 100644
+--- a/pkg/controllers/state/cluster.go
++++ b/pkg/controllers/state/cluster.go
+@@ -182,7 +182,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
+ 	// If the cluster state has already synced once, then we assume that objects are kept internally consistent
+ 	// with each other to avoid having to continually re-check that we have fully captured the same view
+ 	// of cluster state that controller-runtime has
+-	if c.hasSynced.Load() {
++	if false && c.hasSynced.Load() {
+ 		c.mu.RLock()
+ 		defer c.mu.RUnlock()
+ 

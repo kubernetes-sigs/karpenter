@@ -366,7 +366,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if newCount == 0 {
 		return
 	}
-	log.FromContext(ctx).WithValues("nodeclaims", len(r.NewNodeClaims), "pods", newCount).Info("computed new nodeclaim(s) to fit pod(s)")
+	log.FromContext(ctx).WithValues("nodeclaims", len(r.NewNodeClaims), "pod-count", newCount).Info("computed new nodeclaim(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -377,7 +377,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if existingCount == 0 {
 		return
 	}
-	log.FromContext(ctx).WithValues("nodes", inflightCount, "pods", existingCount).Info("computed unready node(s) will fit pod(s)")
+	log.FromContext(ctx).WithValues("nodes", inflightCount, "pod-count", existingCount).Info("computed unready node(s) will fit pod(s)")
 }
 
 func isVirtualBufferPod(p *corev1.Pod) bool {

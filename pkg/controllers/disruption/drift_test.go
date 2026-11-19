@@ -1019,6 +1019,7 @@ var _ = Describe("Drift", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -1026,6 +1027,7 @@ var _ = Describe("Drift", func() {
 			replacementInstance := fake.NewInstanceType("replacement-on-demand",
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.3,
 				}),
@@ -1202,7 +1204,7 @@ var _ = Describe("Drift", func() {
 			for _, nc := range nodeClaims {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			}
-			drift := disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock)
+			drift := disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)
 
 			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
 

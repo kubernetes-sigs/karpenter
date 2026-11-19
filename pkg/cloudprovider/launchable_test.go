@@ -33,6 +33,7 @@ import (
 func reservedOffering(available bool, capacity int) *cloudprovider.Offering {
 	return &cloudprovider.Offering{
 		Available:           available,
+		Compatible:          true,
 		ReservationCapacity: capacity,
 		Price:               0.001,
 		Requirements: scheduling.NewLabelRequirements(map[string]string{
@@ -44,8 +45,9 @@ func reservedOffering(available bool, capacity int) *cloudprovider.Offering {
 
 func onDemandOffering(price float64) *cloudprovider.Offering {
 	return &cloudprovider.Offering{
-		Available: true,
-		Price:     price,
+		Available:  true,
+		Compatible: true,
+		Price:      price,
 		Requirements: scheduling.NewLabelRequirements(map[string]string{
 			v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 			corev1.LabelTopologyZone: "test-zone-1",
@@ -97,5 +99,18 @@ var _ = Describe("Offering Launchability", func() {
 		// genuine (launchable 1.0) must sort before phantom (launchable 2.0); the phantom's ~0 reserved price is ignored.
 		Expect(ordered[0].Name).To(Equal("genuine-cheap"))
 		Expect(ordered[1].Name).To(Equal("phantom-cheap"))
+	})
+})
+
+var _ = Describe("Offerings that aren't Compatible", func() {
+	It("Launchable is false for an offering that isn't Compatible, even if it's left Available", func() {
+		od := onDemandOffering(1.0)
+		Expect(od.Launchable()).To(BeTrue())
+		od.Compatible = false
+		Expect(od.Launchable()).To(BeFalse())
+		reserved := reservedOffering(true, 1)
+		Expect(reserved.Launchable()).To(BeTrue())
+		reserved.Compatible = false
+		Expect(reserved.Launchable()).To(BeFalse())
 	})
 })

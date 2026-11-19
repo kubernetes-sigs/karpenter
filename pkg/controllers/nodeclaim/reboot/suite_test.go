@@ -148,6 +148,31 @@ var _ = Describe("Reboot Lifecycle", func() {
 	// Advance past the minimum drain window.
 	stepPastDrainFloor := func() { env.Clock.Step(6 * time.Second) }
 
+	DescribeTable("ignores NodeClaims managed by another provider", func(group, kind, reason string) {
+		nodeClaim.Spec.NodeClassRef.Group = group
+		nodeClaim.Spec.NodeClassRef.Kind = kind
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, reason, "reboot requested")
+		if reason == v1.RebootReasonIssued {
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = env.Clock.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+		}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		storedNodeClaim := ExpectExists(ctx, env.Client, nodeClaim).DeepCopy()
+		storedNode := ExpectExists(ctx, env.Client, node).DeepCopy()
+
+		stepPastDrainFloor()
+		result := ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+		Expect(result.IsZero()).To(BeTrue())
+		Expect(cloudProvider.RebootCalls).To(BeEmpty())
+		Expect(ExpectExists(ctx, env.Client, nodeClaim)).To(Equal(storedNodeClaim))
+		Expect(ExpectExists(ctx, env.Client, node)).To(Equal(storedNode))
+	},
+		Entry("requested reboot with an unsupported kind", "karpenter.test.sh", "UnmanagedNodeClass", v1.RebootReasonRequested),
+		Entry("requested reboot with an unsupported group", "other.test.sh", "TestNodeClass", v1.RebootReasonRequested),
+		Entry("expired issued reboot with an unsupported kind", "karpenter.test.sh", "UnmanagedNodeClass", v1.RebootReasonIssued),
+		Entry("expired issued reboot with an unsupported group", "other.test.sh", "TestNodeClass", v1.RebootReasonIssued),
+	)
+
 	Context("RebootRequested", func() {
 		It("holds a drained reboot for minDrainTime before issuing, even when there is nothing to drain", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "1m"})

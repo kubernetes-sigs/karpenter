@@ -122,7 +122,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder)))
+				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder, nodePoolBackoff)))
 		})
 
 		It("issues a delete-only command for a static NodePool at its node limit when TerminateFirstDrift is enabled", func() {
@@ -208,6 +208,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 					Price:               mostExpensiveOffering.Price / 1_000_000.0,
 					Available:           true,
+					Compatible:          true,
 					ReservationCapacity: capacity,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -258,7 +259,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 					[]*corev1.Node{node, healthyNode}, []*v1.NodeClaim{nodeClaim, healthyNodeClaim})
 				erroring := &instanceTypesErrorCloudProvider{CloudProvider: cloudProvider, nodePools: []string{nodePool.Name}}
 				staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-					disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, erroring, recorder)))
+					disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, erroring, recorder, nodePoolBackoff)))
 
 				ExpectSingletonReconciled(ctx, staticDriftController)
 
@@ -294,6 +295,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
 					Price:               leastExpensiveOffering.Price / 1_000_000.0,
 					Available:           true,
+					Compatible:          true,
 					ReservationCapacity: 1,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -456,6 +458,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               mostExpensiveOffering.Price / 1_000_000.0,
 				Available:           available,
+				Compatible:          true,
 				ReservationCapacity: reservationCapacity,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -487,7 +490,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			driftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-				disruption.WithMethods(disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock)))
+				disruption.WithMethods(disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)))
 		}
 
 		It("issues a delete-only command when the reservation is full and there is no fallback", func() {

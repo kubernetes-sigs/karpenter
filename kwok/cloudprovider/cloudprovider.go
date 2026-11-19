@@ -25,6 +25,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -50,12 +51,54 @@ func NewCloudProvider(ctx context.Context, kubeClient client.Client, instanceTyp
 	return &CloudProvider{
 		kubeClient:    kubeClient,
 		instanceTypes: instanceTypes,
+		launches:      &launches{entries: map[string]*launch{}},
 	}
 }
 
 type CloudProvider struct {
 	kubeClient    client.Client
 	instanceTypes []*cloudprovider.InstanceType
+	launches      *launches
+}
+
+// launches tracks async Node creates so Delete can stop one that hasn't run yet.
+type launches struct {
+	mu      sync.Mutex
+	entries map[string]*launch
+}
+
+// launch is held while creating the Node, so Delete either cancels the create or runs after it.
+type launch struct {
+	mu       sync.Mutex
+	canceled bool
+}
+
+func (l *launches) start(nodeClaimName string) *launch {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ln := &launch{}
+	l.entries[nodeClaimName] = ln
+	return ln
+}
+
+func (l *launches) finish(nodeClaimName string, ln *launch) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.entries[nodeClaimName] == ln {
+		delete(l.entries, nodeClaimName)
+	}
+}
+
+func (l *launches) cancel(nodeClaimName string) {
+	l.mu.Lock()
+	ln, ok := l.entries[nodeClaimName]
+	l.mu.Unlock()
+	if !ok {
+		return
+	}
+	ln.mu.Lock()
+	ln.canceled = true
+	ln.mu.Unlock()
 }
 
 func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
@@ -76,9 +119,17 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 	}
 	// Kick-off a goroutine to allow us to asynchronously register nodes
 	// We're fine to leak this because failed registration can also happen in real providers
+	ln := c.launches.start(nodeClaim.Name)
 	go func() {
+		defer c.launches.finish(nodeClaim.Name, ln)
 		time.Sleep(nodeClass.Spec.NodeRegistrationDelay.Duration)
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return true }, func() error {
+			ln.mu.Lock()
+			defer ln.mu.Unlock()
+			// Skip the create if Delete already ran, otherwise the Node would outlive its NodeClaim
+			if ln.canceled {
+				return nil
+			}
 			return c.kubeClient.Create(ctx, node)
 		}); err != nil {
 			log.FromContext(ctx).Error(err, "failed creating node from nodeclaim")
@@ -97,6 +148,14 @@ func (c CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeCl
 }
 
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
+	// Core deletes Nodes only for Registered NodeClaims and relies on the CCM for the rest.
+	// KWOK has no CCM, so delete the Node behind the providerID here.
+	c.launches.cancel(nodeClaim.Name)
+	if nodeName, ok := strings.CutPrefix(nodeClaim.Status.ProviderID, kwokProviderPrefix); ok && nodeName != "" {
+		if err := c.kubeClient.Delete(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}); client.IgnoreNotFound(err) != nil {
+			return serrors.Wrap(fmt.Errorf("deleting node, %w", err), "Node", klog.KRef("", nodeName))
+		}
+	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("deleting node, %w", cloudprovider.NewNodeClaimNotFoundError(err))
@@ -107,7 +166,10 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 }
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {
-	nodeName := strings.ReplaceAll(providerID, kwokProviderPrefix, "")
+	nodeName, ok := strings.CutPrefix(providerID, kwokProviderPrefix)
+	if !ok {
+		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("providerID %q isn't a kwok instance", providerID))
+	}
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		if errors.IsNotFound(err) {

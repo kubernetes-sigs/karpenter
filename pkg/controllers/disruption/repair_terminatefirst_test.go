@@ -229,7 +229,8 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
 		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 		mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
-			Price: mostExpensiveOffering.Price / 1_000_000.0, Available: true, ReservationCapacity: 0,
+			Price: mostExpensiveOffering.Price / 1_000_000.0, Available: true,
+			Compatible: true, ReservationCapacity: 0,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
 				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
@@ -341,7 +342,8 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 		mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 			Price:               mostExpensiveOffering.Price / 1_000_000.0,
-			Available:           true, // full but healthy
+			Available:           true,
+			Compatible:          true, // full but healthy
 			ReservationCapacity: 0,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -407,7 +409,8 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 		mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 			Price:               mostExpensiveOffering.Price / 1_000_000.0,
-			Available:           true, // full but healthy
+			Available:           true,
+			Compatible:          true, // full but healthy
 			ReservationCapacity: 0,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
@@ -561,6 +564,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               mostExpensiveOffering.Price / 1_000_000.0,
 				Available:           true,
+				Compatible:          true,
 				ReservationCapacity: capacity,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,

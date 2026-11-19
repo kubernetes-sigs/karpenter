@@ -135,7 +135,8 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 	if len(cfg.Offerings) == 0 {
 		cfg.Offerings = cloudprovider.Offerings{
 			{
-				Available: true,
+				Available:  true,
+				Compatible: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "spot",
 					corev1.LabelTopologyZone: "test-zone-1",
@@ -143,7 +144,8 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 				Price: PriceFromResources(cfg.Resources),
 			},
 			{
-				Available: true,
+				Available:  true,
+				Compatible: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "spot",
 					corev1.LabelTopologyZone: "test-zone-2",
@@ -151,7 +153,8 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 				Price: PriceFromResources(cfg.Resources),
 			},
 			{
-				Available: true,
+				Available:  true,
+				Compatible: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-1",
@@ -159,7 +162,8 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 				Price: PriceFromResources(cfg.Resources),
 			},
 			{
-				Available: true,
+				Available:  true,
+				Compatible: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-2",
@@ -167,7 +171,8 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 				Price: PriceFromResources(cfg.Resources),
 			},
 			{
-				Available: true,
+				Available:  true,
+				Compatible: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-3",
@@ -391,7 +396,8 @@ func DriverModeInstanceType(name string, gpuCount int, include func(gpuMode, nic
 			}
 			for _, zone := range []string{"test-zone-1", "test-zone-2"} {
 				offerings = append(offerings, cloudprovider.Offering{
-					Available: true,
+					Available:  true,
+					Compatible: true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 						corev1.LabelTopologyZone: zone,
@@ -473,7 +479,8 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 								WithOperatingSystems(sets.List(os)...),
 								WithResources(resources),
 								WithOfferings(cloudprovider.Offering{
-									Available: true,
+									Available:  true,
+									Compatible: true,
 									Requirements: scheduling.NewLabelRequirements(map[string]string{
 										v1.CapacityTypeLabelKey:  ct,
 										corev1.LabelTopologyZone: zone,

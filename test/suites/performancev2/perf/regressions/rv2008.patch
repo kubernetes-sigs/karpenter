@@ -1,0 +1,101 @@
+diff --git a/pkg/scheduling/requirements.go b/pkg/scheduling/requirements.go
+index bcf0b760..4344d92a 100644
+--- a/pkg/scheduling/requirements.go
++++ b/pkg/scheduling/requirements.go
+@@ -197,6 +197,45 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
+ 	return r.Intersects(requirements)
+ }
+ 
++// editDistance is an implementation of edit distance from Algorithms/DPV
++func editDistance(s, t string) int {
++	min := func(a, b, c int) int {
++		m := a
++		if b < m {
++			m = b
++		}
++		if c < m {
++			m = c
++		}
++		return m
++	}
++
++	m := len(s)
++	n := len(t)
++	if m == 0 {
++		return n
++	}
++	if n == 0 {
++		return m
++	}
++	prevRow := make([]int, n)
++	curRow := make([]int, n)
++	for j := 1; j < n; j++ {
++		prevRow[j] = j
++	}
++	for i := 1; i < m; i++ {
++		for j := 1; j < n; j++ {
++			diff := 0
++			if s[i] != t[j] {
++				diff = 1
++			}
++			curRow[j] = min(prevRow[j]+1, curRow[j-1]+1, prevRow[j-1]+diff)
++		}
++		prevRow, curRow = curRow, prevRow
++	}
++	return prevRow[n-1]
++}
++
+ func getSuffix(key string) string {
+ 	before, after, found := strings.Cut(key, "/")
+ 	return lo.Ternary(found, after, before)
+@@ -204,7 +243,7 @@ func getSuffix(key string) string {
+ 
+ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
+ 	for wellKnown := range allowedUndefined {
+-		if strings.Contains(wellKnown, key) {
++		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
+ 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
+ 		}
+ 		if strings.HasSuffix(wellKnown, getSuffix(key)) {
+@@ -212,7 +251,7 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
+ 		}
+ 	}
+ 	for existing := range r {
+-		if strings.Contains(existing, key) {
++		if strings.Contains(existing, key) || editDistance(key, existing) < len(existing)/5 {
+ 			return fmt.Sprintf(" (typo of %q?)", existing)
+ 		}
+ 		if strings.HasSuffix(existing, getSuffix(key)) {
+diff --git a/pkg/scheduling/requirements_test.go b/pkg/scheduling/requirements_test.go
+index 233b197a..174f36cc 100644
+--- a/pkg/scheduling/requirements_test.go
++++ b/pkg/scheduling/requirements_test.go
+@@ -561,8 +561,10 @@ var _ = Describe("Requirements", func() {
+ 		},
+ 			Entry("Zone Label #1", "topology.kubernetesio/zone", `label "topology.kubernetesio/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
+ 			Entry("Zone Label #1", "node.io/zone", `label "node.io/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
++			Entry("Zone Label #1", "topology.kubernetesiozone", `label "topology.kubernetesiozone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
+ 			Entry("Region Label #1", "topology.kubernetes.io/regio", `label "topology.kubernetes.io/regio" does not have known values (typo of "topology.kubernetes.io/region"?)`),
+ 			Entry("Region Label #2", "node.kubernetes.io/region", `label "node.kubernetes.io/region" does not have known values (typo of "topology.kubernetes.io/region"?)`),
++			Entry("NodePool Label #1", "karpenter.shnodepool", `label "karpenter.shnodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
+ 			Entry("NodePool Label #2", "karpenter/nodepool", `label "karpenter/nodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
+ 		)
+ 		It("should display an error message for unknown labels", func() {
+@@ -708,6 +710,17 @@ var _ = Describe("Requirements", func() {
+ 	})
+ })
+ 
++// Keeping this in case we need it, I ran for 1m+ samples and had no issues
++// fuzz: elapsed: 2m27s, execs: 1002748 (6130/sec), new interesting: 30 (total: 33)
++func FuzzEditDistance(f *testing.F) {
++	f.Add("foo", "bar")
++	f.Add("foo", "")
++	f.Add("", "foo")
++	f.Fuzz(func(t *testing.T, lhs, rhs string) {
++		editDistance(lhs, rhs)
++	})
++}
++
+ // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
+ // Go benchmark functions
+ // go test -tags=test_performance -run=RequirementsProfile

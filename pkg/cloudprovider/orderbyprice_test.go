@@ -74,6 +74,7 @@ func randomInstanceTypes(r *rand.Rand, n int, fewPrices bool) cloudprovider.Inst
 			ct := orderByPriceCapacityTypes[r.IntN(len(orderByPriceCapacityTypes))]
 			offerings = append(offerings, &cloudprovider.Offering{
 				Available:           r.IntN(5) != 0,
+				Compatible:          true,
 				ReservationCapacity: r.IntN(2),
 				Price:               price,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
@@ -138,7 +139,8 @@ var _ = Describe("OrderByPrice", func() {
 	It("orders instance types without a launchable compatible offering last", func() {
 		reqs := scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"))
 		incompatible := &cloudprovider.InstanceType{Name: "incompatible", Offerings: cloudprovider.Offerings{{
-			Available: true, Price: 0.1,
+			Available:  true,
+			Compatible: true, Price: 0.1,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-2"}),
 		}}}
 		none := &cloudprovider.InstanceType{Name: "none"}
@@ -164,8 +166,9 @@ func benchmarkInstanceTypes(n int) (cloudprovider.InstanceTypes, scheduling.Requ
 					price = base * (0.3 + 0.4*r.Float64())
 				}
 				offerings = append(offerings, &cloudprovider.Offering{
-					Available: true,
-					Price:     price,
+					Available:  true,
+					Compatible: true,
+					Price:      price,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  ct,
 						corev1.LabelTopologyZone: zone,

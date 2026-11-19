@@ -1,0 +1,27 @@
+diff --git a/pkg/scheduling/requirements.go b/pkg/scheduling/requirements.go
+index bcf0b760..49e40847 100644
+--- a/pkg/scheduling/requirements.go
++++ b/pkg/scheduling/requirements.go
+@@ -179,7 +179,7 @@ func (r Requirements) IsCompatible(requirements Requirements, options ...option.
+ }
+ 
+ // Compatible ensures the provided requirements can loosely be met.
+-func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) error {
++func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) (errs error) {
+ 	opts := option.Resolve(options...)
+ 
+ 	// Custom Labels must intersect, but if not defined are denied.
+@@ -190,11 +190,10 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
+ 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
+ 			continue
+ 		}
+-		// break early so we only report the first error
+-		return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
++		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined)))
+ 	}
+ 	// Well Known Labels must intersect, but if not defined, are allowed.
+-	return r.Intersects(requirements)
++	return multierr.Append(errs, r.Intersects(requirements))
+ }
+ 
+ func getSuffix(key string) string {
