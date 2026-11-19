@@ -136,7 +136,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	c.lastConsolidationState = currentState
 
 	if total > 0 {
-		log.FromContext(ctx).V(1).WithValues("nodeCount", total).Info("enqueued pod deletion cost annotation writes")
+		log.FromContext(ctx).V(1).WithValues("node-count", total).Info("enqueued pod deletion cost annotation writes")
 	}
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }

@@ -153,13 +153,13 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 	if apierrors.IsNotFound(err) {
-		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, target not found")
+		log.FromContext(ctx).V(1).WithValues("Pod", klog.KObj(pod)).Info("skipping pod annotation update, target not found")
 		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedNotFound.Name})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
 	if apierrors.IsConflict(err) {
-		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, write raced")
+		log.FromContext(ctx).V(1).WithValues("Pod", klog.KObj(pod)).Info("skipping pod annotation update, write raced")
 		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedConflict.Name})
 		q.complete(qk)
 		return reconcile.Result{}, nil

@@ -198,7 +198,7 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	}
 	if err != nil {
 		failed = true
-		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", nodePoolName)
+		return serrors.Wrap(err, "NodeClaim", klog.KObj(nodeClaim), "NodePool", klog.KRef("", nodePoolName))
 	}
 	cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim)] = NodeClaimMetaData{
 		NodePoolName: nodePoolName,
@@ -235,7 +235,7 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nn types.NamespacedN
 	}
 	if err != nil {
 		failed = true
-		return serrors.Wrap(err, "namespacedName", nn, "nodepool", metadata.NodePoolName)
+		return serrors.Wrap(err, "NodeClaim", klog.KRef(nn.Namespace, nn.Name), "NodePool", klog.KRef("", metadata.NodePoolName))
 	}
 
 	// If it succeeds, we can remove the metadata

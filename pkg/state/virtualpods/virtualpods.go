@@ -22,6 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -81,7 +82,7 @@ func (v *Cache) hydrateCache(ctx context.Context) error {
 	for _, cb := range buffers {
 		spec, err := resolveVirtualPodSpec(ctx, v.kubeClient, cb)
 		if err != nil {
-			log.FromContext(ctx).WithValues("capacitybuffer", client.ObjectKeyFromObject(cb)).V(1).Info("skipping buffer", "reason", err.Error())
+			log.FromContext(ctx).WithValues("CapacityBuffer", klog.KObj(cb)).V(1).Info("skipping buffer", "reason", err.Error())
 			continue
 		}
 		newMap[client.ObjectKeyFromObject(cb)] = BuildVirtualPods(cb, spec)

@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -274,7 +275,7 @@ func sortBySavingsRatio(ctx context.Context, kubeClient client.Client, nodes []*
 		pods, err := n.Pods(ctx, kubeClient)
 		if err != nil {
 			// Fall back to the base-cost floor; the next reconcile re-reads.
-			log.FromContext(ctx).V(1).WithValues("node", n.Name()).Error(err, "listing pods for savings-ratio sort; using base cost")
+			log.FromContext(ctx).V(1).WithValues("Node", klog.KRef("", n.Name())).Error(err, "listing pods for savings-ratio sort; using base cost")
 			pods = nil
 		}
 		reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutils.IsReschedulable(p) })
