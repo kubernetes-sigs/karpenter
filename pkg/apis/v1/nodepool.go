@@ -373,12 +373,19 @@ func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int, r
 		if err != nil {
 			multiErr = multierr.Append(multiErr, err)
 		}
+		if budget.Reasons == nil && reason == DisruptionReasonUnhealthy && err == nil {
+			val = lo.Max([]int{val, lo.Must(intstr.GetScaledValueFromIntOrPercent(new(UnhealthyBudgetFloor), numNodes, true))})
+		}
 		if budget.Reasons == nil || lo.Contains(budget.Reasons, reason) {
 			allowedNodes = lo.Min([]int{allowedNodes, val})
 		}
 	}
 	return allowedNodes, multiErr
 }
+
+// UnhealthyBudgetFloor keeps repair at parity with the legacy node repair controller's 20% breaker: a budget that
+// doesn't name Unhealthy in its reasons can't hold repair below it. Only a budget listing Unhealthy can.
+var UnhealthyBudgetFloor = intstr.FromString("20%")
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
