@@ -319,7 +319,7 @@ func (env *Environment) ConsistentlyExpectDisruptionsUntilNoneLeft(nodesAtStart,
 			return ok
 		})
 		if len(nodes) > maxNodesDisrupting {
-			StopTrying(fmt.Sprintf("Too many disruptions detected. Expected no more than %d, got %d", maxNodesDisrupting, len(nodeList.Items))).Now()
+			StopTrying(fmt.Sprintf("Too many disruptions detected. Expected no more than %d, got %d", maxNodesDisrupting, len(nodes))).Now()
 		}
 
 		g.Expect(nodes).To(HaveLen(0))
