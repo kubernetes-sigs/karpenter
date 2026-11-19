@@ -35,7 +35,7 @@ import (
 )
 
 var _ = Describe("RebootHistory", func() {
-	candidateWithAction := func(uid types.UID, action cloudprovider.RepairAction) *Candidate {
+	candidateWithAction := func(uid types.UID, action cloudprovider.DisruptionAction) *Candidate {
 		return &Candidate{
 			StateNode:          &state.StateNode{NodeClaim: &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{UID: uid}}},
 			RepairPolicyResult: health.RepairResult{Action: action, Condition: "AcceleratorReady", Reason: "XID48"},
@@ -44,20 +44,20 @@ var _ = Describe("RebootHistory", func() {
 
 	It("escalates after two committed reboots", func() {
 		history := NewRebootHistory()
-		candidate := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		candidate := candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 		Expect(history.Resolve(candidate)).To(BeTrue())
-		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.RebootNode))
+		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.Reboot))
 
 		history.RecordCommittedReboot(candidate.NodeClaim.UID)
-		candidate = candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		candidate = candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 		Expect(history.Resolve(candidate)).To(BeTrue())
-		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.RebootNode))
+		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.Reboot))
 		Expect(candidate.RebootEscalated).To(BeFalse())
 
 		history.RecordCommittedReboot(candidate.NodeClaim.UID)
-		candidate = candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		candidate = candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 		Expect(history.Resolve(candidate)).To(BeTrue())
-		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.ReplaceNode))
+		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.Replace))
 		Expect(candidate.RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("AcceleratorReady")))
 		Expect(candidate.RebootEscalated).To(BeTrue())
 	})
@@ -65,9 +65,9 @@ var _ = Describe("RebootHistory", func() {
 	It("does not record reboots while resolving", func() {
 		history := NewRebootHistory()
 		for range 3 {
-			candidate := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+			candidate := candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 			Expect(history.Resolve(candidate)).To(BeTrue())
-			Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.RebootNode))
+			Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.Reboot))
 		}
 	})
 
@@ -76,9 +76,9 @@ var _ = Describe("RebootHistory", func() {
 		history.RecordCommittedReboot("original-uid")
 		history.RecordCommittedReboot("original-uid")
 
-		successor := candidateWithAction("successor-uid", cloudprovider.RebootNode)
+		successor := candidateWithAction("successor-uid", cloudprovider.Reboot)
 		Expect(history.Resolve(successor)).To(BeTrue())
-		Expect(successor.RepairPolicyResult.Action).To(Equal(cloudprovider.RebootNode))
+		Expect(successor.RepairPolicyResult.Action).To(Equal(cloudprovider.Reboot))
 	})
 
 	It("preserves replacement action and requires a current decision", func() {
@@ -86,9 +86,9 @@ var _ = Describe("RebootHistory", func() {
 		history.RecordCommittedReboot("nodeclaim-uid")
 		history.RecordCommittedReboot("nodeclaim-uid")
 
-		replacement := candidateWithAction("nodeclaim-uid", cloudprovider.ReplaceNode)
+		replacement := candidateWithAction("nodeclaim-uid", cloudprovider.Replace)
 		Expect(history.Resolve(replacement)).To(BeTrue())
-		Expect(replacement.RepairPolicyResult.Action).To(Equal(cloudprovider.ReplaceNode))
+		Expect(replacement.RepairPolicyResult.Action).To(Equal(cloudprovider.Replace))
 		Expect(replacement.RebootEscalated).To(BeFalse())
 
 		healthy := candidateWithAction("nodeclaim-uid", "")
@@ -106,14 +106,14 @@ var _ = Describe("RebootHistory", func() {
 		history.RecordCommittedReboot("nodeclaim-uid")
 
 		clk.Step(12 * time.Hour)
-		candidate := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		candidate := candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 		Expect(history.Resolve(candidate)).To(BeTrue())
-		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.RebootNode))
+		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.Reboot))
 
 		history.RecordCommittedReboot("nodeclaim-uid")
-		candidate = candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		candidate = candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 		Expect(history.Resolve(candidate)).To(BeTrue())
-		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.ReplaceNode))
+		Expect(candidate.RepairPolicyResult.Action).To(Equal(cloudprovider.Replace))
 	})
 
 	It("bounds concurrent commits at the escalation threshold", func() {
@@ -139,10 +139,10 @@ var _ = Describe("RebootHistory", func() {
 		history.RecordCommittedReboot("nodeclaim-uid")
 		history.RecordCommittedReboot("nodeclaim-uid")
 
-		escalated := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		escalated := candidateWithAction("nodeclaim-uid", cloudprovider.Reboot)
 		escalated.Node = &corev1.Node{}
 		Expect(history.Resolve(escalated)).To(BeTrue())
-		replaced := candidateWithAction("other-uid", cloudprovider.ReplaceNode)
+		replaced := candidateWithAction("other-uid", cloudprovider.Replace)
 		replaced.Node = &corev1.Node{}
 		Expect(history.Resolve(replaced)).To(BeTrue())
 

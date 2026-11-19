@@ -83,9 +83,9 @@ func (h *RebootHistory) Resolve(candidate *Candidate) bool {
 	if candidate.RepairPolicyResult.Action == "" {
 		return false
 	}
-	if candidate.RepairPolicyResult.Action == cloudprovider.RebootNode &&
+	if candidate.RepairPolicyResult.Action == cloudprovider.Reboot &&
 		h.recentReboots(candidate.NodeClaim.UID, h.clock.Now()).count >= rebootsBeforeReplacement {
-		candidate.RepairPolicyResult.Action = cloudprovider.ReplaceNode
+		candidate.RepairPolicyResult.Action = cloudprovider.Replace
 		candidate.RebootEscalated = true
 	}
 	return true

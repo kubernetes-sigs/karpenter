@@ -66,7 +66,7 @@ type Controller struct {
 	policies      []replacePolicy
 }
 
-// replacePolicy is a ReplaceNode RepairPolicy. The legacy controller can only replace nodes, so it ignores policies with
+// replacePolicy is a Replace RepairPolicy. The legacy controller can only replace nodes, so it ignores policies with
 // any other action.
 type replacePolicy struct {
 	cloudprovider.RepairPolicy
@@ -77,7 +77,7 @@ type replacePolicy struct {
 func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock, recorder events.Recorder) *Controller {
 	var policies []replacePolicy
 	for _, policy := range cloudProvider.RepairPolicies() {
-		if policy.Action != cloudprovider.ReplaceNode {
+		if policy.Action != cloudprovider.Replace {
 			continue
 		}
 		policies = append(policies, replacePolicy{

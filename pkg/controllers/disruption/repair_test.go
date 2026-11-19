@@ -168,7 +168,7 @@ var _ = Describe("Repair", func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}}))
 		// Single default policy: BadNode/False, 30m toleration (the fake cloud provider default).
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
 		})
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
@@ -222,10 +222,10 @@ var _ = Describe("Repair", func() {
 		Expect(cmds[0].Replacements).To(BeEmpty())
 	})
 
-	It("should commit an in-place reboot (no replacement, no termination) for a RebootNode policy", func() {
+	It("should commit an in-place reboot (no replacement, no termination) for a Reboot policy", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode, TerminationGracePeriod: lo.ToPtr(5 * time.Minute)},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Reboot, TerminationGracePeriod: lo.ToPtr(5 * time.Minute)},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		initNode(nodeClaim, node)
@@ -271,8 +271,8 @@ var _ = Describe("Repair", func() {
 
 	It("should leave the reboot TGP annotation unset (unbounded) when neither policy nor NodeClaim sets one", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Reboot},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		initNode(nodeClaim, node)
@@ -289,8 +289,8 @@ var _ = Describe("Repair", func() {
 
 	It("should inherit the NodeClaim's TGP as the reboot bound when the policy sets none", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Reboot},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 7 * time.Minute}
@@ -307,8 +307,8 @@ var _ = Describe("Repair", func() {
 
 	It("should remove a stale reboot TGP annotation when the new reboot is unbounded", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Reboot},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "5m0s"})
@@ -326,9 +326,9 @@ var _ = Describe("Repair", func() {
 	Context("reboot history", func() {
 		BeforeEach(func() {
 			useRepairPolicies([]cloudprovider.RepairPolicy{
-				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
+				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Reboot},
 				// Required default fallback; its toleration outlasts these specs so only history escalates to replace.
-				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 48 * time.Hour, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 48 * time.Hour, Action: cloudprovider.Replace},
 			})
 			newRepairController()
 			initNode(nodeClaim, node)
@@ -400,13 +400,13 @@ var _ = Describe("Repair", func() {
 				ConditionStatus:    corev1.ConditionFalse,
 				ReasonRegex:        `^FastFailure$`,
 				TolerationDuration: 10 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 			{
 				ConditionType:      "BadNode",
 				ConditionStatus:    corev1.ConditionFalse,
 				TolerationDuration: 30 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 		})
 		newRepairController()
@@ -425,13 +425,13 @@ var _ = Describe("Repair", func() {
 				ConditionStatus:    corev1.ConditionFalse,
 				ReasonRegex:        `^ImmediateReason$`,
 				TolerationDuration: 30 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 			{
 				ConditionType:      "BadNode",
 				ConditionStatus:    corev1.ConditionFalse,
 				TolerationDuration: 2 * time.Hour,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 		})
 		newRepairController()
@@ -471,12 +471,12 @@ var _ = Describe("Repair", func() {
 				ConditionStatus:    corev1.ConditionFalse,
 				ReasonRegex:        `FastFailure`,
 				TolerationDuration: 30 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 			{
 				ConditionType:   "BadNode",
 				ConditionStatus: corev1.ConditionFalse,
-				Action:          cloudprovider.ReplaceNode,
+				Action:          cloudprovider.Replace,
 			},
 		})
 		newRepairController()
@@ -495,13 +495,13 @@ var _ = Describe("Repair", func() {
 				ConditionStatus:    corev1.ConditionFalse,
 				ReasonRegex:        `^KnownFailure$`,
 				TolerationDuration: 10 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 			{
 				ConditionType:      "BadNode",
 				ConditionStatus:    corev1.ConditionFalse,
 				TolerationDuration: 30 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			},
 		})
 		newRepairController()
@@ -536,8 +536,8 @@ var _ = Describe("Repair", func() {
 
 	It("should not reboot a node carrying the do-not-repair annotation", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Reboot},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
@@ -621,7 +621,7 @@ var _ = Describe("Repair", func() {
 
 	It("should repair with the full policy decision once a blocking budget lifts", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(5 * time.Minute), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(5 * time.Minute), Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
@@ -685,8 +685,8 @@ var _ = Describe("Repair", func() {
 	// Ordering is prioritizable — a higher-priority fault repairs before a lower-priority one in the same pass.
 	It("should repair the higher-priority condition first", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.Replace},
+			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		// Include healthy nodes to exercise ordering within a mixed NodePool.
@@ -774,9 +774,9 @@ var _ = Describe("Repair", func() {
 
 	It("should not score a node using a reason-specific policy that does not match", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Critical$", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "MediumPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Critical$", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.Replace},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.Replace},
+			{ConditionType: "MediumPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 50, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		healthyClaims, healthyNodes := test.NodeClaimsAndNodes(8, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
@@ -799,10 +799,10 @@ var _ = Describe("Repair", func() {
 
 	It("should not score a node using a matching policy whose toleration has not elapsed", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^failure$", TolerationDuration: time.Hour, Priority: 100, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "failure", Priority: 0, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, Priority: 0, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "MediumPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", Priority: 50, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^failure$", TolerationDuration: time.Hour, Priority: 100, Action: cloudprovider.Replace},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "failure", Priority: 0, Action: cloudprovider.Replace},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, Priority: 0, Action: cloudprovider.Replace},
+			{ConditionType: "MediumPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", Priority: 50, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		healthyClaims, healthyNodes := test.NodeClaimsAndNodes(8, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
@@ -826,9 +826,9 @@ var _ = Describe("Repair", func() {
 		diagnosticGracePeriod := 10 * time.Minute
 		mediumGracePeriod := 5 * time.Minute
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Critical$", TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Priority: 90, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: &diagnosticGracePeriod, Priority: 10, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "MediumPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, TerminationGracePeriod: &mediumGracePeriod, Priority: 50, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Critical$", TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Priority: 90, Action: cloudprovider.Replace},
+			{ConditionType: "Diagnostic", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: &diagnosticGracePeriod, Priority: 10, Action: cloudprovider.Replace},
+			{ConditionType: "MediumPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, TerminationGracePeriod: &mediumGracePeriod, Priority: 50, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		healthyClaims, healthyNodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
@@ -853,8 +853,8 @@ var _ = Describe("Repair", func() {
 	// (fresh) condition would rank it below B and repair B first; the argmax lifts A above B on its starving condition.
 	It("should order a node by its most urgent condition, not just its highest-priority one", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.Replace},
+			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		// Healthy peers ensure candidate ordering is evaluated in a realistically populated NodePool.
@@ -887,7 +887,7 @@ var _ = Describe("Repair", func() {
 	// policy stamps an immediate deadline, so repair is never the unbounded hang.
 	It("should stamp a forceful (immediate) termination deadline before requesting deletion", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer") // survive Delete so we can read the stamp
@@ -909,7 +909,7 @@ var _ = Describe("Repair", func() {
 
 	It("should preserve an existing earlier termination deadline", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer")
@@ -936,7 +936,7 @@ var _ = Describe("Repair", func() {
 
 	It("should retry a failed termination-deadline patch without losing the deadline", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Action: cloudprovider.Replace},
 		})
 		injectedErr := errors.New("injected termination timestamp patch failure")
 		failingClient := &terminationTimestampPatchErrorClient{Client: env.Client, err: injectedErr, failNext: true}
@@ -971,7 +971,7 @@ var _ = Describe("Repair", func() {
 	// When both the policy and the NodeClaim bound the drain, the smaller (most forceful) wins.
 	It("should stamp min(policy TGP, NodeClaim TGP) before requesting deletion", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(20 * time.Minute), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(20 * time.Minute), Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 5 * time.Minute}
@@ -992,8 +992,8 @@ var _ = Describe("Repair", func() {
 
 	It("should act on and meter the highest-priority eligible condition", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, TerminationGracePeriod: lo.ToPtr(15 * time.Minute), Action: cloudprovider.ReplaceNode},
-			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, TerminationGracePeriod: lo.ToPtr(5 * time.Minute), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, TerminationGracePeriod: lo.ToPtr(15 * time.Minute), Action: cloudprovider.Replace},
+			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, TerminationGracePeriod: lo.ToPtr(5 * time.Minute), Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		nodeClaim.Status.ImageID = "ami-test-1234"
@@ -1022,7 +1022,7 @@ var _ = Describe("Repair", func() {
 	// leaves the original both un-terminated AND un-stamped (the bounded policy proves it would stamp if termination ran).
 	It("should neither terminate nor stamp a deadline when the replacement never becomes healthy", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.Replace},
 		})
 		newRepairController()
 		initNode(nodeClaim, node)
@@ -1058,7 +1058,7 @@ var _ = Describe("Repair", func() {
 				ConditionStatus:        corev1.ConditionFalse,
 				TolerationDuration:     30 * time.Minute,
 				TerminationGracePeriod: lo.ToPtr(5 * time.Minute),
-				Action:                 cloudprovider.ReplaceNode,
+				Action:                 cloudprovider.Replace,
 			},
 		})
 		newRepairController()

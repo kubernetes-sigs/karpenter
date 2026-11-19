@@ -61,31 +61,41 @@ var (
 
 type DriftReason string
 
-// RepairAction identifies the operation requested by a repair policy.
-type RepairAction string
+// DisruptionAction identifies how Karpenter resolves a disruption, for drift and for repair policies.
+type DisruptionAction string
 
 const (
-	// RebootNode requests recovery of the existing Node through the provider reboot lifecycle.
-	RebootNode RepairAction = "RebootNode"
-	// ReplaceNode requests replacement of the unhealthy Node.
-	ReplaceNode RepairAction = "ReplaceNode"
+	// NoOp requests no action. It is the zero value, and GetDriftStatus returns it when the NodeClaim has not drifted.
+	NoOp DisruptionAction = ""
+	// Reboot requests recovery of the existing Node through the provider reboot lifecycle.
+	Reboot DisruptionAction = "Reboot"
+	// Replace requests replacement of the Node.
+	Replace DisruptionAction = "Replace"
 )
 
-// IsMoreDisruptiveThan returns whether the repair action is more disruptive than another action.
+// IsMoreDisruptiveThan returns whether the action is more disruptive than another action.
 // It panics if either action is unsupported.
-func (a RepairAction) IsMoreDisruptiveThan(other RepairAction) bool {
-	return repairActionRank(a) > repairActionRank(other)
+func (a DisruptionAction) IsMoreDisruptiveThan(other DisruptionAction) bool {
+	return disruptionActionRank(a) > disruptionActionRank(other)
 }
 
-func repairActionRank(action RepairAction) int {
+func disruptionActionRank(action DisruptionAction) int {
 	switch action {
-	case ReplaceNode:
+	case Replace:
 		return 1
-	case RebootNode:
+	case Reboot:
 		return 0
 	default:
-		panic(fmt.Sprintf("unsupported repair action %q", action))
+		panic(fmt.Sprintf("unsupported disruption action %q", action))
 	}
+}
+
+// DriftStatus is a cloud provider's drift decision for a NodeClaim.
+type DriftStatus struct {
+	// Action is how Karpenter resolves the drift. It is NoOp when the NodeClaim has not drifted.
+	Action DisruptionAction
+	// Reason is written as the Drifted condition reason. It is required when Action is not NoOp.
+	Reason DriftReason
 }
 
 // RepairPolicy defines when and how Karpenter repairs a provider-supported unhealthy condition.
@@ -111,7 +121,7 @@ type RepairPolicy struct {
 	// are compressed to dense ranks, with earlier eligibility breaking equal-priority ties across conditions.
 	Priority int
 	// Action is the repair operation requested by this policy.
-	Action RepairAction
+	Action DisruptionAction
 }
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -132,9 +142,9 @@ type CloudProvider interface {
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
 	GetInstanceTypes(context.Context, *v1.NodePool) ([]*InstanceType, error)
-	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
-	// it is tied to.
-	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
+	// GetDriftStatus returns whether a NodeClaim has drifted from the provisioning requirements it is tied to, why,
+	// and how Karpenter should resolve it. Providers that do not support in-place drift remediation never return Reboot.
+	GetDriftStatus(context.Context, *v1.NodeClaim) (DriftStatus, error)
 	// Reboot restarts the instance backing the NodeClaim in place without terminating it.
 	// operationID identifies a logical reboot operation; providers with native idempotency should
 	// use it to make repeated calls for the same operation replay-safe. Reboot returns once the

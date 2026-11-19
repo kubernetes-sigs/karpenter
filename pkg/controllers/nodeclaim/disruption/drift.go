@@ -108,11 +108,14 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 	}
 	// Then check if it's drifted from the cloud provider side.
-	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
+	driftStatus, err := d.cloudProvider.GetDriftStatus(ctx, nodeClaim)
 	if err != nil {
 		return "", serrors.Wrap(fmt.Errorf("checking cloud provider drift, %w", err), "NodeClaim", klog.KObj(nodeClaim))
 	}
-	return driftedReason, nil
+	if driftStatus.Action == cloudprovider.NoOp {
+		return "", nil
+	}
+	return driftStatus.Reason, nil
 }
 
 // InstanceType Offerings should return the full list of allowed instance types, even if they're temporarily

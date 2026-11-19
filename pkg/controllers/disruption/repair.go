@@ -157,7 +157,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		// must be stamped before either replacement path returns a command.
 		candidate.TerminationGracePeriod = effectiveDrainBound(candidate, candidate.RepairPolicyResult)
 		// Reboot is in-place, so skip replacement and termination paths.
-		if candidate.RepairPolicyResult.Action == cloudprovider.RebootNode {
+		if candidate.RepairPolicyResult.Action == cloudprovider.Reboot {
 			committed, err := r.commitReboot(ctx, candidate)
 			if err != nil {
 				return []Command{}, err

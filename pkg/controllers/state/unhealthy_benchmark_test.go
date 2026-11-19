@@ -52,14 +52,14 @@ var benchmarkRepairResult health.RepairResult
 // policies, a few node-agent conditions and the default fallback.
 func benchmarkRepairPolicies() []cloudprovider.RepairPolicy {
 	policies := []cloudprovider.RepairPolicy{
-		{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
-		{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionUnknown, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
-		{ConditionType: benchmarkAcceleratorCondition, ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^NvidiaXID(13|31|43|45|48|63|64|74|79|94|95)Error$", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
-		{ConditionType: benchmarkAcceleratorCondition, ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^NeuronSRAMUncorrectable", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.RebootNode},
-		{ConditionType: benchmarkAcceleratorCondition, ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Neuron", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
+		{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
+		{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionUnknown, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
+		{ConditionType: benchmarkAcceleratorCondition, ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^NvidiaXID(13|31|43|45|48|63|64|74|79|94|95)Error$", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.Replace},
+		{ConditionType: benchmarkAcceleratorCondition, ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^NeuronSRAMUncorrectable", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.Reboot},
+		{ConditionType: benchmarkAcceleratorCondition, ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Neuron", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.Replace},
 	}
 	for _, conditionType := range []corev1.NodeConditionType{"StorageReady", "NetworkingReady", "KernelReady", "ContainerRuntimeReady"} {
-		policies = append(policies, cloudprovider.RepairPolicy{ConditionType: conditionType, ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode})
+		policies = append(policies, cloudprovider.RepairPolicy{ConditionType: conditionType, ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace})
 	}
 	return policies
 }

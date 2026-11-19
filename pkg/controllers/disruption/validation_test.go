@@ -78,8 +78,8 @@ var _ = Describe("Repair Method Registration", func() {
 
 	It("fails when the complete policy set is invalid", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "[", Action: cloudprovider.ReplaceNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "[", Action: cloudprovider.Replace},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 		}
 		_, err := health.NewRepairPolicyMatcher(enabledCtx, cloudProvider)
 		Expect(err).To(MatchError(ContainSubstring("node repair requires valid RepairPolicies")))

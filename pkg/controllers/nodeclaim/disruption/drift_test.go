@@ -46,8 +46,8 @@ type erroringCloudProvider struct {
 	err error
 }
 
-func (e *erroringCloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider.DriftReason, error) {
-	return "", e.err
+func (e *erroringCloudProvider) GetDriftStatus(context.Context, *v1.NodeClaim) (cloudprovider.DriftStatus, error) {
+	return cloudprovider.DriftStatus{}, e.err
 }
 
 var _ = Describe("Drift", func() {
@@ -76,7 +76,7 @@ var _ = Describe("Drift", func() {
 	DescribeTable(
 		"Drift",
 		func(isNodeClaimManaged bool) {
-			cp.Drifted = "drifted"
+			cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 			if !isNodeClaimManaged {
 				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
 					Group: "karpenter.test.sh",
@@ -178,7 +178,7 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 	})
 	It("should detect static drift before cloud provider drift", func() {
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		nodePool.Annotations = lo.Assign(nodePool.Annotations, map[string]string{
 			v1.NodePoolHashAnnotationKey:        "test-123456789",
 			v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
@@ -195,7 +195,7 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.NodePoolDrifted)))
 	})
 	It("should detect node requirement drift before cloud provider drift", func() {
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
 				Key:      corev1.LabelInstanceTypeStable,
@@ -209,8 +209,25 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
 	})
+	It("should detect drift with the cloud provider reason when the cloud provider resolves it in place", func() {
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Reboot, Reason: "drifted"}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).Reason).To(Equal("drifted"))
+	})
+	It("should not detect drift when the cloud provider returns NoOp", func() {
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.NoOp, Reason: "drifted"}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
+	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim launch condition is unknown", func() {
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeLaunched)
@@ -222,7 +239,7 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim launch condition is false", func() {
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeLaunched, "LaunchFailed", "LaunchFailed")
@@ -234,7 +251,7 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should not detect drift if the nodePool does not exist", func() {
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 

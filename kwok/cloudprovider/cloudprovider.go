@@ -209,8 +209,8 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePo
 }
 
 // Return nothing since there's no cloud provider drift.
-func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (cloudprovider.DriftReason, error) {
-	return "", nil
+func (c CloudProvider) GetDriftStatus(ctx context.Context, nodeClaim *v1.NodeClaim) (cloudprovider.DriftStatus, error) {
+	return cloudprovider.DriftStatus{}, nil
 }
 
 // Reboot simulates an in-place restart. KWOK has no instance to restart, so it gives the Node a new boot ID,
@@ -265,7 +265,7 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			ConditionStatus:        corev1.ConditionFalse,
 			TolerationDuration:     10 * time.Minute,
 			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
-			Action:                 cloudprovider.ReplaceNode,
+			Action:                 cloudprovider.Replace,
 		},
 		{
 			ConditionType:          corev1.NodeReady,
@@ -273,7 +273,7 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			ReasonRegex:            ".*",
 			TolerationDuration:     10 * time.Minute,
 			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
-			Action:                 cloudprovider.ReplaceNode,
+			Action:                 cloudprovider.Replace,
 		},
 		// Simulated faults (see KWOKUnhealthyCondition and KWOKRebootRequiredCondition). A short toleration and an explicit
 		// termination grace period keep e2e repair tests fast and let them exercise the drain/TGP path deterministically.
@@ -284,7 +284,7 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			ReasonRegex:            ".*",
 			TolerationDuration:     30 * time.Second,
 			TerminationGracePeriod: lo.ToPtr(45 * time.Second),
-			Action:                 cloudprovider.ReplaceNode,
+			Action:                 cloudprovider.Replace,
 		},
 		{
 			ConditionType:          KWOKRebootRequiredCondition,
@@ -292,7 +292,7 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			ReasonRegex:            ".*",
 			TolerationDuration:     30 * time.Second,
 			TerminationGracePeriod: lo.ToPtr(time.Minute),
-			Action:                 cloudprovider.RebootNode,
+			Action:                 cloudprovider.Reboot,
 		},
 	}
 }

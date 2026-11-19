@@ -98,9 +98,9 @@ var _ = Describe("Unhealthy Nodes", func() {
 	BeforeEach(func() {
 		suiteCluster, suiteNodeController, suiteNodeClaimController = cluster, nodeController, nodeClaimController
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Kernel$", TolerationDuration: time.Minute, Action: cloudprovider.ReplaceNode},
-			{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionUnknown, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.Replace},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Kernel$", TolerationDuration: time.Minute, Action: cloudprovider.Replace},
+			{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionUnknown, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Action: cloudprovider.Replace},
 		}
 		matcher = lo.Must(health.NewRepairPolicyMatcher(
 			options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}})), cloudProvider))
@@ -134,7 +134,7 @@ var _ = Describe("Unhealthy Nodes", func() {
 
 		env.Clock.Step(31 * time.Minute)
 		result := stateNode(node).GetRepairResult(env.Clock.Now())
-		Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+		Expect(result.Action).To(Equal(cloudprovider.Replace))
 		Expect(result.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 	It("should re-match the policies when a condition's reason changes", func() {

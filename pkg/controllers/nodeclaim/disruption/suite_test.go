@@ -125,7 +125,7 @@ var _ = Describe("Disruption", func() {
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -155,7 +155,7 @@ var _ = Describe("Disruption", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 
-		cp.Drifted = "drifted"
+		cp.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)

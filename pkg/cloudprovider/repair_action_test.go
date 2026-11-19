@@ -23,13 +23,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
-var _ = Describe("RepairAction", func() {
+var _ = Describe("DisruptionAction", func() {
 	It("should rank replacement as more disruptive than reboot", func() {
-		Expect(cloudprovider.ReplaceNode.IsMoreDisruptiveThan(cloudprovider.RebootNode)).To(BeTrue())
-		Expect(cloudprovider.RebootNode.IsMoreDisruptiveThan(cloudprovider.ReplaceNode)).To(BeFalse())
-		Expect(cloudprovider.ReplaceNode.IsMoreDisruptiveThan(cloudprovider.ReplaceNode)).To(BeFalse())
+		Expect(cloudprovider.Replace.IsMoreDisruptiveThan(cloudprovider.Reboot)).To(BeTrue())
+		Expect(cloudprovider.Reboot.IsMoreDisruptiveThan(cloudprovider.Replace)).To(BeFalse())
+		Expect(cloudprovider.Replace.IsMoreDisruptiveThan(cloudprovider.Replace)).To(BeFalse())
 	})
 	It("should panic on an unsupported action", func() {
-		Expect(func() { cloudprovider.RepairAction("Unknown").IsMoreDisruptiveThan(cloudprovider.ReplaceNode) }).To(Panic())
+		Expect(func() { cloudprovider.DisruptionAction("Unknown").IsMoreDisruptiveThan(cloudprovider.Replace) }).To(Panic())
 	})
 })
