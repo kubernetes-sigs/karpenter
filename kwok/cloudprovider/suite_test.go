@@ -18,6 +18,7 @@ package kwok_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -96,6 +98,20 @@ var _ = Describe("Delete", func() {
 		Expect(cloudprovider.IsNodeClaimNotFoundError(cp.Delete(ctx, nodeClaim))).To(BeTrue())
 		Expect(nodes(kubeClient)(Default)).To(BeEmpty())
 		Expect(cloudprovider.IsNodeClaimNotFoundError(cp.Delete(ctx, nodeClaim))).To(BeTrue())
+	})
+	It("should not delete a Node for a providerID KWOK does not own", func() {
+		cp, _ := newCloudProvider(0, interceptor.Funcs{
+			// The fake client skips the name check client-go does before sending a request
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if msgs := rest.IsValidPathSegmentName(obj.GetName()); len(msgs) != 0 {
+					return fmt.Errorf("invalid resource name %q: %v", obj.GetName(), msgs)
+				}
+				return c.Delete(ctx, obj, opts...)
+			},
+		})
+		nodeClaim.Status.ProviderID = "Provider:///AZ/i-01234567890123456"
+
+		Expect(cp.Delete(ctx, nodeClaim)).To(Satisfy(cloudprovider.IsNodeClaimNotFoundError))
 	})
 	It("should not create the Node when Delete runs before the registration delay elapses", func() {
 		cp, kubeClient := newCloudProvider(200*time.Millisecond, interceptor.Funcs{})
