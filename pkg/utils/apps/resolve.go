@@ -37,7 +37,7 @@ type PodTemplateResult struct {
 }
 
 // ResolvePodTemplateRef fetches a PodTemplate by name and namespace.
-func ResolvePodTemplateRef(ctx context.Context, c client.Client, name, namespace string) (*PodTemplateResult, error) {
+func ResolvePodTemplateRef(ctx context.Context, c client.Reader, name, namespace string) (*PodTemplateResult, error) {
 	pt := &corev1.PodTemplate{}
 	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, pt); err != nil {
 		return nil, err
@@ -71,7 +71,10 @@ type BufferResolution struct {
 // its spec declares (podTemplateRef or scalableRef). It centralizes the dispatch
 // shared by the buffer controller (which also reads the returned metadata to
 // update status) and the virtual pod cache (which only needs the pod spec).
-func ResolveCapacityBuffer(ctx context.Context, c client.Client, cb *autoscalingv1beta1.CapacityBuffer) (*BufferResolution, error) {
+//
+// For a scalableRef, c must read that one object from the API server. A
+// cache-backed Get starts an informer that lists every object of the kind.
+func ResolveCapacityBuffer(ctx context.Context, c client.Reader, cb *autoscalingv1beta1.CapacityBuffer) (*BufferResolution, error) {
 	switch {
 	case cb.Spec.PodTemplateRef != nil:
 		result, err := ResolvePodTemplateRef(ctx, c, cb.Spec.PodTemplateRef.Name, cb.Namespace)
@@ -99,8 +102,9 @@ func ResolveCapacityBuffer(ctx context.Context, c client.Client, cb *autoscaling
 }
 
 // ResolveScalableRef fetches the workload referenced by a ScalableRef and returns
-// its pod spec and replica count.
-func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1beta1.ScalableRef, namespace string) (*ScalableRefResult, error) {
+// its pod spec and replica count. c must read that one object from the API
+// server; a cache-backed Get starts an informer that lists every object of the kind.
+func ResolveScalableRef(ctx context.Context, c client.Reader, ref *autoscalingv1beta1.ScalableRef, namespace string) (*ScalableRefResult, error) {
 	group := ref.APIGroup
 	if group == "" {
 		group = "apps"

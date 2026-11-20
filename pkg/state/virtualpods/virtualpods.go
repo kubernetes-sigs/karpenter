@@ -30,8 +30,12 @@ import (
 
 // Cache holds the virtual pods materialized for each CapacityBuffer
 type Cache struct {
-	// kubeClient is used to resolve buffer pod specs when hydrating the cache
+	// kubeClient lists CapacityBuffers and resolves podTemplateRef targets.
 	kubeClient client.Client
+	// workloadReader reads scalableRef targets from the API server. A cached Get
+	// would start an informer that retains every Deployment, ReplicaSet, and
+	// StatefulSet. Nil falls back to kubeClient (tests).
+	workloadReader client.Reader
 	// capacityBufferToPods maps a CapacityBuffer's namespace/name -> to a list of
 	// virtual pods corresponding to that CapacityBuffer
 	capacityBufferToPods map[types.NamespacedName][]*corev1.Pod
@@ -46,6 +50,14 @@ func NewVirtualPodCache(kubeClient client.Client) *Cache {
 		kubeClient:           kubeClient,
 		capacityBufferToPods: map[types.NamespacedName][]*corev1.Pod{},
 	}
+}
+
+// SetWorkloadReader directs scalableRef reads at r. Call it before GetAll.
+// A nil reader keeps those reads on kubeClient.
+func (v *Cache) SetWorkloadReader(r client.Reader) {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	v.workloadReader = r
 }
 
 // UpdateEntry refreshes the cached virtual pods for a buffer using an
@@ -79,7 +91,7 @@ func (v *Cache) hydrateCache(ctx context.Context) error {
 
 	newMap := make(map[types.NamespacedName][]*corev1.Pod)
 	for _, cb := range buffers {
-		spec, err := resolveVirtualPodSpec(ctx, v.kubeClient, cb)
+		spec, err := resolveVirtualPodSpec(ctx, v.kubeClient, v.workloadReader, cb)
 		if err != nil {
 			log.FromContext(ctx).WithValues("capacitybuffer", client.ObjectKeyFromObject(cb)).V(1).Info("skipping buffer", "reason", err.Error())
 			continue
