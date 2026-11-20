@@ -707,7 +707,6 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 		})
 
-		// On-demand offerings that can never launch aren't a fallback to wait for, so the NodePool terminates first.
 		It("should terminate-first when the template's on-demand offerings are not Compatible", func() {
 			for _, o := range mostExpensiveInstance.Offerings {
 				o.Available = false
@@ -722,8 +721,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
-		// An on-demand offering outside the instance type's zones (e.g. one the type isn't offered in, or the NodeClass has no
-		// subnet in) can never launch, so it isn't a fallback to wait for and the NodePool terminates first.
+		// e.g. a zone the type isn't offered in, or the NodeClass has no subnet in.
 		It("should terminate-first when the template's on-demand offerings are unavailable only outside the instance type's zones", func() {
 			zone := mostExpensiveOffering.Zone()
 			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))

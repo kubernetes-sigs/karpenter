@@ -287,8 +287,6 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 			})
 
-			// On-demand offerings that can never launch aren't a fallback to wait for, so the full reservation is the only
-			// way in and the NodePool terminates first.
 			It("issues a delete-only command when the template's on-demand offerings are not Compatible", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				for _, o := range mostExpensiveInstance.Offerings {
@@ -308,8 +306,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cmds[0].Replacements).To(HaveLen(0))
 			})
 
-			// An on-demand offering outside the instance type's zones (e.g. one the type isn't offered in, or the NodeClass has
-			// no subnet in) can never launch, so it isn't a fallback to wait for and the NodePool terminates first.
+			// e.g. a zone the type isn't offered in, or the NodeClass has no subnet in.
 			It("issues a delete-only command when the template's on-demand offerings are unavailable only outside the instance type's zones", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				zone := mostExpensiveOffering.Zone()
@@ -655,9 +652,6 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(1))
 		})
 
-		// kubernetes-sigs/karpenter#3415: the reservation is full and the NodePool's on-demand offerings are unavailable, so
-		// freeing the candidate's slot is the only way to reschedule now. Drift waits (Blocked), like a static NodePool,
-		// only if some on-demand offering the pod could use may come back.
 		DescribeTable("a full reservation with unavailable on-demand offerings",
 			func(mutate func(), nodeSelector map[string]string, terminateFirst bool) {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
@@ -701,7 +695,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Entry("terminates first when the instance type has no on-demand offering", func() {
 				mostExpensiveInstance.Offerings = nil
 			}, nil, true),
-			// e.g. a zone the type isn't offered in, or the NodeClass has no subnet in: that capacity can't come back.
+			// e.g. a zone the type isn't offered in, or the NodeClass has no subnet in.
 			Entry("terminates first when on-demand is unavailable only outside the instance type's zones", func() {
 				zone := mostExpensiveOffering.Zone()
 				mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
@@ -714,8 +708,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Entry("terminates first when the pod can't use on-demand", func() {}, map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}, true),
 		)
 
-		// The transient fallback is a different instance type than the candidate's, so only the NodePool's full instance
-		// type set (not Candidate.instanceType) sees it.
+		// The transient fallback is another instance type than the candidate's.
 		It("waits when only another instance type in the NodePool has transiently unavailable on-demand", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			for _, o := range mostExpensiveInstance.Offerings {

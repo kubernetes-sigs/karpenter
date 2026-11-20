@@ -212,8 +212,6 @@ func SimulateSchedulingWithReservedFallback(
 	if !terminateFirstEnabled || candidate.capacityType != v1.CapacityTypeReserved || reservationID == "" {
 		return results, false, nil
 	}
-	// A replacement only blocked on capacity that may come back (e.g. ICE'd on-demand) waits, as a static NodePool does,
-	// rather than taking the workload down until the refill launches (kubernetes-sigs/karpenter#3415).
 	if awaitsTransientCapacity(ctx, provisioner.CloudProvider(), candidate) {
 		return results, false, nil
 	}
@@ -451,15 +449,13 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	})
 }
 
-// templateCompatible reports whether a NodePool template could launch into one of the instance type's offerings.
-// GetInstanceTypes is NodeClass-scoped, so the template's requirements still apply. An offering outside its instance
-// type's zones (e.g. one the type isn't offered in, or the NodeClass has no subnet in) can never launch.
+// templateCompatible reports whether the NodePool template could launch into the offering. An offering outside its
+// instance type's zones can never launch.
 func templateCompatible(nct *scheduling.NodeClaimTemplate, it *cloudprovider.InstanceType, o *cloudprovider.Offering) bool {
 	return templateCompatibleInstanceType(nct, it) && templateCompatibleOffering(nct, it, o)
 }
 
-// templateCompatibleInstanceType is templateCompatible's instance-type half, for callers that check it once per
-// instance type rather than per offering.
+// templateCompatibleInstanceType is templateCompatible's instance-type half.
 func templateCompatibleInstanceType(nct *scheduling.NodeClaimTemplate, it *cloudprovider.InstanceType) bool {
 	return nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels)
 }
@@ -483,7 +479,7 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 	}
 	offered := sets.New[string]()
 	for _, it := range its {
-		// Nearly every offering passes the cheap field check below, so check the instance type once, not per offering.
+		// Check the instance type once: nearly every offering passes the field check below.
 		if !templateCompatibleInstanceType(nct, it) {
 			continue
 		}
@@ -504,16 +500,12 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 }
 
 // awaitsTransientCapacity reports whether the candidate's NodePool has a non-reserved offering that's only transiently
-// unavailable (Compatible but not Available) and that every reschedulable pod could use, so its replacement may
-// launch without the candidate's reservation slot once that capacity comes back. It's the dynamic counterpart of
-// staticReservations' non-reserved fallback check.
+// unavailable (Compatible but not Available) and that every reschedulable pod could use.
 func awaitsTransientCapacity(ctx context.Context, cloudProvider cloudprovider.CloudProvider, c *Candidate) bool {
-	// The scheduling simulation's instance types only keep types with an Available offering, so they can't show a
-	// transiently unavailable fallback; look the NodePool's instance types up instead.
+	// The simulation drops instance types with no Available offering, so look them up.
 	its, err := cloudProvider.GetInstanceTypes(ctx, c.NodePool)
 	if err != nil {
-		// Without the NodePool's offerings we can't rule out a fallback that may come back, so wait rather than
-		// terminating first.
+		// We can't rule out a fallback that may come back, so wait.
 		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(c.NodePool)), "waiting instead of terminating first")
 		return true
 	}
