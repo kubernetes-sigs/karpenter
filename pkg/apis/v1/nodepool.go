@@ -118,9 +118,11 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
-	// Otherwise, this will apply to each reason defined.
+	// reasons is a list of disruption methods that this budget applies to.
+	// If reasons is not set, it defaults to Empty, Drifted, and Underutilized, so the budget does not limit node repair.
+	// Add Unhealthy to have the budget limit node repair.
 	// allowed reasons are Underutilized, Empty, Drifted, and Unhealthy.
+	// +default=["Empty","Drifted","Underutilized"]
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	// +listType=set

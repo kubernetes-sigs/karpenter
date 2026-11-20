@@ -213,7 +213,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 	})
 
 	It("respects disruption budgets", func() {
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		appLabels := map[string]string{"app": "repair-budget"}
 		dep := test.Deployment(test.DeploymentOptions{Replicas: 1, PodOptions: test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: appLabels}}})
 		selector := labels.SelectorFromSet(appLabels)
