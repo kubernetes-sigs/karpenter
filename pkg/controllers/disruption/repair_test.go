@@ -595,8 +595,8 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(1))
 	})
 
-	It("should not repair when the disruption budget is zero", func() {
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+	It("should not repair when an Unhealthy disruption budget is zero", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
@@ -607,12 +607,24 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(BeEmpty())
 	})
 
+	It("should repair when a disruption budget without reasons is zero", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		Expect(queue.GetCommands()).To(HaveLen(1))
+	})
+
 	It("should repair with the full policy decision once a blocking budget lifts", func() {
 		useRepairPolicies([]cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(5 * time.Minute), Action: cloudprovider.ReplaceNode},
 		})
 		newRepairController()
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
