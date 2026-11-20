@@ -12,6 +12,22 @@ on:
         type: string
         required: false
         description: "Ginkgo focus pattern to run specific tests"
+      focus_file:
+        type: string
+        required: false
+        description: "Space-separated ginkgo --focus-file filters"
+      skip_file:
+        type: string
+        required: false
+        description: "Space-separated ginkgo --skip-file filters"
+      runs:
+        type: number
+        default: 1
+        description: "Run the suite this many times, stopping at the first failure"
+      ginkgo_timeout:
+        type: string
+        required: false
+        description: "ginkgo --timeout for each run. Empty keeps the Makefile default"
       test_name:
         type: string
         required: false
@@ -31,6 +47,9 @@ on:
       retention_days:
         type: number
         default: 30
+      timeout_minutes:
+        type: number
+        default: 360
 # A called workflow can only reduce the caller's token permissions, so every caller must grant at least these.
 permissions:
   contents: read
@@ -38,6 +57,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
     - name: Debug workflow_run trigger
       run: |
@@ -45,6 +65,9 @@ jobs:
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        # No later step uses git credentials, so the token needn't sit on disk while PR code runs.
+        persist-credentials: false
     - name: apply regression ${{ inputs.regression }}
       if: inputs.regression != ''
       env:
@@ -57,6 +80,31 @@ jobs:
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ inputs.k8s_version }}
+    - name: resolve kind node image
+      id: kind-image
+      env:
+        K8S_VERSION: ${{ inputs.k8s_version }}
+      shell: bash
+      run: |
+        # Each node image is pinned by digest to the kind release that built it, as kind's release notes require
+        case "${K8S_VERSION%.x}" in
+          1.30) kind=v0.29.0 node=v1.30.13@sha256:397209b3d947d154f6641f2d0ce8d473732bd91c87d9575ade99049aa33cd648 ;;
+          1.31) kind=v0.31.0 node=v1.31.14@sha256:6f86cf509dbb42767b6e79debc3f2c32e4ee01386f0489b3b2be24b0a55aac2b ;;
+          1.32) kind=v0.31.0 node=v1.32.11@sha256:5fc52d52a7b9574015299724bd68f183702956aa4a2116ae75a63cb574b35af8 ;;
+          1.33) kind=v0.31.0 node=v1.33.7@sha256:d26ef333bdb2cbe9862a0f7c3803ecc7b4303d8cea8e814b481b09949d353040 ;;
+          1.34) kind=v0.31.0 node=v1.34.3@sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48 ;;
+          1.35) kind=v0.31.0 node=v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f ;;
+          1.36) kind=v0.32.0 node=v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5 ;;
+          *)
+            echo "::error::no kind node image for k8s_version ${K8S_VERSION}. Add one from https://github.com/kubernetes-sigs/kind/releases"
+            exit 1 ;;
+        esac
+        echo "kind ${kind}, kindest/node:${node}"
+        {
+          echo "kind_version=${kind}"
+          echo "node_image=kindest/node:${node}"
+          echo "node_version=${node%@*}"
+        } >> "$GITHUB_OUTPUT"
     - name: Kind Cluster
       id: kind
       # kind-action downloads kind and kubectl with curl and no retries, so a transient TLS error
@@ -64,6 +112,10 @@ jobs:
       continue-on-error: true
       uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
       with:
+        version: ${{ steps.kind-image.outputs.kind_version }}
+        node_image: ${{ steps.kind-image.outputs.node_image }}
+        # kind-action's default kubectl is v1.35.0, past the supported skew for the older legs.
+        kubectl_version: ${{ steps.kind-image.outputs.node_version }}
         # Configures the cluster's kube-scheduler with the default topology spread constraints the
         # DefaultTopologySpreadConstraints specs mirror into Karpenter. Everything else is a default cluster.
         config: hack/kind/cluster.yaml
@@ -77,12 +129,19 @@ jobs:
       if: steps.kind.outcome == 'failure'
       uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
       with:
+        version: ${{ steps.kind-image.outputs.kind_version }}
+        node_image: ${{ steps.kind-image.outputs.node_image }}
+        kubectl_version: ${{ steps.kind-image.outputs.node_version }}
         config: hack/kind/cluster.yaml
     - name: check kind cluster and taint nodes
       shell: bash
+      env:
+        WANT: ${{ steps.kind-image.outputs.node_version }}
       run: |
         kubectl config current-context
         kubectl get nodes
+        got=$(kubectl get node chart-testing-control-plane -o jsonpath='{.status.nodeInfo.kubeletVersion}')
+        [ "${got}" = "${WANT}" ] || { echo "::error::node runs ${got}, want ${WANT}"; exit 1; }
         kubectl taint nodes chart-testing-control-plane CriticalAddonsOnly:NoSchedule
     - name: install prometheus 
       uses: ./.github/actions/install-prometheus
@@ -119,6 +178,10 @@ jobs:
       env:
           SUITE: ${{ inputs.suite }}
           FOCUS: ${{ inputs.focus }}
+          FOCUS_FILE: ${{ inputs.focus_file }}
+          SKIP_FILE: ${{ inputs.skip_file }}
+          RUNS: ${{ inputs.runs }}
+          GINKGO_TIMEOUT: ${{ inputs.ginkgo_timeout }}
           PERF_ENV: ${{ inputs.perf_env }}
       shell: bash
       run: |
@@ -126,7 +189,10 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         while IFS= read -r kv; do [ -n "$kv" ] && export "${kv?}"; done <<< "$PERF_ENV"
-        TEST_SUITE="$SUITE" make e2etests
+        # An empty GINKGO_TIMEOUT would override the Makefile's ?= default.
+        [ -n "$GINKGO_TIMEOUT" ] || unset GINKGO_TIMEOUT
+        # go test can't rerun a ginkgo suite, and --ginkgo.repeat is ginkgo CLI only.
+        for _ in $(seq "$RUNS"); do TEST_SUITE="$SUITE" make e2etests; done
     - name: plot performance results
       if: always() && inputs.plot && env.OUTPUT_DIR != ''
       shell: bash
