@@ -3,7 +3,7 @@ kind: Stage
 metadata:
   name: node-unhealthy
 spec:
-  # No-op: outweighs node-initialize so kwok doesn't reset conditions a test injects on a labeled node.
+  # No-op: outweighs node-initialize, which would otherwise reset the conditions a test injects on a labeled node.
   next: {}
   resourceRef:
     apiGroup: v1
