@@ -2788,6 +2788,52 @@ var _ = Context("Scheduling", func() {
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod2)
 				ExpectNotScheduled(ctx, env.Client, pod2)
 			})
+			DescribeTable("should subtract daemonset overhead from an existing node matching any node affinity term",
+				func(role string) {
+					apps := test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "apps"}, Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"role": "apps"}}}}})
+					dediserver := test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "dediserver"}, Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"role": "dediserver"}}}}})
+					nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"role": role, v1.NodePoolLabelKey: role}},
+						Status: v1.NodeClaimStatus{
+							Allocatable: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+								corev1.ResourcePods:   resource.MustParse("110"),
+							},
+						},
+					})
+					ds := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("2Gi")},
+						},
+					}})
+					ds.Spec.Template.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"apps"}}}},
+							{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"dediserver"}}}},
+						}},
+					}}
+					ExpectApplied(ctx, env.Client, apps, dediserver, nodeClaim, node, ds)
+					ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
+					ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
+					ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+					pod := test.UnschedulablePod(test.PodOptions{
+						NodeSelector: map[string]string{"role": role},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("3"),
+							corev1.ResourceMemory: resource.MustParse("3Gi")},
+						},
+					})
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					scheduledNode := ExpectScheduled(ctx, env.Client, pod)
+					Expect(scheduledNode.Name).ToNot(Equal(node.Name))
+				},
+				Entry("node matches the first term", "apps"),
+				Entry("node matches the second term", "dediserver"),
+			)
 		})
 	})
 

@@ -868,10 +868,16 @@ func (s *Scheduler) isDaemonPodCompatibleWithNode(p *corev1.Pod, taints []corev1
 	if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 		return false
 	}
-	if err := scheduling.NewLabelRequirements(nodeLabels).Compatible(scheduling.NewStrictPodRequirements(p)); err != nil {
-		return false
+	p = p.DeepCopy()
+	preferences := &Preferences{}
+	for {
+		if scheduling.NewLabelRequirements(nodeLabels).Compatible(scheduling.NewStrictPodRequirements(p)) == nil {
+			return true
+		}
+		if preferences.removeRequiredNodeAffinityTerm(p) == nil {
+			return false
+		}
 	}
-	return true
 }
 
 // updateRemainingResources updates the remaining resources for the node's nodepool
@@ -1063,6 +1069,7 @@ func podSetKey(pods []*corev1.Pod) string {
 
 // isDaemonPodCompatible determines if the daemon pod is compatible with the NodeClaimTemplate for daemon scheduling
 func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, it *cloudprovider.InstanceType, pod *corev1.Pod) bool {
+	pod = pod.DeepCopy()
 	preferences := &Preferences{}
 	// Add a toleration for PreferNoSchedule since a daemon pod shouldn't respect the preference
 	_ = preferences.toleratePreferNoScheduleTaints(pod)
