@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -186,7 +187,7 @@ func (r *Run) AwaitNodePoolsReady(timeout time.Duration) {
 		g.Expect(r.Provider.Client.List(r.ctx, pools, client.MatchingLabels{ScenarioLabel: r.Scenario.Name})).To(Succeed())
 		ready := 0
 		for i := range pools.Items {
-			if pools.Items[i].StatusConditions().Root().IsTrue() {
+			if pools.Items[i].StatusConditions(status.WithObservedOnly()).Root().IsTrue() {
 				ready++
 			}
 		}

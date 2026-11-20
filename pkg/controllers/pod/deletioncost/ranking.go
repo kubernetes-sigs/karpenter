@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -222,7 +223,7 @@ func isDrifted(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool 
 	if np := nodePoolMap[node.Labels()[v1.NodePoolLabelKey]]; np != nil && nodepoolutils.IsStatic(np) {
 		return false
 	}
-	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
+	return node.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
 // Controllers that replace a pod they own somewhere else in the cluster, so a

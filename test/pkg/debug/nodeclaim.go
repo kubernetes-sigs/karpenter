@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,10 +58,10 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 
 func (c *NodeClaimController) GetInfo(nc *v1.NodeClaim) string {
 	return fmt.Sprintf("ready=%t launched=%t registered=%t initialized=%t",
-		nc.StatusConditions().Root().IsTrue(),
-		nc.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue(),
-		nc.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue(),
-		nc.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue(),
+		nc.StatusConditions(status.WithObservedOnly()).Root().IsTrue(),
+		nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeLaunched).IsTrue(),
+		nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRegistered).IsTrue(),
+		nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInitialized).IsTrue(),
 	)
 }
 

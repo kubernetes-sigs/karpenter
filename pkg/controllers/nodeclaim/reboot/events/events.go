@@ -21,6 +21,7 @@ package events
 import (
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -44,7 +45,7 @@ func event(nodeClaim *v1.NodeClaim, eventType, reason, message string) events.Ev
 
 // rebootEpisode identifies the current reboot episode by the Rebooting condition's transition time.
 func rebootEpisode(nodeClaim *v1.NodeClaim) string {
-	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting); cond != nil {
+	if cond := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting); cond != nil {
 		return cond.LastTransitionTime.Format(time.RFC3339Nano)
 	}
 	return ""
