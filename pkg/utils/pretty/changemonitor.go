@@ -20,19 +20,21 @@ import (
 	"time"
 
 	"github.com/mitchellh/hashstructure/v2"
-	"github.com/patrickmn/go-cache"
+	"k8s.io/apimachinery/pkg/util/cache"
 )
+
+const changeMonitorTTL = 24 * time.Hour
 
 // ChangeMonitor is used to reduce logging when discovering information that may change. The values recorded expire after
 // 24 hours by default to prevent a value from being logged at startup only which could impede debugging if full sets
 // of logs aren't available.
 type ChangeMonitor struct {
-	lastSeen *cache.Cache
+	lastSeen *cache.Expiring
 }
 
 func NewChangeMonitor() *ChangeMonitor {
 	return &ChangeMonitor{
-		lastSeen: cache.New(24*time.Hour, 12*time.Hour),
+		lastSeen: cache.NewExpiring(),
 	}
 }
 
@@ -46,7 +48,7 @@ func (c *ChangeMonitor) HasChanged(key string, value any) bool {
 		existingHash = existing.(uint64)
 	}
 	if !ok || existingHash != hv {
-		c.lastSeen.SetDefault(key, hv)
+		c.lastSeen.Set(key, hv, changeMonitorTTL)
 		return true
 	}
 	return false

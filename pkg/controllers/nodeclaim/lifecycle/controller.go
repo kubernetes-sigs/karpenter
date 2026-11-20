@@ -22,13 +22,13 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/patrickmn/go-cache"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -86,7 +86,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		nodePoolState: nodePoolState,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cluster: cluster, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cluster: cluster, cache: cache.NewExpiringWithClock(clk), recorder: recorder, clock: clk},
 		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks, clock: clk},
 		initialization: &Initialization{kubeClient: kubeClient, clock: clk},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, npState: nodePoolState},

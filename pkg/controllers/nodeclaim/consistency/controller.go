@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -50,7 +50,7 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 	checks        []Check
 	recorder      events.Recorder
-	lastScanned   *cache.Cache
+	lastScanned   *cache.Expiring
 }
 
 type Issue string
@@ -70,7 +70,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
-		lastScanned:   cache.New(scanPeriod, 1*time.Minute),
+		lastScanned:   cache.NewExpiringWithClock(clk),
 		checks: []Check{
 			NewNodeShape(),
 		},
@@ -104,7 +104,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		// the above should always succeed
 		return reconcile.Result{RequeueAfter: scanPeriod}, nil
 	}
-	c.lastScanned.SetDefault(string(nodeClaim.UID), c.clock.Now())
+	c.lastScanned.Set(string(nodeClaim.UID), c.clock.Now(), scanPeriod)
 
 	// We assume the invariant that there is a single node for a single nodeClaim. If this invariant is violated,
 	// then we assume this is bubbled up through the nodeClaim lifecycle controller and don't perform consistency checks

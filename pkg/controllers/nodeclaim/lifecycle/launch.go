@@ -20,11 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -46,11 +47,14 @@ const (
 	maxEventMessageLength = 1024
 )
 
+// launchCacheTTL is how long a created NodeClaim is remembered while waiting for the client cache to catch up.
+const launchCacheTTL = time.Hour
+
 type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
-	cache         *cache.Cache // exists due to eventual consistency on the cache
+	cache         *cache.Expiring // exists due to eventual consistency on the cache
 	recorder      events.Recorder
 	clock         clock.Clock
 }
@@ -83,7 +87,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	if err != nil || created == nil {
 		return reconcile.Result{}, err
 	}
-	l.cache.SetDefault(string(nodeClaim.UID), created)
+	l.cache.Set(string(nodeClaim.UID), created, launchCacheTTL)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
 	nodeClaim.StatusConditions(status.WithClock(l.clock)).SetTrue(v1.ConditionTypeLaunched)
 	return reconcile.Result{}, nil
