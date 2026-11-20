@@ -160,8 +160,8 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	// If the Node is unhealthy, but has not reached its full toleration disruption
 	// requeue at the termination time of the unhealthy node
 	terminationTime := unhealthyNodeCondition.LastTransitionTime.Add(policyTerminationDuration)
-	if c.clock.Now().Before(terminationTime) {
-		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
+	if remaining := terminationTime.Sub(c.clock.Now()); remaining > 0 {
+		return reconcile.Result{RequeueAfter: remaining}, nil
 	}
 
 	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)

@@ -81,6 +81,19 @@ func (c *Controller) Name() string {
 	return "nodeclaim.consistency"
 }
 
+func (c *Controller) untilNextScan(nodeClaim *v1.NodeClaim) time.Duration {
+	lastTime, ok := c.lastScanned.Get(string(nodeClaim.UID))
+	if !ok {
+		return 0
+	}
+	t, ok := lastTime.(time.Time)
+	if !ok {
+		// the above should always succeed
+		return scanPeriod
+	}
+	return scanPeriod - c.clock.Since(t)
+}
+
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if nodeClaim.Status.NodeName != "" {
@@ -96,13 +109,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 	stored := nodeClaim.DeepCopy()
 	// If we get an event before we should check for consistency checks, we ignore and wait
-	if lastTime, ok := c.lastScanned.Get(string(nodeClaim.UID)); ok {
-		if lastTime, ok := lastTime.(time.Time); ok {
-			remaining := scanPeriod - c.clock.Since(lastTime)
-			return reconcile.Result{RequeueAfter: remaining}, nil
-		}
-		// the above should always succeed
-		return reconcile.Result{RequeueAfter: scanPeriod}, nil
+	if remaining := c.untilNextScan(nodeClaim); remaining > 0 {
+		return reconcile.Result{RequeueAfter: remaining}, nil
 	}
 	c.lastScanned.SetDefault(string(nodeClaim.UID), c.clock.Now())
 

@@ -19,12 +19,14 @@ package analyzers
 import (
 	"golang.org/x/tools/go/analysis"
 
+	"sigs.k8s.io/karpenter/hack/tools/karpenterlint/internal/analyzers/durationfloor"
 	"sigs.k8s.io/karpenter/hack/tools/karpenterlint/internal/analyzers/ginkgoonly"
 )
 
 // All returns every karpenterlint analyzer.
 func All() []*analysis.Analyzer {
 	return []*analysis.Analyzer{
+		durationfloor.Analyzer,
 		ginkgoonly.Analyzer,
 	}
 }
