@@ -363,16 +363,6 @@ func Resolve(matches []RepairPolicyMatch, now, notBefore time.Time) RepairResult
 	return result
 }
 
-// ConditionTypes returns the condition types that the provider policy set covers, sorted. Any RepairResult with an
-// Action has its Condition among them.
-func (p *RepairPolicyMatcher) ConditionTypes() []corev1.NodeConditionType {
-	conditionTypes := sets.New[corev1.NodeConditionType]()
-	for key := range p.groups {
-		conditionTypes.Insert(key.conditionType)
-	}
-	return sets.List(conditionTypes)
-}
-
 // Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
 func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
 	_, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]

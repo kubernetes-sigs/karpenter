@@ -638,16 +638,6 @@ var _ = Describe("Repair Policies", func() {
 		Expect(result.FirstEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
 	})
 
-	It("lists each condition type the policies cover once, sorted", func() {
-		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
-			{ConditionType: "StorageReady", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Failed$", Action: cloudprovider.RebootNode},
-			{ConditionType: "StorageReady", ConditionStatus: corev1.ConditionUnknown, ReasonRegex: "^Lost$", Action: cloudprovider.ReplaceNode},
-			defaultFallback,
-			validSpecific,
-		}, supportedActions))
-		Expect(matcher.ConditionTypes()).To(Equal([]corev1.NodeConditionType{"AcceleratorReady", "StorageReady"}))
-	})
-
 	DescribeTable("comparing match inputs",
 		func(mutate func(*corev1.Node), equal bool) {
 			old := &corev1.Node{

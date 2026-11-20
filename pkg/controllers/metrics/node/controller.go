@@ -39,6 +39,7 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -53,7 +54,7 @@ const (
 
 // Fixed node metric dimensions. The remaining dimensions are the cloud
 // provider's well-known labels, which are self-describing and wrapped without
-// help text (see nodeLabelNames).
+// help text (see nodeLabelNamesWithoutNodeName).
 var (
 	nodeNameLabel  = opmetrics.Label{Name: nodeName, Help: "The name of the node."}
 	nodePhaseLabel = opmetrics.Label{Name: nodePhase, Help: "The node's lifecycle phase, e.g. `Pending`, `Running`."}
@@ -61,14 +62,16 @@ var (
 )
 
 var (
-	Allocatable         opmetrics.GaugeMetric
-	TotalPodRequests    opmetrics.GaugeMetric
-	TotalPodLimits      opmetrics.GaugeMetric
-	TotalDaemonRequests opmetrics.GaugeMetric
-	TotalDaemonLimits   opmetrics.GaugeMetric
-	SystemOverhead      opmetrics.GaugeMetric
-	Lifetime            opmetrics.GaugeMetric
-	ClusterUtilization  opmetrics.GaugeMetric
+	Allocatable                  opmetrics.GaugeMetric
+	TotalPodRequests             opmetrics.GaugeMetric
+	TotalPodLimits               opmetrics.GaugeMetric
+	TotalDaemonRequests          opmetrics.GaugeMetric
+	TotalDaemonLimits            opmetrics.GaugeMetric
+	SystemOverhead               opmetrics.GaugeMetric
+	Lifetime                     opmetrics.GaugeMetric
+	ClusterUtilization           opmetrics.GaugeMetric
+	RepairPastDueTimeSeconds     opmetrics.GaugeMetric
+	RepairPastDueDurationSeconds opmetrics.ObservationMetric
 )
 
 // Initialize metrics at runtime to ensure cloud provider's well-known labels are properly
@@ -162,6 +165,30 @@ func initializeMetrics() {
 		[]opmetrics.Label{metrics.ResourceType},
 		opmetrics.Alpha,
 	)
+	RepairPastDueTimeSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due_time_seconds",
+			Help:      "How long a node has been past due on repair, or 0 while it isn't. Every node that Karpenter manages and that has a NodePool reports a value, so the number of past-due nodes is the number of values above 0, for example `count by (nodepool, condition) (karpenter_nodes_repair_past_due_time_seconds > 0)` in Prometheus. A node is past due once it is still unhealthy after all the time repair gets. That time starts when the first of the node's repair policies becomes eligible, and is the 15 minute node registration timeout plus the drain bound at that point: the shortest termination grace period that the NodeClaim and the policies eligible by then set, if any. Policies that become eligible later don't change it. Nodes that repair holds back, such as for disruption budgets, still become past due. Nodes with do-not-repair, and nodes that repair is rebooting, report 0. Labeled like karpenter_nodes_current_lifetime_seconds: node_name, phase, managed and the node's well-known labels, such as nodepool, zone and capacity_type. It also has the condition repair acts on, which is empty while the node isn't past due. Not reported when node repair is off, with --legacy-node-repair, or before cluster state first syncs.",
+		},
+		nodeLabelNamesWithRepairCondition(),
+		opmetrics.Alpha,
+	)
+	RepairPastDueDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due_duration_seconds",
+			Help:      "How long a node was past due on repair, as karpenter_nodes_repair_past_due_time_seconds defines it. Recorded each time a node stops being past due: it is gone, repair starts a reboot, it recovers, or repair stops acting on it, such as for do-not-repair. Labeled by phase, managed, the node's well-known labels, such as nodepool, zone and capacity_type, and the condition repair acted on, all as of the last time the node was past due. A stretch that ends while Karpenter is down isn't recorded. Not recorded when node repair is off, with --legacy-node-repair, or before cluster state first syncs.",
+			Buckets:   prometheus.ExponentialBuckets(60, 2, 12), // 1m, 2m, 4m, ... up to about 34h
+		},
+		// Histogram series are never removed, so leave out node_name, which is different for every node.
+		append(nodeLabelNamesWithoutNodeName(), disruption.RepairCondition),
+		opmetrics.Alpha,
+	)
 }
 
 func nodeLabelNamesWithResourceType() []opmetrics.Label {
@@ -171,7 +198,21 @@ func nodeLabelNamesWithResourceType() []opmetrics.Label {
 	)
 }
 
+func nodeLabelNamesWithRepairCondition() []opmetrics.Label {
+	return append(
+		nodeLabelNames(),
+		disruption.RepairCondition,
+	)
+}
+
 func nodeLabelNames() []opmetrics.Label {
+	return append(
+		[]opmetrics.Label{nodeNameLabel},
+		nodeLabelNamesWithoutNodeName()...,
+	)
+}
+
+func nodeLabelNamesWithoutNodeName() []opmetrics.Label {
 	return append(
 		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
 		// If we do, prometheus will panic since there would be duplicate labels.
@@ -179,7 +220,6 @@ func nodeLabelNames() []opmetrics.Label {
 		lo.Map(sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(), func(l string, _ int) opmetrics.Label {
 			return opmetrics.Label{Name: l}
 		}),
-		nodeNameLabel,
 		nodePhaseLabel,
 		managedLabel,
 	)

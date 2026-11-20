@@ -18,6 +18,7 @@ package node_test
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -143,15 +144,66 @@ var _ = Describe("Repair Past Due", func() {
 		ExpectApplied(repairCtx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 	}
-	// expectPastDueIn runs a pass and checks the counts under each condition for the nodepool.
+	// seriesOf returns the metric's series in the registry.
+	seriesOf := func(name string) []*prometheusmodel.Metric {
+		family, _ := lo.Find(lo.Must(crmetrics.Registry.Gather()), func(f *prometheusmodel.MetricFamily) bool { return f.GetName() == name })
+		return family.GetMetric()
+	}
+	labelsOf := func(m *prometheusmodel.Metric) map[string]string {
+		return lo.SliceToMap(m.GetLabel(), func(l *prometheusmodel.LabelPair) (string, string) { return l.GetName(), l.GetValue() })
+	}
+	// onlyLabels checks that there is exactly one series and returns its labels.
+	onlyLabels := func(series []*prometheusmodel.Metric) map[string]string {
+		GinkgoHelper()
+		Expect(series).To(HaveLen(1))
+		return labelsOf(series[0])
+	}
+	pastDueTimeSeries := func() []*prometheusmodel.Metric {
+		return seriesOf(ExpectMetricName(node.RepairPastDueTimeSeconds.(*opmetrics.PrometheusGauge)))
+	}
+	pastDueDurationSeries := func() []*prometheusmodel.Metric {
+		return seriesOf(ExpectMetricName(node.RepairPastDueDurationSeconds.(*opmetrics.PrometheusHistogram)))
+	}
+	// pastDueTime is the part of a RepairPastDueTimeSeconds row that the specs check.
+	type pastDueTime struct {
+		nodeName  string
+		nodePool  string
+		condition string
+		pastDue   time.Duration
+	}
+	// pastDueTimes returns the rows that the last pass reported.
+	pastDueTimes := func() []pastDueTime {
+		return lo.Map(pastDueTimeSeries(), func(m *prometheusmodel.Metric, _ int) pastDueTime {
+			labels := labelsOf(m)
+			return pastDueTime{nodeName: labels["node_name"], nodePool: labels["nodepool"], condition: labels["condition"], pastDue: time.Duration(m.GetGauge().GetValue() * float64(time.Second))}
+		})
+	}
+	// expectPastDueIn runs a pass and checks how many nodes are past due under each condition in the nodepool, which are
+	// the rows with that condition. It also checks that each managed node in a NodePool has one row, and that every row
+	// without a condition is 0.
 	expectPastDueIn := func(nodePool string, counts map[string]int) {
 		GinkgoHelper()
 		ExpectSingletonReconciled(repairCtx, repairMetricsController)
+		rows := pastDueTimes()
+		var managed []string
+		for _, n := range repairCluster.DeepCopyNodes() {
+			if n.Node != nil && n.Managed() && n.Labels()[v1.NodePoolLabelKey] != "" {
+				managed = append(managed, n.Node.Name)
+			}
+		}
+		Expect(lo.Map(rows, func(row pastDueTime, _ int) string { return row.nodeName })).To(ConsistOf(managed), "each managed node in a NodePool should have one row")
+		for _, row := range rows {
+			if row.condition == "" {
+				Expect(row.pastDue).To(BeZero(), row.nodeName+" isn't past due, so it should report 0")
+			}
+		}
 		for condition, count := range counts {
-			ExpectMetricGaugeValue(node.RepairPastDue, float64(count), map[string]string{"nodepool": nodePool, "condition": condition})
+			Expect(lo.CountBy(rows, func(row pastDueTime) bool {
+				return row.nodePool == nodePool && row.condition == condition
+			})).To(Equal(count), "past-due nodes under "+condition)
 		}
 	}
-	// expectPastDue runs a pass and checks the counts for the default nodepool, which nodePoolNodeClaim uses.
+	// expectPastDue runs a pass and checks the past-due nodes in the default nodepool, which nodePoolNodeClaim uses.
 	expectPastDue := func(counts map[string]int) {
 		GinkgoHelper()
 		expectPastDueIn("default", counts)
@@ -164,61 +216,37 @@ var _ = Describe("Repair Past Due", func() {
 		env.Clock.Step(2 * time.Minute)
 		expectPastDue(map[string]int{condition: 1})
 	}
-	// expectRecordedIn checks how many times the histogram recorded under the nodepool and condition, and the total time
-	// recorded.
+	// expectRecordedWith checks how many stretches the histogram recorded under the labels, and their total time. It adds
+	// up the matching series, as `sum by` the labels would.
+	expectRecordedWith := func(labels map[string]string, count int, total time.Duration) {
+		GinkgoHelper()
+		series := lo.Filter(pastDueDurationSeries(), func(m *prometheusmodel.Metric, _ int) bool {
+			return maps.Equal(lo.PickByKeys(labelsOf(m), lo.Keys(labels)), labels)
+		})
+		Expect(lo.SumBy(series, func(m *prometheusmodel.Metric) uint64 { return m.GetHistogram().GetSampleCount() })).To(Equal(uint64(count)), "stretches recorded under %v", labels)
+		Expect(lo.SumBy(series, func(m *prometheusmodel.Metric) float64 { return m.GetHistogram().GetSampleSum() })).To(BeNumerically("~", total.Seconds()), "time recorded under %v", labels)
+	}
+	// expectRecordedIn checks the histogram under the nodepool and condition.
 	expectRecordedIn := func(nodePool, condition string, count int, total time.Duration) {
 		GinkgoHelper()
-		name := ExpectMetricName(node.RepairPastDueDurationSeconds.(*opmetrics.PrometheusHistogram))
-		labels := map[string]string{"nodepool": nodePool, "condition": condition}
-		if count == 0 {
-			_, found := FindMetricWithLabelValues(name, labels)
-			Expect(found).To(BeFalse(), "nothing should be recorded under "+condition)
-			return
-		}
-		ExpectMetricHistogramSampleCountValue(name, uint64(count), labels)
-		metric, _ := FindMetricWithLabelValues(name, labels)
-		Expect(metric.GetHistogram().GetSampleSum()).To(BeNumerically("~", total.Seconds()))
+		expectRecordedWith(map[string]string{"nodepool": nodePool, "condition": condition}, count, total)
 	}
 	// expectRecorded checks the histogram for the default nodepool.
 	expectRecorded := func(condition string, count int, total time.Duration) {
 		GinkgoHelper()
 		expectRecordedIn("default", condition, count, total)
 	}
-	// seriesOf returns the metric's series in the registry.
-	seriesOf := func(name string) []*prometheusmodel.Metric {
-		family, _ := lo.Find(lo.Must(crmetrics.Registry.Gather()), func(f *prometheusmodel.MetricFamily) bool { return f.GetName() == name })
-		return family.GetMetric()
-	}
-	// pastDueTime is one series of RepairPastDueTimeSeconds.
-	type pastDueTime struct {
-		nodeName  string
-		nodePool  string
-		condition string
-		pastDue   time.Duration
-	}
-	// expectPastDueTimes checks the per-node times the last pass reported. It runs no pass itself, so a value that is wrong
-	// for only one pass still fails.
+	// expectPastDueTimes checks the rows the last pass reported. It runs no pass itself, so a value that is wrong for only
+	// one pass still fails.
 	expectPastDueTimes := func(want ...pastDueTime) {
 		GinkgoHelper()
-		got := lo.Map(seriesOf(ExpectMetricName(node.RepairPastDueTimeSeconds.(*opmetrics.PrometheusGauge))), func(m *prometheusmodel.Metric, _ int) pastDueTime {
-			labels := lo.SliceToMap(m.GetLabel(), func(l *prometheusmodel.LabelPair) (string, string) {
-				return l.GetName(), l.GetValue()
-			})
-			return pastDueTime{nodeName: labels["node_name"], nodePool: labels["nodepool"], condition: labels["condition"], pastDue: time.Duration(m.GetGauge().GetValue() * float64(time.Second))}
-		})
-		Expect(got).To(ConsistOf(want))
+		Expect(pastDueTimes()).To(ConsistOf(want))
 	}
 	expectNoSeries := func() {
 		GinkgoHelper()
 		ExpectSingletonReconciled(repairCtx, repairMetricsController)
-		for _, name := range []string{
-			ExpectMetricName(node.RepairPastDue.(*opmetrics.PrometheusGauge)),
-			ExpectMetricName(node.RepairPastDueDurationSeconds.(*opmetrics.PrometheusHistogram)),
-			ExpectMetricName(node.RepairPastDueTimeSeconds.(*opmetrics.PrometheusGauge)),
-		} {
-			_, found := FindMetricWithLabelValues(name, map[string]string{})
-			Expect(found).To(BeFalse(), name)
-		}
+		Expect(pastDueTimeSeries()).To(BeEmpty())
+		Expect(pastDueDurationSeries()).To(BeEmpty())
 	}
 
 	BeforeEach(func() {
@@ -232,7 +260,7 @@ var _ = Describe("Repair Past Due", func() {
 		ExpectCleanedUp(ctx, env.Client)
 		// Each spec builds its own controller, so drop the series it left in the shared metrics.
 		for _, gauge := range []opmetrics.GaugeMetric{node.Allocatable, node.TotalPodRequests, node.TotalPodLimits, node.TotalDaemonRequests,
-			node.TotalDaemonLimits, node.SystemOverhead, node.Lifetime, node.ClusterUtilization, node.RepairPastDue, node.RepairPastDueTimeSeconds} {
+			node.TotalDaemonLimits, node.SystemOverhead, node.Lifetime, node.ClusterUtilization, node.RepairPastDueTimeSeconds} {
 			gauge.Reset()
 		}
 		node.RepairPastDueDurationSeconds.Reset()
@@ -242,38 +270,115 @@ var _ = Describe("Repair Past Due", func() {
 		BeforeEach(func() {
 			startRepair(nodeRepair, badNode, fatalDisk)
 		})
-		It("should report 0 for each repair condition in each nodepool with nodes while no node is past due", func() {
-			Expect(ExpectMetricName(node.RepairPastDue.(*opmetrics.PrometheusGauge))).To(Equal("karpenter_nodes_repair_past_due"))
+		It("should report 0, with an empty condition, for each managed node that isn't past due", func() {
 			Expect(ExpectMetricName(node.RepairPastDueDurationSeconds.(*opmetrics.PrometheusHistogram))).To(Equal("karpenter_nodes_repair_past_due_duration_seconds"))
 			Expect(ExpectMetricName(node.RepairPastDueTimeSeconds.(*opmetrics.PrometheusGauge))).To(Equal("karpenter_nodes_repair_past_due_time_seconds"))
-			// With no nodes, there is no nodepool to report under.
+			// With no nodes, there is nothing to report.
 			expectNoSeries()
-			healthyNode(nodePoolNodeClaim())
+			healthy := healthyNode(nodePoolNodeClaim())
+			unhealthy := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
 			expectPastDue(map[string]int{"bad_node": 0, "bad_disk": 0})
-			expectPastDueTimes()
+			expectPastDueTimes(pastDueTime{healthy.Name, "default", "", 0}, pastDueTime{unhealthy.Name, "default", "", 0})
+			Expect(pastDueDurationSeries()).To(BeEmpty())
 		})
-		It("should count, report and record each nodepool's nodes under that nodepool", func() {
+		It("should not report a count of past-due nodes, since the values above 0 give it", func() {
+			unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
 			healthyNode(nodePoolNodeClaim())
+			env.Clock.Step(2 * time.Hour)
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(lo.CountBy(pastDueTimes(), func(row pastDueTime) bool { return row.pastDue > 0 })).To(Equal(1))
+			Expect(seriesOf("karpenter_nodes_repair_past_due")).To(BeEmpty())
+		})
+		It("should label both metrics like the other node metrics, leaving node_name off the histogram", func() {
+			// It has no instance type label, so cluster cost doesn't look up a NodePool that the spec doesn't create.
+			n := unhealthyNode(test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:        "default",
+				corev1.LabelTopologyZone:   "test-zone-1",
+				corev1.LabelTopologyRegion: "test-region",
+				corev1.LabelArchStable:     "arm64",
+				v1.CapacityTypeLabelKey:    v1.CapacityTypeOnDemand,
+			}}}), badNodeCondition)
+			expectPastDue(map[string]int{"bad_node": 0})
+			lifetime, found := FindMetricWithLabelValues(ExpectMetricName(node.Lifetime.(*opmetrics.PrometheusGauge)), map[string]string{"node_name": n.Name})
+			Expect(found).To(BeTrue())
+			nodeLabels := labelsOf(lifetime)
+			Expect(nodeLabels).To(And(
+				HaveKeyWithValue("managed", "true"),
+				HaveKeyWithValue("nodepool", "default"),
+				HaveKeyWithValue("zone", "test-zone-1"),
+				HaveKeyWithValue("region", "test-region"),
+				HaveKeyWithValue("arch", "arm64"),
+				HaveKeyWithValue("capacity_type", v1.CapacityTypeOnDemand),
+			))
+			Expect(onlyLabels(pastDueTimeSeries())).To(Equal(lo.Assign(nodeLabels, map[string]string{"condition": ""})))
+
+			env.Clock.Step(56 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(onlyLabels(pastDueTimeSeries())).To(Equal(lo.Assign(nodeLabels, map[string]string{"condition": "bad_node"})))
+
+			applyCondition(n, healthyNodeCondition)
+			expectPastDue(map[string]int{"bad_node": 0})
+			Expect(onlyLabels(pastDueDurationSeries())).To(Equal(lo.Assign(lo.OmitByKeys(nodeLabels, []string{"node_name"}), map[string]string{"condition": "bad_node"})))
+		})
+		It("should record a stretch under the node's labels from the last pass in which it was past due", func() {
+			reserved := map[string]string{v1.NodePoolLabelKey: "default", v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}
+			setCapacityType := func(n *corev1.Node, capacityType string) {
+				n = ExpectExists(repairCtx, env.Client, n)
+				n.Labels[v1.CapacityTypeLabelKey] = capacityType
+				ExpectApplied(repairCtx, env.Client, n)
+				ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
+			}
+			moved := unhealthyNode(test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: reserved}}), badNodeCondition)
+			// The other node becomes unhealthy a minute later, so the two are past due from 55m and 56m. Stepping the clock
+			// first also keeps the other node's creation from moving the clock and adding a second to the first node's time.
+			env.Clock.Step(time.Minute)
+			ended := unhealthyNode(test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: reserved}}), badNodeCondition)
+			env.Clock.Step(56 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 2})
+
+			// The first node's capacity type changes while it is past due, as when its capacity reservation ends. Its row
+			// moves to the new value.
+			setCapacityType(moved, v1.CapacityTypeOnDemand)
+			env.Clock.Step(time.Minute)
+			expectPastDue(map[string]int{"bad_node": 2})
+			Expect(pastDueTimeSeries()).To(HaveLen(2))
+			Expect(lo.SliceToMap(pastDueTimeSeries(), func(m *prometheusmodel.Metric) (string, string) {
+				return labelsOf(m)["node_name"], labelsOf(m)["capacity_type"]
+			})).To(Equal(map[string]string{moved.Name: v1.CapacityTypeOnDemand, ended.Name: v1.CapacityTypeReserved}))
+
+			// Both recover at 59m. The other node's capacity type changes after the 58m pass, just before it recovers, so its
+			// stretch is still recorded under reserved, the value that pass saw.
+			env.Clock.Step(time.Minute)
+			applyCondition(moved, healthyNodeCondition)
+			setCapacityType(ended, v1.CapacityTypeOnDemand)
+			applyCondition(ended, healthyNodeCondition)
+			expectPastDue(map[string]int{"bad_node": 0})
+			expectRecordedWith(map[string]string{"capacity_type": v1.CapacityTypeOnDemand}, 1, 4*time.Minute)
+			expectRecordedWith(map[string]string{"capacity_type": v1.CapacityTypeReserved}, 1, 3*time.Minute)
+		})
+		It("should report and record each node under its own nodepool", func() {
+			healthy := healthyNode(nodePoolNodeClaim())
 			otherNodeClaim := nodeClaimIn("other")
 			disk := unhealthyNode(otherNodeClaim, fatalDiskCondition)
 			// The other nodepool's node is past due from 30m, and the default nodepool's node stays healthy.
 			env.Clock.Step(31 * time.Minute)
 			expectPastDue(map[string]int{"bad_node": 0, "bad_disk": 0})
 			expectPastDueIn("other", map[string]int{"bad_node": 0, "bad_disk": 1})
-			expectPastDueTimes(pastDueTime{disk.Name, "other", "bad_disk", time.Minute})
+			expectPastDueTimes(pastDueTime{healthy.Name, "default", "", 0}, pastDueTime{disk.Name, "other", "bad_disk", time.Minute})
 
 			applyCondition(disk, healthyDiskCondition)
 			expectPastDueIn("other", map[string]int{"bad_disk": 0})
 			expectRecordedIn("other", "bad_disk", 1, time.Minute)
 			expectRecorded("bad_disk", 0, 0)
+			expectPastDueTimes(pastDueTime{healthy.Name, "default", "", 0}, pastDueTime{disk.Name, "other", "", 0})
 
-			// Once the other nodepool has no nodes, it has no series, but the default nodepool still does.
+			// Once the other nodepool's node is gone, its 0 row goes too, and nothing more is recorded.
 			ExpectDeleted(repairCtx, env.Client, otherNodeClaim, disk)
 			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(otherNodeClaim))
 			ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(disk))
 			expectPastDue(map[string]int{"bad_node": 0, "bad_disk": 0})
-			_, found := FindMetricWithLabelValues(ExpectMetricName(node.RepairPastDue.(*opmetrics.PrometheusGauge)), map[string]string{"nodepool": "other"})
-			Expect(found).To(BeFalse())
+			expectPastDueTimes(pastDueTime{healthy.Name, "default", "", 0})
+			expectRecordedIn("other", "bad_disk", 1, time.Minute)
 		})
 		It("should not emit any series until another controller marks cluster state synced", func() {
 			// Clear the synced flag that startRepair set.
@@ -345,14 +450,15 @@ var _ = Describe("Repair Past Due", func() {
 			later := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
 
 			// At 60m, the first node has been past due since 55m and the disk node since 40m. The later node is past due
-			// from 65m.
+			// from 65m, so it still reports 0.
 			env.Clock.Step(50 * time.Minute)
 			expectPastDue(map[string]int{"bad_node": 1, "bad_disk": 1})
 			expectPastDueTimes(
 				pastDueTime{first.Name, "default", "bad_node", 5 * time.Minute},
 				pastDueTime{disk.Name, "default", "bad_disk", 20 * time.Minute},
+				pastDueTime{later.Name, "default", "", 0},
 			)
-			// At 70m, the times have grown and the later node is reported too.
+			// At 70m, the times have grown and the later node is past due too.
 			env.Clock.Step(10 * time.Minute)
 			expectPastDue(map[string]int{"bad_node": 2, "bad_disk": 1})
 			expectPastDueTimes(
@@ -394,7 +500,7 @@ var _ = Describe("Repair Past Due", func() {
 			expectPastDue(map[string]int{"bad_disk": 0, "bad_node": 0})
 			expectRecorded("bad_node", 1, 15*time.Minute)
 			expectRecorded("bad_disk", 0, 0)
-			expectPastDueTimes()
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 		})
 		It("should record the whole stretch when another condition keeps the node past due", func() {
 			n := unhealthyNode(nodePoolNodeClaim(), fatalDiskCondition)
@@ -418,16 +524,17 @@ var _ = Describe("Repair Past Due", func() {
 			expectPastDue(map[string]int{"bad_disk": 0, "bad_node": 0})
 			expectRecorded("bad_node", 1, 40*time.Minute)
 			expectRecorded("bad_disk", 0, 0)
-			expectPastDueTimes()
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 		})
 		It("should not record or report the time do-not-repair blocked repair", func() {
 			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
-			// The node is past due from 55m until do-not-repair blocks repair at 65m.
+			// The node is past due from 55m until do-not-repair blocks repair at 65m. Then it reports 0.
 			env.Clock.Step(60 * time.Minute)
 			expectPastDue(map[string]int{"bad_node": 1})
 			env.Clock.Step(5 * time.Minute)
 			setDoNotRepair(n, true)
 			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 			expectRecorded("bad_node", 1, 10*time.Minute)
 
 			// Removing do-not-repair at 100m starts a new stretch, which ends when the node recovers at 110m.
@@ -441,6 +548,7 @@ var _ = Describe("Repair Past Due", func() {
 			expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 10 * time.Minute})
 			applyCondition(n, healthyNodeCondition)
 			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 			expectRecorded("bad_node", 2, 20*time.Minute)
 		})
 		It("should keep counting a node when a policy with a longer drain bound becomes eligible later", func() {
@@ -484,15 +592,16 @@ var _ = Describe("Repair Past Due", func() {
 			Entry("when both become eligible together", 30*time.Minute, "bad_disk"),
 			Entry("when the one without a bound becomes eligible later", 35*time.Minute, "bad_node"),
 		)
-		It("should not count a node while it reboots, and should restart the toleration once the reboot ends", func() {
+		It("should report 0 for a node while it reboots, and should restart the toleration once the reboot ends", func() {
 			nodeClaim := nodePoolNodeClaim()
-			unhealthyNode(nodeClaim, badNodeCondition)
+			n := unhealthyNode(nodeClaim, badNodeCondition)
 			env.Clock.Step(40 * time.Minute)
 			setRebooting(nodeClaim, true)
 
 			// The reboot runs past when the node would otherwise be past due, but the reboot controller bounds it.
 			env.Clock.Step(time.Hour)
 			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 
 			// Once the reboot ends, the node is past due 55m later, not 55m after the condition started.
 			setRebooting(nodeClaim, false)
@@ -513,45 +622,51 @@ var _ = Describe("Repair Past Due", func() {
 			// The reboot held the node back, so its time starts at this pass.
 			expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 0})
 		})
-		DescribeTable("should record how long a node was past due, and stop reporting its time, once it stops being past due",
-			func(stop func(*corev1.Node, *v1.NodeClaim)) {
-				// A second, healthy node keeps the nodepool's count series in the entry that deletes the node.
-				healthyNode(nodePoolNodeClaim())
+		DescribeTable("should record how long a node was past due, and report 0 for it or drop its row, once it stops being past due",
+			func(stop func(*corev1.Node, *v1.NodeClaim), gone bool) {
 				nodeClaim := nodePoolNodeClaim()
 				n := unhealthyNode(nodeClaim, badNodeCondition)
-				// The node is past due from 55m. Nothing is recorded while it stays past due.
-				env.Clock.Step(60 * time.Minute)
-				expectPastDue(map[string]int{"bad_node": 1})
+				// Another node becomes unhealthy a minute later and stays past due throughout. Stepping the clock first keeps
+				// its creation from moving the clock and adding a second to this node's time.
+				env.Clock.Step(time.Minute)
+				other := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+				// The node is past due from 55m, and the other node from 56m. Nothing is recorded while they stay past due.
+				env.Clock.Step(59 * time.Minute)
+				expectPastDue(map[string]int{"bad_node": 2})
 				env.Clock.Step(5 * time.Minute)
-				expectPastDue(map[string]int{"bad_node": 1})
+				expectPastDue(map[string]int{"bad_node": 2})
 				expectRecorded("bad_node", 0, 0)
-				expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 10 * time.Minute})
+				expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 10 * time.Minute}, pastDueTime{other.Name, "default", "bad_node", 9 * time.Minute})
 
-				// It stops being past due at 65m.
+				// It stops being past due at 65m. It reports 0 again unless it is gone, and the other node keeps its row.
 				stop(n, nodeClaim)
-				expectPastDue(map[string]int{"bad_node": 0})
+				expectPastDue(map[string]int{"bad_node": 1})
 				expectRecorded("bad_node", 1, 10*time.Minute)
-				expectPastDueTimes()
+				rows := []pastDueTime{{other.Name, "default", "bad_node", 9 * time.Minute}}
+				if !gone {
+					rows = append(rows, pastDueTime{n.Name, "default", "", 0})
+				}
+				expectPastDueTimes(rows...)
 
 				// It's recorded once, not on every pass.
 				env.Clock.Step(time.Minute)
-				expectPastDue(map[string]int{"bad_node": 0})
+				expectPastDue(map[string]int{"bad_node": 1})
 				expectRecorded("bad_node", 1, 10*time.Minute)
 			},
 			Entry("when it recovers", func(n *corev1.Node, _ *v1.NodeClaim) {
 				applyCondition(n, healthyNodeCondition)
-			}),
+			}, false),
 			Entry("when repair reboots it", func(_ *corev1.Node, nodeClaim *v1.NodeClaim) {
 				setRebooting(nodeClaim, true)
-			}),
+			}, false),
 			Entry("when it is gone", func(n *corev1.Node, nodeClaim *v1.NodeClaim) {
 				ExpectDeleted(repairCtx, env.Client, nodeClaim, n)
 				ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 				ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
-			}),
+			}, true),
 			Entry("when it gets do-not-repair", func(n *corev1.Node, _ *v1.NodeClaim) {
 				setDoNotRepair(n, true)
-			}),
+			}, false),
 		)
 		It("should not record a negative time when the clock steps back", func() {
 			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
@@ -580,38 +695,41 @@ var _ = Describe("Repair Past Due", func() {
 			expectPastDue(map[string]int{"bad_node": 1})
 			expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 0})
 		})
-		It("should not record a node that recovers before it is past due", func() {
+		It("should report 0 for a node that recovers before it is past due, and record nothing", func() {
 			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
 			env.Clock.Step(54 * time.Minute)
 			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 
 			applyCondition(n, healthyNodeCondition)
 			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
 			expectRecorded("bad_node", 0, 0)
 		})
-		It("should ignore a node with do-not-repair", func() {
-			unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
-			setDoNotRepair(unhealthyNode(nodePoolNodeClaim(), badNodeCondition), true)
+		It("should report 0 for a node with do-not-repair", func() {
+			overdue := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			// Step the clock first, so creating the other node can't move it and add a second to the first node's time.
+			env.Clock.Step(time.Minute)
+			vetoed := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			setDoNotRepair(vetoed, true)
+
+			env.Clock.Step(119 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			expectPastDueTimes(pastDueTime{overdue.Name, "default", "bad_node", 65 * time.Minute}, pastDueTime{vetoed.Name, "default", "", 0})
+		})
+		It("should not report a node without a NodePool", func() {
+			inNodePool := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			unhealthyNode(test.NodeClaim(), badNodeCondition)
 
 			env.Clock.Step(2 * time.Hour)
 			expectPastDue(map[string]int{"bad_node": 1})
+			// Repair doesn't act on a node without a NodePool, so it gets no row.
+			Expect(onlyLabels(pastDueTimeSeries())).To(HaveKeyWithValue("node_name", inNodePool.Name))
 		})
-		It("should ignore a node without a NodePool", func() {
-			unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
-			noPool := unhealthyNode(test.NodeClaim(), badNodeCondition)
-
-			env.Clock.Step(2 * time.Hour)
-			expectPastDue(map[string]int{"bad_node": 1})
-			// The node without a NodePool adds no series to the count or the per-node time.
-			_, found := FindMetricWithLabelValues(ExpectMetricName(node.RepairPastDue.(*opmetrics.PrometheusGauge)), map[string]string{"nodepool": ""})
-			Expect(found).To(BeFalse())
-			_, found = FindMetricWithLabelValues(ExpectMetricName(node.RepairPastDueTimeSeconds.(*opmetrics.PrometheusGauge)), map[string]string{"node_name": noPool.Name})
-			Expect(found).To(BeFalse())
-		})
-		It("should ignore a node without a NodeClaim", func() {
-			unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
-			// It has a NodePool label, so only the missing NodeClaim keeps it from counting. Cluster state only tracks a node
-			// like this once it has a provider ID and is initialized.
+		It("should not report a node without a NodeClaim", func() {
+			managed := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			// It has a NodePool label, so only the missing NodeClaim keeps it from getting a row. Cluster state only tracks a
+			// node like this once it has a provider ID and is initialized.
 			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: "unmanaged"}}, ProviderID: test.RandomProviderID()})
 			ExpectApplied(repairCtx, env.Client, n)
 			ExpectMakeNodesInitialized(repairCtx, env.Client, env.Clock, n)
@@ -619,9 +737,8 @@ var _ = Describe("Repair Past Due", func() {
 
 			env.Clock.Step(2 * time.Hour)
 			expectPastDue(map[string]int{"bad_node": 1})
-			// Its NodePool has no node that repair acts on, so it gets no series.
-			_, found := FindMetricWithLabelValues(ExpectMetricName(node.RepairPastDue.(*opmetrics.PrometheusGauge)), map[string]string{"nodepool": "unmanaged"})
-			Expect(found).To(BeFalse())
+			// Repair doesn't act on a node that Karpenter doesn't manage, so it gets no row.
+			Expect(onlyLabels(pastDueTimeSeries())).To(HaveKeyWithValue("node_name", managed.Name))
 		})
 		It("should count a deleting node until it is gone", func() {
 			nodeClaim := nodePoolNodeClaim()
@@ -641,10 +758,27 @@ var _ = Describe("Repair Past Due", func() {
 			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
 			ExpectSingletonReconciled(repairCtx, repairMetricsController)
-			// The nodepool has no nodes left, so the count has no series for it.
-			Expect(seriesOf(ExpectMetricName(node.RepairPastDue.(*opmetrics.PrometheusGauge)))).To(BeEmpty())
+			// Its row is gone with it.
+			expectPastDueTimes()
 			// It was past due from 55m until it was gone at 57m.
 			expectRecorded("bad_node", 1, 2*time.Minute)
+		})
+		It("should report 0 for a deleting node that isn't past due, until it is gone", func() {
+			nodeClaim := nodePoolNodeClaim()
+			n := unhealthyNode(nodeClaim, badNodeCondition)
+			ExpectDeletionTimestampSet(repairCtx, env.Client, nodeClaim, n)
+			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
+			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes(pastDueTime{n.Name, "default", "", 0})
+
+			ExpectFinalizersRemoved(repairCtx, env.Client, nodeClaim, n)
+			ExpectNotFound(repairCtx, env.Client, nodeClaim, n)
+			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
+			expectPastDue(map[string]int{"bad_node": 0})
+			expectPastDueTimes()
+			expectRecorded("bad_node", 0, 0)
 		})
 	})
 
