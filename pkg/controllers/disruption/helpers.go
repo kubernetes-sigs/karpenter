@@ -437,12 +437,18 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	return disruptionBudgetMapping, nil
 }
 
-// mapCandidates maps the list of proposed candidates with the current state
-func mapCandidates(proposed, current []*Candidate) []*Candidate {
-	proposedNames := sets.New[string](lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
-	return lo.Filter(current, func(c *Candidate, _ int) bool {
+// mapCandidates maps the list of proposed candidates with the current state, returning the kept current candidates and
+// any proposed candidates that were dropped.
+func mapCandidates(proposed, current []*Candidate) ([]*Candidate, []*Candidate) {
+	proposedNames := sets.New[string](lo.Map(proposed, func(c *Candidate, _ int) string { return c.Name() })...)
+	kept := lo.Filter(current, func(c *Candidate, _ int) bool {
 		return proposedNames.Has(c.Name())
 	})
+	keptNames := sets.New[string](lo.Map(kept, func(c *Candidate, _ int) string { return c.Name() })...)
+	dropped := lo.Filter(proposed, func(c *Candidate, _ int) bool {
+		return !keptNames.Has(c.Name())
+	})
+	return kept, dropped
 }
 
 // staticReservations reports whether a static NodePool's replacement can only land in full capacity reservations, so
