@@ -41,6 +41,7 @@ For non-feature contributions, open a pull request referencing the relevant issu
 | [Contributor Ladder](contributing-guidelines.md) | Path from contributor to reviewer to approver |
 | [Release Process](RELEASE.md) | How releases are versioned and published |
 | [Development Guide](https://karpenter.sh/docs/contributing/development-guide/) | Setting up your local environment |
+| [Testing Unreleased Changes](TESTING_UNRELEASED_CHANGES.md) | Running a pull request's code in your cluster before it's released |
 
 ## Contact Information
 
