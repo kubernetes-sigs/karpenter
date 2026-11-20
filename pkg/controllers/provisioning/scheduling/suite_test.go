@@ -1508,6 +1508,36 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Labels).To(HaveKey(fake.ExoticInstanceLabelKey))
 				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[4].Name))
 			})
+			It("should schedule optional labels when Exists is combined with NotIn", func() {
+				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
+				ExpectApplied(ctx, env.Client, nodePool)
+				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+					{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpExists},
+					{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"foo"}},
+				}})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKey(fake.ExoticInstanceLabelKey))
+			})
+			It("should schedule optional labels when pods with Exists and NotIn share a node", func() {
+				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
+				ExpectApplied(ctx, env.Client, nodePool)
+				pods := []*corev1.Pod{
+					test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpExists},
+					}}),
+					// The larger pod is scheduled first, so the NodeClaim starts without the label required.
+					test.UnschedulablePod(test.PodOptions{
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"foo"}},
+						},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}},
+					}),
+				}
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				Expect(ExpectScheduled(ctx, env.Client, pods[0]).Labels).To(HaveKey(fake.ExoticInstanceLabelKey))
+				ExpectScheduled(ctx, env.Client, pods[1])
+			})
 			It("should schedule without optional labels if disallowed", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 				ExpectApplied(ctx, env.Client, test.NodePool())
