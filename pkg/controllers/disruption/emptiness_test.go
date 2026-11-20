@@ -410,6 +410,8 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -424,6 +426,8 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -456,6 +460,8 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -470,6 +476,8 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -497,8 +505,12 @@ var _ = Describe("Emptiness", func() {
 		ExpectNotFound(ctx, env.Client, nodeClaim2)
 	})
 	It("considers pending pods when consolidating", func() {
+		// WhenEmpty pools never consolidate non-empty nodes
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
+		// on-demand, because spot-to-spot replacement is off by default. Consolidation would
+		// replace this node with a cheaper one if it ignored the pending pod.
 		largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
-			return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0
+			return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0 && item.Offerings[0].CapacityType() == v1.CapacityTypeOnDemand
 		})
 		sort.Slice(largeTypes, func(i, j int) bool {
 			return largeTypes[i].Offerings[0].Price < largeTypes[j].Offerings[0].Price
@@ -521,6 +533,7 @@ var _ = Describe("Emptiness", func() {
 				},
 			},
 		})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
 		// there is a pending pod that should land on the node
 		pod := test.UnschedulablePod(test.PodOptions{
@@ -547,6 +560,8 @@ var _ = Describe("Emptiness", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectSingletonReconciled(ctx, disruptionController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(0))
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 		// node to schedule, which prevents the large expensive node from being replaced
@@ -815,6 +830,8 @@ var _ = Describe("Emptiness", func() {
 			})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 
 			// Node should NOT be deleted because it hosts buffer capacity
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -832,6 +849,8 @@ var _ = Describe("Emptiness", func() {
 			})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 
 			// Now: buffer consumed (real pods took the space, or buffer deleted)
@@ -877,6 +896,8 @@ var _ = Describe("Emptiness", func() {
 			})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 
 			// Node should NOT be empty-deleted (it has real pods)
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
