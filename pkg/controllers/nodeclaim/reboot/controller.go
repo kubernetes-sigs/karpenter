@@ -141,14 +141,14 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{RequeueAfter: pollInterval}, nil
 	}
 
-	// Fail reboots that exceed their phase deadline instead of retrying indefinitely.
-	if c.pastRebootDeadline(nodeClaim) {
-		result, msg := deadlineResult(nodeClaim)
-		return c.transitionToFailed(ctx, nodeClaim, node, result, msg)
-	}
-
 	switch cond.Reason {
 	case v1.RebootReasonRequested:
+		// A changed boot ID means the provider already rebooted the node. Observe that
+		// reboot before the issuance timeout can replace the node.
+		if !bootChanged(nodeClaim, node) && c.pastRebootDeadline(nodeClaim) {
+			result, msg := deadlineResult(nodeClaim)
+			return c.transitionToFailed(ctx, nodeClaim, node, result, msg)
+		}
 		return c.reconcileRequested(ctx, nodeClaim, node)
 	case v1.RebootReasonIssued:
 		return c.reconcileIssued(ctx, nodeClaim, node)
@@ -169,12 +169,12 @@ func (c *Controller) reconcileRequested(ctx context.Context, nodeClaim *v1.NodeC
 		return reconcile.Result{}, err
 	}
 
-	preBootID, issuing := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]
+	// If bootID already changed, the reboot happened; move to observation without re-issuing.
+	_, issuing := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]
+	if bootChanged(nodeClaim, node) {
+		return c.transitionToIssued(ctx, nodeClaim, node)
+	}
 	if issuing {
-		// If bootID already changed, the reboot happened; move to observation without re-issuing.
-		if node.Status.NodeInfo.BootID != preBootID {
-			return c.transitionToIssued(ctx, nodeClaim, node)
-		}
 		// Re-seed the process-local issuance timeout after restart.
 		c.ensureIssuanceStarted(nodeClaim.UID)
 	}
@@ -211,27 +211,30 @@ func (c *Controller) issueReboot(ctx context.Context, nodeClaim *v1.NodeClaim, n
 }
 
 // reconcileIssued observes reboot recovery and completes once the new boot is Ready.
+// A rejoin inside the observation window succeeds even when this reconcile runs after the
+// window. The deadline fails a reboot only when the node has not come back in time.
 func (c *Controller) reconcileIssued(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) (reconcile.Result, error) {
 	// Re-apply the issued-state invariant after restart.
 	if err := c.removeInitializedLabel(ctx, node); err != nil {
 		return reconcile.Result{}, err
 	}
-	preBootID := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]
-	bootChanged := node.Status.NodeInfo.BootID != preBootID
+	changed := bootChanged(nodeClaim, node)
 
 	// Remove the scheduling fence as soon as the new boot is observed.
-	if bootChanged {
+	if changed {
 		if err := c.removeRebootTaint(ctx, node); err != nil {
 			return reconcile.Result{}, err
 		}
 		c.recorder.Publish(rebootevents.RebootObserved(nodeClaim))
 	}
 
-	ready := nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue
-	if bootChanged && ready {
+	if c.recoveredWithinObservationWindow(nodeClaim, node) {
 		return c.transitionToSucceeded(ctx, nodeClaim, node)
 	}
-	// Timeout is enforced by Reconcile.
+	if c.pastRebootDeadline(nodeClaim) {
+		result, msg := deadlineResult(nodeClaim)
+		return c.transitionToFailed(ctx, nodeClaim, node, result, msg)
+	}
 	return reconcile.Result{RequeueAfter: pollInterval}, nil
 }
 
@@ -494,6 +497,35 @@ func (c *Controller) rebootDeadline(nodeClaim *v1.NodeClaim) (time.Time, bool) {
 func (c *Controller) pastRebootDeadline(nodeClaim *v1.NodeClaim) bool {
 	deadline, ok := c.rebootDeadline(nodeClaim)
 	return ok && c.clock.Now().After(deadline)
+}
+
+// bootChanged reports whether the Node's boot ID differs from the recorded pre-reboot boot ID.
+func bootChanged(nodeClaim *v1.NodeClaim, node *corev1.Node) bool {
+	preBootID, recorded := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]
+	return recorded && node.Status.NodeInfo.BootID != preBootID
+}
+
+// recoveredWithinObservationWindow reports whether the node rejoined inside the observation
+// window: a new boot ID and Ready=True, with that Ready transition no later than the window.
+// A Ready transition that predates issuance counts as issuance time. A fast reboot can leave
+// Ready=True without a new transition, and that rejoin is inside the window.
+func (c *Controller) recoveredWithinObservationWindow(nodeClaim *v1.NodeClaim, node *corev1.Node) bool {
+	if !bootChanged(nodeClaim, node) {
+		return false
+	}
+	ready := nodeutils.GetCondition(node, corev1.NodeReady)
+	if ready.Status != corev1.ConditionTrue {
+		return false
+	}
+	issuedAt, ok := c.issuedAt(nodeClaim)
+	if !ok {
+		return true
+	}
+	recoveredAt := ready.LastTransitionTime.Time
+	if recoveredAt.Before(issuedAt) {
+		recoveredAt = issuedAt
+	}
+	return !recoveredAt.After(issuedAt.Add(observationWindow))
 }
 
 // Maps a phase timeout to its terminal result.
