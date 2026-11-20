@@ -185,7 +185,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil
 			}
-			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
+			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), "reason", strings.ToLower(string(m.Reason())))
 		}
 		if success {
 			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
