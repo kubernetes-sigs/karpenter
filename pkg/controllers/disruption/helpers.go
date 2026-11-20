@@ -83,6 +83,17 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
 
+	var opts []scheduling.Options
+	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
+		opts = append(opts, scheduling.IgnorePreferences)
+	}
+	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
+
+	pods, err = filterPendingPodsRequiringNewCapacity(ctx, cluster, provisioner, pods, opts)
+	if err != nil {
+		return scheduling.Results{}, err
+	}
+
 	// candidatePods are the pods on consolidation candidate nodes that we will reschedule. Their UIDs feed
 	// deletingPodUIDs below so the DRA allocator frees the devices they hold and re-allocates their claims onto the
 	// replacement capacity, mirroring how pods on already-deleting nodes are treated.
@@ -114,11 +125,6 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	pods = append(pods, deletingNodePods...)
 
-	var opts []scheduling.Options
-	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
-		opts = append(opts, scheduling.IgnorePreferences)
-	}
-	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
 	opts = append(opts, schedulerOpts...)
 	// Both consolidation candidate pods and pods on already-deleting nodes are migrating off their current nodes, so
 	// the DRA allocator should treat the devices they hold as available for reallocation (and re-allocate their claims).
@@ -163,6 +169,38 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		}
 	}
 	return results, nil
+}
+
+// filterPendingPodsRequiringNewCapacity drops the pending pods that require new capacity no matter what disruption
+// decides. It solves a baseline scheduling simulation against the cluster as it stands — every active node included,
+// candidates too — so a pending pod the baseline still places on a new NodeClaim cannot be waiting on any capacity a
+// disruption decision might free or keep: reactive provisioning has to create that capacity for it either way. Left in
+// the disruption simulation, such a pod blocks consolidation of unrelated nodes (a delete is refused whenever the
+// simulation produces a NodeClaim) and skews replacements, which get sized and priced for a pod the candidates never
+// hosted (kubernetes-sigs/karpenter#3593). Pods the baseline places on existing nodes stay in the simulation so
+// disruption keeps reserving the capacity they would consume, and pods the baseline cannot schedule at all also stay,
+// since Results.AllNonPendingPodsScheduled already ignores them. The baseline runs with the base scheduling options
+// only: caller options model the disruption being simulated (e.g. crediting back a candidate's reservation slot) and
+// must not leak into the no-disruption baseline.
+func filterPendingPodsRequiringNewCapacity(ctx context.Context, cluster *state.Cluster, provisioner *provisioning.Provisioner, pods []*corev1.Pod, opts []scheduling.Options) ([]*corev1.Pod, error) {
+	if len(pods) == 0 {
+		return pods, nil
+	}
+	// The scheduler mutates the state nodes it is given, so hand the baseline its own deep copy.
+	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, cluster.DeepCopyNodes().Active(), nil, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating baseline scheduler, %w", err)
+	}
+	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
+	if err != nil {
+		return nil, fmt.Errorf("simulating baseline scheduling, %w", err)
+	}
+	requiresNewCapacity := sets.New(lo.FlatMap(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) []types.UID {
+		return lo.Map(nc.Pods, func(p *corev1.Pod, _ int) types.UID { return p.UID })
+	})...)
+	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+		return !requiresNewCapacity.Has(p.UID)
+	}), nil
 }
 
 // SimulateSchedulingWithReservedFallback runs the candidate-gone scheduling simulation for a single voluntary-disruption

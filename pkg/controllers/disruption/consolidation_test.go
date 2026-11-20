@@ -1059,6 +1059,75 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		It("can replace node without sizing the replacement for a pending pod that needs a new node", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+
+			// A pending pod that fits on no existing node, only on a new node. It needs that new capacity regardless of
+			// any disruption decision, so the candidate's replacement must not be sized and priced to carry it.
+			pending := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("48")},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool, pending)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Process the item so that the nodes can be deleted.
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			// the replacement carries only the candidate's pod; the pending pod's new capacity is provisioned
+			// independently of consolidation
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims[0].Pods).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims[0].Pods[0].Name).To(Equal(pod.Name))
+
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// should create a new nodeclaim as there is a cheaper one that can hold the pod
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodes).To(HaveLen(1))
+
+			// Expect that the new nodeclaim does not request the most expensive instance type
+			Expect(nodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+
+			// pending pod is still here and hasn't been scheduled
+			pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
+			Expect(pending.Spec.NodeName).To(BeEmpty())
+		})
 		DescribeTable("only requires Spot for an on-demand replacement when a Spot offering is available", func(spotAvailable bool) {
 			offerings := func(price float64) []cloudprovider.Offering {
 				return []cloudprovider.Offering{
@@ -3555,6 +3624,63 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 
 			// pending pod is still here and hasn't been scheduled anywayre
+			pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
+			Expect(pending.Spec.NodeName).To(BeEmpty())
+		})
+		It("can delete nodes with a pending pod that needs a new node", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+
+			// A pending pod that fits on no existing node, only on a new node. Whether or not that node ever launches
+			// (e.g. the cloud provider is out of capacity), the pod needs new capacity regardless of any disruption
+			// decision, so it must not block consolidation of unrelated nodes.
+			pending := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("48")},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool, pending)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Process the item so that the nodes can be deleted.
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Replacements).To(BeEmpty())
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+
+			// we don't need a new node to replace the candidate, and the pending pod's new capacity is provisioned
+			// independently of consolidation
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+
+			// pending pod is still here and hasn't been scheduled
 			pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
 			Expect(pending.Spec.NodeName).To(BeEmpty())
 		})
