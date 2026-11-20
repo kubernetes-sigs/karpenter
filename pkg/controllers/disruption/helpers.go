@@ -421,16 +421,22 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	if err != nil {
 		return disruptionBudgetMapping, fmt.Errorf("listing node pools, %w", err)
 	}
+	nodePoolMap := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) { return np.Name, np })
+	// NodePoolBudgetMap clamps (allowed - disrupting) at 0 and logs when it does, so the two callers stay in sync.
+	disruptionBudgetMapping = NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, reason)
 	for _, nodePool := range nodePools {
+		// allowed_disruptions is GA and reports the budget itself, not the remaining headroom; the effective
+		// budget is max(allowed_disruptions - nodes_consuming_budgets, 0).
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
-		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
 		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: strings.ToLower(string(reason)),
 		})
 		NodePoolNodesConsumingBudgets.Set(float64(disrupting[nodePool.Name]), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: strings.ToLower(string(reason)),
 		})
-		if numNodes[nodePool.Name] != 0 && allowedDisruptions == 0 {
+		// Blocked whenever there is no remaining headroom, whether the budget itself is 0 or nodes that are
+		// already disrupting have consumed it.
+		if numNodes[nodePool.Name] != 0 && disruptionBudgetMapping[nodePool.Name] == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(nodePool, reason))
 		}
 	}
