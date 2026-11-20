@@ -78,8 +78,10 @@ var (
 		Help: "Users set this to block voluntary disruption. On a Node or NodeClaim, it blocks consolidation and " +
 			"drift. On a Pod, it blocks consolidation of the Pod's node, and blocks drift unless the NodeClaim sets " +
 			"a terminationGracePeriod. On a Pod, the value may also be a duration (e.g. `5m`) after the Pod's start " +
-			"time at which the protection ends. It does not block expiration, repair, or forceful termination once " +
-			"the terminationGracePeriod elapses.",
+			"time at which the protection ends. It does not block expiration. On a Pod, it blocks repair when no " +
+			"drain bound applies from the repair policy or the NodeClaim's terminationGracePeriod, and otherwise " +
+			"holds the Pod on the node until that drain bound forces its deletion. It does not block forceful termination once the " +
+			"terminationGracePeriod elapses.",
 		Values: []docs.Value{{Name: trueValue, Help: "Disruption is blocked."}},
 		Stage:  docs.GA,
 	}
@@ -116,7 +118,8 @@ var (
 		Example: "2026-10-01T22:00:00Z",
 		UsedOn:  []runtime.Object{&NodeClaim{}},
 		Help: "Karpenter sets this to the RFC3339 time by which the node must finish draining, from the " +
-			"NodeClaim's terminationGracePeriod when it is deleted. Pods are deleted early enough to complete " +
+			"NodeClaim's terminationGracePeriod when it is deleted, or earlier from a repair policy or failed " +
+			"reboot drain bound. The earliest deadline wins. Pods are deleted early enough to complete " +
 			"their own terminationGracePeriodSeconds by then, bypassing PDBs and karpenter.sh/do-not-disrupt.",
 		Stage:        docs.Alpha,
 		InternalOnly: true,
@@ -157,7 +160,7 @@ var (
 		Example: "10m",
 		UsedOn:  []runtime.Object{&NodeClaim{}},
 		Help: "Karpenter sets this to a duration bounding the drain before a reboot. When unset, the drain is " +
-			"unbounded; `0` drains forcefully.",
+			"unbounded; `0` skips the drain. Pods still on the node when the bound ends stay through the reboot.",
 		Stage:        docs.Alpha,
 		InternalOnly: true,
 	}
