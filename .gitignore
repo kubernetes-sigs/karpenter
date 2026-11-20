@@ -21,3 +21,6 @@ bin/
 *.swp
 *.swo
 *~
+
+# Built by make e2etest-dra
+dra-kwok-driver/dra-kwok-driver
