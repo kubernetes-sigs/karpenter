@@ -2598,7 +2598,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			// this test validator invalidates the command because it creates pod churn during validaiton
+			// this test validator invalidates the command because it creates pod churn during validation
 			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(len(cmds)).To(Equal(1))
@@ -5505,7 +5505,7 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			// This is not possible as we dont set ConditionTypeConsolidatable on static NodeClaims, incase user sets it
+			// This is not possible as we dont set ConditionTypeConsolidatable on static NodeClaims, in case user sets it
 			for _, nc := range nodeClaims {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			}

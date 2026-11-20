@@ -1855,7 +1855,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(lo.Keys(instanceTypeList[0].Capacity)).ToNot(ContainElement("smarter-devices/fuse"))
 			})
-			It("should pass with conflicting capcaity update overlays for all nodepools", func() {
+			It("should pass with conflicting capacity update overlays for all nodepools", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []v1alpha1.NodeSelectorRequirement{

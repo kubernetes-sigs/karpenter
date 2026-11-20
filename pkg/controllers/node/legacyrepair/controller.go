@@ -164,7 +164,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
 
-	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
+	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e below the allowed threshold)
 	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
 	// to repair the nodes
 	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
