@@ -742,16 +742,17 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:              oldNode.Node,
-		NodeClaim:         nodeClaim,
-		daemonSetRequests: oldNode.daemonSetRequests,
-		daemonSetLimits:   oldNode.daemonSetLimits,
-		podRequests:       oldNode.podRequests,
-		podLimits:         oldNode.podLimits,
-		hostPortUsage:     oldNode.hostPortUsage,
-		volumeUsage:       oldNode.volumeUsage,
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
+		Node:               oldNode.Node,
+		NodeClaim:          nodeClaim,
+		daemonSetRequests:  oldNode.daemonSetRequests,
+		daemonSetLimits:    oldNode.daemonSetLimits,
+		podRequests:        oldNode.podRequests,
+		podLimits:          oldNode.podLimits,
+		terminatingPodKeys: oldNode.terminatingPodKeys,
+		hostPortUsage:      oldNode.hostPortUsage,
+		volumeUsage:        oldNode.volumeUsage,
+		markedForDeletion:  oldNode.markedForDeletion,
+		nominatedUntil:     oldNode.nominatedUntil,
 
 		repairPolicyMatches: oldNode.repairPolicyMatches,
 	}
@@ -792,16 +793,17 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:              node,
-		NodeClaim:         oldNode.NodeClaim,
-		daemonSetRequests: map[types.NamespacedName]corev1.ResourceList{},
-		daemonSetLimits:   map[types.NamespacedName]corev1.ResourceList{},
-		podRequests:       map[types.NamespacedName]corev1.ResourceList{},
-		podLimits:         map[types.NamespacedName]corev1.ResourceList{},
-		hostPortUsage:     scheduling.NewHostPortUsage(),
-		volumeUsage:       scheduling.NewVolumeUsage(),
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
+		Node:               node,
+		NodeClaim:          oldNode.NodeClaim,
+		daemonSetRequests:  map[types.NamespacedName]corev1.ResourceList{},
+		daemonSetLimits:    map[types.NamespacedName]corev1.ResourceList{},
+		podRequests:        map[types.NamespacedName]corev1.ResourceList{},
+		podLimits:          map[types.NamespacedName]corev1.ResourceList{},
+		terminatingPodKeys: sets.New[types.NamespacedName](),
+		hostPortUsage:      scheduling.NewHostPortUsage(),
+		volumeUsage:        scheduling.NewVolumeUsage(),
+		markedForDeletion:  oldNode.markedForDeletion,
+		nominatedUntil:     oldNode.nominatedUntil,
 	}
 	n.repairPolicyMatches = c.matchRepairPolicies(ctx, node, oldNode)
 	if err := multierr.Combine(

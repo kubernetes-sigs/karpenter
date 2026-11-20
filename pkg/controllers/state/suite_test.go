@@ -1057,6 +1057,165 @@ var _ = Describe("Node Resource Level", func() {
 	})
 })
 
+var _ = Describe("Reboot Available Resources", func() {
+	It("should exclude terminating pod requests from Available() during reboot", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+		node.Status.Allocatable = corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("4"),
+		}
+		// Add a finalizer to the pod so that Delete sets DeletionTimestamp but
+		// the pod stays in the API server (not terminal).
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Finalizers: []string{"testing/block-deletion"}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
+				},
+			},
+		})
+
+		// Set up node, nodeclaim, and initialize
+		ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+		ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		// Bind the pod to the node and reconcile
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+
+		// Before reboot: pod requests counted, Available = 4 - 2 = 2
+		sn := ExpectStateNodeExists(cluster, node)
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.Available())
+
+		// Simulate reboot: set Rebooting condition to True on the NodeClaim
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "reboot requested")
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		// Delete the pod (simulates eviction during reboot drain). The finalizer
+		// keeps the pod in the API server so the reconciler sees it as terminating
+		// (DeletionTimestamp set) but not terminal (still Running).
+		Expect(env.Client.Delete(ctx, pod)).To(Succeed())
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+
+		// Verify the node is rebooting and the pod is still tracked
+		sn = ExpectStateNodeExists(cluster, node)
+		Expect(sn.RebootInProgress()).To(BeTrue())
+		// PodRequests() still counts the terminating pod
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.PodRequests())
+		// Available() should exclude terminating pod's requests during reboot,
+		// so the scheduling simulation sees full capacity (4 - 0 = 4)
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")}, sn.Available())
+	})
+	It("should not exclude terminating pod requests from Available() on a non-rebooting node", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
+			},
+			ProviderID: test.RandomProviderID(),
+		})
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Finalizers: []string{"testing/block-deletion"}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, node, pod)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+
+		// Delete pod to make it terminating (but not terminal due to finalizer)
+		Expect(env.Client.Delete(ctx, pod)).To(Succeed())
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+
+		// Non-rebooting node: Available() should still count terminating pod's requests
+		sn := ExpectStateNodeExists(cluster, node)
+		Expect(sn.RebootInProgress()).To(BeFalse())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.Available())
+	})
+	It("should resume counting pod requests after reboot completes", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+		node.Status.Allocatable = corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("4"),
+		}
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Finalizers: []string{"testing/block-deletion"}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+		ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+
+		// Start reboot
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "reboot requested")
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		// Delete pod
+		Expect(env.Client.Delete(ctx, pod)).To(Succeed())
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+
+		// During reboot: terminating pod excluded from Available()
+		sn := ExpectStateNodeExists(cluster, node)
+		Expect(sn.RebootInProgress()).To(BeTrue())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")}, sn.Available())
+
+		// Finish reboot: set Rebooting condition to False
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRebooting, v1.RebootReasonSucceeded, "reboot succeeded")
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		// After reboot completes: terminating pod's requests are counted again in Available()
+		sn = ExpectStateNodeExists(cluster, node)
+		Expect(sn.RebootInProgress()).To(BeFalse())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}, sn.Available())
+	})
+})
+
 var _ = Describe("Pod Anti-Affinity", func() {
 	It("should track pods with required anti-affinity", func() {
 		pod := test.UnschedulablePod(test.PodOptions{
