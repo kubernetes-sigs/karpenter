@@ -180,12 +180,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     replaces-first with these Results (as it always has).
 //
 //  2. Only if pass 1 leaves pods pending AND terminateFirstEnabled is set by the caller AND the candidate itself holds a
-//     reservation: if the NodePool's non-reserved fallback is only transiently unavailable (e.g. ICE), we wait for it
-//     rather than terminating first, as a static NodePool does, and skip this pass. Otherwise, re-simulate in strict
-//     mode with the candidate's reservation slot credited back (modeling the slot it will free on termination). If every
-//     pod then places, terminateFirst is true — deleting the candidate is exactly what unblocks the reschedule. Strict
-//     mode makes surplus pods that wouldn't fit the freed slot fail rather than fall back, and a reservation that is
-//     unavailable for another reason stays unschedulable, so we don't terminate uselessly.
+//     reservation: if the NodePool's non-reserved fallback is only transiently unavailable (e.g. ICE), wait for it.
+//     Otherwise, re-simulate in strict mode with the candidate's reservation slot credited back (modeling the slot it
+//     will free on termination). If every pod then places, terminateFirst is true — deleting the candidate is exactly
+//     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
+//     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
+//     uselessly.
 //
 // A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, unchanged.
 func SimulateSchedulingWithReservedFallback(
