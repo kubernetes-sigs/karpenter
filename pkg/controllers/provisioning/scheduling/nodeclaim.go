@@ -265,7 +265,7 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, 
 	n.InstanceTypeOptions = instanceTypes
 	n.volumes.Insert(volumes)
 	// Daemon overhead is excluded here to avoid double-counting
-	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
+	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests) //nolint:nilaway // Solve caches pod data for every pod before scheduling it
 	n.Requirements = nodeClaimRequirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)

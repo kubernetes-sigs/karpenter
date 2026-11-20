@@ -328,6 +328,9 @@ func subCapacity(dst, src map[resourcev1.QualifiedName]resource.Quantity) map[re
 	if len(src) == 0 {
 		return dst
 	}
+	if dst == nil {
+		dst = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
+	}
 	for name, qty := range src {
 		existing := dst[name]
 		existing.Sub(qty)

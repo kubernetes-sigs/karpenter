@@ -1,0 +1,39 @@
+version: "2"
+# NilAway (https://github.com/uber-go/nilaway) reports possible nil panics by tracking nil flows across
+# functions and struct fields. It runs from the same golangci-lint-karpenter binary as karpenterlint, but
+# with its own config: test code is skipped, so flows that only originate in test setup aren't reported.
+# Not part of `make verify` yet; run with `make karpenterlint`.
+run:
+  tests: false
+  timeout: 15m
+linters:
+  default: none
+  enable:
+    - nilaway
+  settings:
+    custom:
+      nilaway:
+        type: "module"
+        description: Reports possible nil panics by tracking nil flows across functions and struct fields.
+        settings:
+          include-pkgs: "sigs.k8s.io/karpenter"
+          # Test helpers and fakes only run under test, where a nil panic fails the test that hit it.
+          exclude-pkgs: "sigs.k8s.io/karpenter/pkg/test,sigs.k8s.io/karpenter/test,sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+  exclusions:
+    generated: lax
+    paths:
+      - tools
+      - website
+      - hack
+      - charts
+      - designs
+      - test
+      - pkg/test
+      - pkg/cloudprovider/fake
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  fix: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

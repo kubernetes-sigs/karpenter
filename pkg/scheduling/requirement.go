@@ -92,7 +92,7 @@ func NewRequirementWithFlexibility(
 		r.values.Insert(values...)
 	}
 	if operator == corev1.NodeSelectorOpGt {
-		value, _ := strconv.Atoi(values[0]) // prevalidated
+		value, _ := strconv.Atoi(values[0]) //nolint:nilaway // prevalidated: Gt and Lt are validated to carry exactly one value
 		if value == math.MaxInt {
 			// Gt MaxInt matches nothing
 			return NewRequirement(key, corev1.NodeSelectorOpDoesNotExist)
@@ -152,7 +152,7 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirementWithMi
 		switch {
 		case len(r.values) > 0:
 			return v1.NodeSelectorRequirementWithMinValues{
-				Key:       r.Key,
+				Key:       r.Key, //nolint:nilaway // Requirements entries are non-nil
 				Operator:  corev1.NodeSelectorOpNotIn,
 				Values:    sets.List(r.values),
 				MinValues: r.minValues,
@@ -286,7 +286,7 @@ func (r *Requirement) Any() string {
 // Has returns true if the requirement allows the value
 func (r *Requirement) Has(value string) bool {
 	if r.complement {
-		return !r.values.Has(value) && withinBounds(value, r.gte, r.lte)
+		return !r.values.Has(value) && withinBounds(value, r.gte, r.lte) //nolint:nilaway // Requirements entries are non-nil
 	}
 	return r.values.Has(value) && withinBounds(value, r.gte, r.lte)
 }
