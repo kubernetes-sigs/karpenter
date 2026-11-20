@@ -214,7 +214,7 @@ func SimulateSchedulingWithReservedFallback(
 	}
 	// A replacement only blocked on capacity that may come back (e.g. ICE'd on-demand) waits, as a static NodePool does,
 	// rather than taking the workload down until the refill launches (kubernetes-sigs/karpenter#3415).
-	if awaitsTransientCapacity(candidate) {
+	if awaitsTransientCapacity(ctx, provisioner.CloudProvider(), candidate) {
 		return results, false, nil
 	}
 
@@ -507,12 +507,21 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 // unavailable (Compatible but not Available) and that every reschedulable pod could use, so its replacement may
 // launch without the candidate's reservation slot once that capacity comes back. It's the dynamic counterpart of
 // staticReservations' non-reserved fallback check.
-func awaitsTransientCapacity(c *Candidate) bool {
+func awaitsTransientCapacity(ctx context.Context, cloudProvider cloudprovider.CloudProvider, c *Candidate) bool {
+	// The scheduling simulation's instance types only keep types with an Available offering, so they can't show a
+	// transiently unavailable fallback; look the NodePool's instance types up instead.
+	its, err := cloudProvider.GetInstanceTypes(ctx, c.NodePool)
+	if err != nil {
+		// Without the NodePool's offerings we can't rule out a fallback that may come back, so wait rather than
+		// terminating first.
+		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(c.NodePool)), "waiting instead of terminating first")
+		return true
+	}
 	nct := scheduling.NewNodeClaimTemplate(c.NodePool)
 	podReqs := lo.Map(c.reschedulablePods, func(p *corev1.Pod, _ int) pkgscheduling.Requirements {
 		return pkgscheduling.NewStrictPodRequirements(p)
 	})
-	for _, it := range c.nodePoolInstanceTypes {
+	for _, it := range its {
 		for _, o := range it.Offerings {
 			if o.Available || !o.Compatible || o.CapacityType() == v1.CapacityTypeReserved || !templateCompatible(nct, it, o) {
 				continue
