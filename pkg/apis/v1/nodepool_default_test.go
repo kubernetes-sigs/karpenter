@@ -63,7 +63,24 @@ var _ = Describe("CEL/Default", func() {
 			Expect(nodePool.Spec.Disruption).ToNot(BeNil())
 			Expect(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration)).To(Equal(0 * time.Second))
 			Expect(nodePool.Spec.Disruption.ConsolidationPolicy).To(Equal(ConsolidationPolicyWhenEmptyOrUnderutilized))
-			Expect(nodePool.Spec.Disruption.Budgets).To(Equal([]Budget{{Nodes: "10%"}}))
+			Expect(nodePool.Spec.Disruption.Budgets).To(Equal([]Budget{{
+				Nodes:   "10%",
+				Reasons: []DisruptionReason{DisruptionReasonEmpty, DisruptionReasonDrifted, DisruptionReasonUnderutilized},
+			}}))
+		})
+	})
+	Context("Defaults/Budgets", func() {
+		It("should default reasons to exclude Unhealthy when unset", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{Nodes: "0"}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), nodePool)).To(Succeed())
+			Expect(nodePool.Spec.Disruption.Budgets[0].Reasons).To(Equal([]DisruptionReason{DisruptionReasonEmpty, DisruptionReasonDrifted, DisruptionReasonUnderutilized}))
+		})
+		It("should not default reasons when set", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{Nodes: "0", Reasons: []DisruptionReason{DisruptionReasonUnhealthy}}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), nodePool)).To(Succeed())
+			Expect(nodePool.Spec.Disruption.Budgets[0].Reasons).To(Equal([]DisruptionReason{DisruptionReasonUnhealthy}))
 		})
 	})
 })

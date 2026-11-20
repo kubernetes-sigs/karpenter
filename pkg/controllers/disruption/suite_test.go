@@ -886,7 +886,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		}
 	})
 	It("should not consider not ready nodes for the Unhealthy repair budget", func() {
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy, v1.DisruptionReasonDrifted}}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
 		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, nodes[0], nodes[1])
@@ -908,7 +908,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})
 	It("should still consider marked-for-deletion nodes for the Unhealthy repair budget", func() {
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
 		// An in-flight repair marks its candidate for deletion; those must still count so repair paces itself.
