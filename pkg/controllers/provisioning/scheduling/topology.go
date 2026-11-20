@@ -225,7 +225,8 @@ func (t *Topology) Record(p *corev1.Pod, taints []corev1.Taint, requirements sch
 // cannot be satisfied.
 func (t *Topology) AddRequirements(p *corev1.Pod, taints []corev1.Taint, podRequirements, nodeRequirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) (scheduling.Requirements, error) {
 	requirements := scheduling.NewRequirements(nodeRequirements.Values()...)
-	for _, topology := range t.getMatchingTopologies(p, taints, nodeRequirements, compatibilityOptions...) {
+	topologies := t.getMatchingTopologies(p, taints, nodeRequirements, compatibilityOptions...)
+	for _, topology := range topologies {
 		podDomains := scheduling.NewRequirement(topology.Key, corev1.NodeSelectorOpExists)
 		if podRequirements.Has(topology.Key) {
 			podDomains = podRequirements.Get(topology.Key)
@@ -234,14 +235,28 @@ func (t *Topology) AddRequirements(p *corev1.Pod, taints []corev1.Taint, podRequ
 		if nodeRequirements.Has(topology.Key) {
 			nodeDomains = nodeRequirements.Get(topology.Key)
 		}
-		domains, _ := topology.Get(p, podDomains, nodeDomains)
-		if domains.Len() == 0 {
+		domains, validDomains := topology.Get(p, podDomains, nodeDomains)
+		// A spread's least populated domain may conflict with another topology constraint even when a
+		// different domain satisfies both. Intersect all valid domains before choosing where to spread.
+		if topology.Type == TopologyTypeSpread && len(topologies) > 1 {
+			domains = scheduling.NewRequirement(topology.Key, corev1.NodeSelectorOpIn, validDomains.UnsortedList()...)
+		}
+		requirements.Add(domains)
+		if requirements.Get(topology.Key).Len() == 0 {
 			return nil, topologyError{
 				topology:    topology,
 				podDomains:  podDomains,
 				nodeDomains: nodeDomains,
 			}
 		}
+	}
+	for _, topology := range topologies {
+		if topology.Type != TopologyTypeSpread || requirements.Get(topology.Key).Len() <= 1 {
+			continue
+		}
+		// Keep the pod's original domains for global minimum/skew calculations. Only narrow placement
+		// choices, preserving the spread preference within the domains allowed by every constraint.
+		domains, _ := topology.Get(p, podRequirements.Get(topology.Key), requirements.Get(topology.Key))
 		requirements.Add(domains)
 	}
 	return requirements, nil
