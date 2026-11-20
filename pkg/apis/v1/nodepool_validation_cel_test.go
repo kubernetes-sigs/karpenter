@@ -724,6 +724,18 @@ var _ = Describe("CEL/Validation", func() {
 			}
 		})
 	})
+	Context("Name", func() {
+		It("should succeed at runtime for a name of 63 characters", func() {
+			nodePool.Name = strings.Repeat("a", 63)
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+		})
+		It("should fail at runtime for a name longer than 63 characters", func() {
+			nodePool.Name = strings.Repeat("a", 64)
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(MatchError(ContainSubstring("must be no more than 63")))
+		})
+	})
 	Context("TerminationGracePeriod", func() {
 		DescribeTable("should succeed on a valid terminationGracePeriod", func(value string) {
 			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
