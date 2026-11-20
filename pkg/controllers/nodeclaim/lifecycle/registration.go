@@ -56,7 +56,6 @@ type Registration struct {
 	clock             clock.Clock
 }
 
-//nolint:gocyclo
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
@@ -136,8 +135,6 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 // checkRegistrationHooks evaluates all registration hooks in parallel. If any hook returns an error,
 // it is returned. If any hook signals it is not ready (non-empty result), the status condition is
 // updated to list all pending hooks and the shortest requeue interval is returned.
-//
-//nolint:gocyclo
 func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if len(r.registrationHooks) == 0 {
 		return reconcile.Result{}, nil

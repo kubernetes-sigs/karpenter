@@ -293,8 +293,6 @@ func (s *Store) PredictedRequests(ctx context.Context, cachedOwnerResolutions Ow
 
 // resolveWorkload resolves a pod to the workload its prediction is stored under, which is always one of
 // SupportedTargets. Keep the two in sync.
-//
-//nolint:gocyclo
 func (s *Store) resolveWorkload(ctx context.Context, pod *corev1.Pod, cachedOwnerResolutions OwnerResolutions) (WorkloadReference, bool) {
 	ref := metav1.GetControllerOfNoCopy(pod)
 	if ref == nil {

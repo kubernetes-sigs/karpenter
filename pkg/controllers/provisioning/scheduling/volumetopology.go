@@ -223,7 +223,6 @@ func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, po
 
 // ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
 // PVCs (e.g. the PVC is not found or references an unknown storage class).
-// nolint:gocyclo
 func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
 	for _, vol := range pod.Spec.Volumes {
 		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, vol)

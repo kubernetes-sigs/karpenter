@@ -78,21 +78,26 @@ func WaitingOnReadiness(nodeClaim *v1.NodeClaim) events.Event {
 	}
 }
 
-func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
+// Terminating says why a node is disrupted and, when terminateFirstExplanation is set, why it goes before its replacement.
+func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason, terminateFirstExplanation string) []events.Event {
+	detail := cases.Title(language.Und, cases.NoLower).String(reason)
+	if terminateFirstExplanation != "" {
+		detail += ", terminating it before its replacement because " + terminateFirstExplanation
+	}
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           corev1.EventTypeNormal,
 			Reason:         events.DisruptionTerminating,
-			Message:        fmt.Sprintf("Disrupting Node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
-			DedupeValues:   []string{string(node.UID), reason},
+			Message:        fmt.Sprintf("Disrupting Node: %s", detail),
+			DedupeValues:   []string{string(node.UID), reason, terminateFirstExplanation},
 		},
 		{
 			InvolvedObject: nodeClaim,
 			Type:           corev1.EventTypeNormal,
 			Reason:         events.DisruptionTerminating,
-			Message:        fmt.Sprintf("Disrupting NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
-			DedupeValues:   []string{string(nodeClaim.UID), reason},
+			Message:        fmt.Sprintf("Disrupting NodeClaim: %s", detail),
+			DedupeValues:   []string{string(nodeClaim.UID), reason, terminateFirstExplanation},
 		},
 	}
 }
@@ -152,6 +157,21 @@ func NodePoolBlockedForDisruptionReason(nodePool *v1.NodePool, reason v1.Disrupt
 		Message:        fmt.Sprintf("No allowed disruptions for disruption reason %s due to blocking budget", reason),
 		DedupeValues:   []string{string(nodePool.UID), string(reason)},
 		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
+// NodePoolDriftBackoff informs the user that a NodePool's drift candidates are being skipped
+// because the NodePool is in drift replacement back-off after repeated unrecoverable failures.
+func NodePoolDriftBackoff(nodePool *v1.NodePool, until time.Time, level int) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.DisruptionBackoff,
+		Message:        fmt.Sprintf("Drift disruption backing off until %s (level %d) after repeated replacement failures", until.Format(time.RFC3339), level),
+		DedupeValues:   []string{string(nodePool.UID)},
+		// A pool's back-off window is at least 30s; rate-limit the event so rapid selection passes
+		// don't spam identical events.
+		DedupeTimeout: 1 * time.Minute,
 	}
 }
 

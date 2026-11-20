@@ -20,6 +20,7 @@ package events
 const (
 	// disruption
 	DisruptionBlocked          = "DisruptionBlocked"
+	DisruptionBackoff          = "DisruptionBackoff"
 	DisruptionLaunching        = "DisruptionLaunching"
 	DisruptionTerminating      = "DisruptionTerminating"
 	DisruptionWaitingReadiness = "DisruptionWaitingReadiness"

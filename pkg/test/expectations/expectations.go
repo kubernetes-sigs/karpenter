@@ -49,6 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -152,20 +153,30 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 		current := object.DeepCopyObject().(client.Object)
 		statuscopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
 
-		// Create or Update
-		if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
-			if errors.IsNotFound(err) {
-				Expect(c.Create(ctx, object)).To(Succeed())
-			} else {
-				Expect(err).ToNot(HaveOccurred())
+		// Create or Update, retrying on conflict. Under parallel test workloads
+		// (e.g. workqueue.ParallelizeUntil), the object's resource version in the
+		// informer cache can be stale so the Update returns 409.
+		// Each retry re-fetches the fresh resource version.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
+				if errors.IsNotFound(err) {
+					return c.Create(ctx, object)
+				}
+				return err
 			}
-		} else {
 			object.SetResourceVersion(current.GetResourceVersion())
-			Expect(c.Update(ctx, object)).To(Succeed())
-		}
-		// Update status
-		statuscopy.SetResourceVersion(object.GetResourceVersion())
-		Expect(c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
+			return c.Update(ctx, object)
+		})).To(Succeed())
+
+		// Update status, also retrying on conflict.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			fresh := statuscopy.DeepCopyObject().(client.Object)
+			if err := c.Get(ctx, client.ObjectKeyFromObject(statuscopy), fresh); err != nil {
+				return err
+			}
+			statuscopy.SetResourceVersion(fresh.GetResourceVersion())
+			return c.Status().Update(ctx, statuscopy)
+		})).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
 
 		// Re-get the object to grab the updated spec and status
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
@@ -234,9 +245,15 @@ func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.
 func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-		controllerutil.AddFinalizer(object, "testing/finalizer")
-		Expect(c.Update(ctx, object)).To(Succeed())
+		// Same informer-cache staleness applies here as in ExpectApplied, so retry
+		// the Get+Update on conflict.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.Get(ctx, client.ObjectKeyFromObject(object), object); err != nil {
+				return err
+			}
+			controllerutil.AddFinalizer(object, "testing/finalizer")
+			return c.Update(ctx, object)
+		})).To(Succeed())
 		Expect(c.Delete(ctx, object)).To(Succeed())
 		DeferCleanup(func(obj client.Object) {
 			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
@@ -328,7 +345,7 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
 	result := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
-	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
+	podKeys := sets.New[string](lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
 	for pod, binding := range result.Bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
@@ -351,7 +368,29 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	return result
 }
 
-//nolint:gocyclo
+func ExpectProvisionedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) []*v1.NodeClaim {
+	GinkgoHelper()
+	for _, pod := range pods {
+		ExpectApplied(ctx, c, pod)
+	}
+	results, err := provisioner.Schedule(ctx)
+	Expect(err).ToNot(HaveOccurred())
+
+	var nodeClaims []*v1.NodeClaim
+	for _, m := range results.NewNodeClaims {
+		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
+		Expect(err).ToNot(HaveOccurred())
+		nodeClaim := &v1.NodeClaim{}
+		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
+		nodeClaim, err = ExpectNodeClaimDeployedNoNode(ctx, c, cloudProvider, nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+		cluster.UpdateNodeClaim(nodeClaim)
+		ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
+		nodeClaims = append(nodeClaims, nodeClaim)
+	}
+	return nodeClaims
+}
+
 func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
 	// Persist objects
@@ -464,14 +503,23 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 		return it.Name == instanceTypeName
 	})
 	Expect(found).To(BeTrue(), "instance type %q not found in cloud provider", instanceTypeName)
-	if len(it.DynamicResources.ResourceSliceTemplates) == 0 {
+	// Only the sets the node was launched with are published: unscoped sets, and sets whose requirements the node's
+	// labels satisfy.
+	nodeReqs := pscheduling.NewLabelRequirements(node.Labels)
+	var templates []*cloudprovider.ResourceSliceTemplate
+	for _, dr := range it.DynamicResources {
+		if nodeReqs.IsCompatible(dr.Requirements) {
+			templates = append(templates, dr.ResourceSliceTemplates...)
+		}
+	}
+	if len(templates) == 0 {
 		return
 	}
 	Expect(node.UID).ToNot(BeEmpty(), "node %q has no UID, cannot create owner reference", node.Name)
 
 	// Group templates by driver to set ResourceSliceCount correctly
 	templatesByDriver := map[string][]*cloudprovider.ResourceSliceTemplate{}
-	for _, t := range it.DynamicResources.ResourceSliceTemplates {
+	for _, t := range templates {
 		templatesByDriver[t.Driver.Value()] = append(templatesByDriver[t.Driver.Value()], t)
 	}
 
@@ -592,8 +640,8 @@ func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *co
 // round that relies on the in-cluster allocated-device set.
 func ExpectDeviceAllocationReconciled(ctx context.Context, c client.Client, controller *deviceallocation.Controller) {
 	GinkgoHelper()
-	// Hydrate is guarded by sync.Once internally, so calling it multiple times is safe.
-	controller.Hydrate(ctx)
+	// Hydrate is a no-op once hydrated, so calling it multiple times is safe.
+	Expect(controller.Hydrate(ctx)).To(Succeed())
 	// Reconcile every existing claim to pick up allocation-status changes committed by prior provisioning runs.
 	claimList := &resourcev1.ResourceClaimList{}
 	Expect(c.List(ctx, claimList)).To(Succeed())
@@ -628,12 +676,6 @@ func ExpectResourceClaimAllocated(ctx context.Context, c client.Client, namespac
 		devices = append(devices, fmt.Sprintf("%s/%s", r.Pool, r.Device))
 	}
 	return devices
-}
-
-// ExpectInstanceTypeOptionNames returns the names of a NodeClaim's candidate instance type options.
-func ExpectInstanceTypeOptionNames(nc *scheduling.NodeClaim) []string {
-	GinkgoHelper()
-	return lo.Map(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })
 }
 
 func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
@@ -1046,6 +1088,8 @@ func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...c
 
 // ConsistentlyExpectNotTerminating ensures that the deletion timestamp is not set
 // We need this since there is some propagation time for the eviction API to set the deletionTimestamp
+//
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs ...client.Object) {
 	GinkgoHelper()
 

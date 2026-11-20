@@ -45,12 +45,15 @@ type fakeNodeClaim struct {
 	requirements   scheduling.Requirements
 	instanceTypes  []dynamicresources.InstanceTypeID
 	resourceSlices map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice
+	// existing models an existing node, which isn't superposed. The zero value is a superposed (planned) NodeClaim.
+	existing bool
 }
 
 func (f *fakeNodeClaim) ID() dynamicresources.NodeClaimID                 { return f.id }
 func (f *fakeNodeClaim) NodeName() string                                 { return f.nodeName }
 func (f *fakeNodeClaim) NodePoolID() dynamicresources.NodePoolID          { return f.nodePoolID }
 func (f *fakeNodeClaim) Requirements() scheduling.Requirements            { return f.requirements }
+func (f *fakeNodeClaim) Superposed() bool                                 { return !f.existing }
 func (f *fakeNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID { return f.instanceTypes }
 func (f *fakeNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	return f.resourceSlices
@@ -2453,12 +2456,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-a",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA0.DeviceID, devA1.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA0.DeviceID, devA1.DeviceID},
 							},
 						},
 					},
@@ -3045,6 +3046,90 @@ var _ = Describe("Allocator", func() {
 		})
 	})
 
+	// Existing nodes aren't superposed: a well-known label the node doesn't define (here, windows-build) is absent, so a
+	// device or allocation that requires a value for it isn't accessible. A superposed NodeClaim is open to any value.
+	Describe("Well-known labels the NodeClaim doesn't define", func() {
+		windowsBuildSelector := func(op corev1.NodeSelectorOperator, values ...string) *corev1.NodeSelector {
+			return &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelWindowsBuild, Operator: op, Values: values}}},
+				},
+			}
+		}
+		makeNC := func(id string, superposed bool) *fakeNodeClaim {
+			nc := makeNodeClaimWithID(id, "it-1")
+			nc.existing = !superposed
+			return nc
+		}
+
+		DescribeTable("should check in-cluster devices with a nodeSelector",
+			func(op corev1.NodeSelectorOperator, values []string, superposed, allocatable bool) {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withRawNodeSelector(windowsBuildSelector(op, values...)),
+						withAPIDevices("gpu-0"),
+						withGeneration(1, 1),
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+				_, err := alloc.Allocate(ctx, makeNC("test-nc", superposed), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
+				if allocatable {
+					Expect(err).ToNot(HaveOccurred())
+				} else {
+					Expect(err).To(HaveOccurred())
+				}
+			},
+			Entry("In is allocatable when superposed", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, true, true),
+			Entry("In isn't allocatable on an existing node", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, false, false),
+			Entry("NotIn is allocatable on an existing node", corev1.NodeSelectorOpNotIn, []string{"10.0.20348"}, false, true),
+			Entry("DoesNotExist is allocatable on an existing node", corev1.NodeSelectorOpDoesNotExist, nil, false, true),
+		)
+
+		DescribeTable("should check an in-cluster allocation's nodeSelector",
+			func(superposed bool) {
+				alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+				claim := makeAllocatedClaim("c1", windowsBuildSelector(corev1.NodeSelectorOpIn, "10.0.20348"))
+				_, err := alloc.Allocate(ctx, makeNC("test-nc", superposed), []*resourcev1.ResourceClaim{claim})
+				if !superposed {
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("in-cluster allocation topology is incompatible"))
+				} else {
+					Expect(err).ToNot(HaveOccurred())
+				}
+			},
+			Entry("compatible when superposed", true),
+			Entry("incompatible on an existing node", false),
+		)
+
+		DescribeTable("should check an in-memory allocation's requirements",
+			func(superposed bool) {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withRawNodeSelector(windowsBuildSelector(corev1.NodeSelectorOpIn, "10.0.20348")),
+						withAPIDevices("gpu-0"),
+						withGeneration(1, 1),
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+				claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+				// Allocate the claim in memory for an in-flight NodeClaim, which records the device's topology.
+				result, err := alloc.Allocate(ctx, makeNC("in-flight-nc", true), []*resourcev1.ResourceClaim{claim})
+				Expect(err).ToNot(HaveOccurred())
+				result.Allocation.Commit(ctx)
+
+				_, err = alloc.Allocate(ctx, makeNC("other-nc", superposed), []*resourcev1.ResourceClaim{claim})
+				if !superposed {
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("in-memory allocation topology is incompatible"))
+				} else {
+					Expect(err).ToNot(HaveOccurred())
+				}
+			},
+			Entry("compatible when superposed", true),
+			Entry("incompatible on an existing node", false),
+		)
+	})
+
 	Describe("Uncommitted allocation state isolation", func() {
 		It("should not reserve devices when allocation is not committed", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
@@ -3254,12 +3339,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-1",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 							},
 						},
 					},
@@ -4264,12 +4347,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-1",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 							},
 						},
 					},
@@ -4319,12 +4400,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-1",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 							},
 						},
 					},

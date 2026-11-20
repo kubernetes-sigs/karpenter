@@ -7,16 +7,37 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       id: setup-go
       with:
         go-version-file: go.mod
         check-latest: true
-        cache-dependency-path: "**/go.sum"
+        cache-dependency-path: |
+          **/go.sum
+          go.tools.sum
+    # Download every module the repo and its `go tool` dependencies need up front, and retry, so a
+    # transient proxy.golang.org / sum.golang.org error (e.g. "stream error: ... INTERNAL_ERROR;
+    # received from peer") doesn't fail the job later in go generate, go vet, golangci-lint or go test.
+    # Modules that already downloaded stay in the module cache, so a retry only refetches what failed.
+    - name: Download Go modules
+      shell: bash
+      run: |
+        attempts=3
+        for ((i = 1; i <= attempts; i++)); do
+          if go mod download && go mod download -modfile=go.tools.mod; then
+            exit 0
+          fi
+          if ((i < attempts)); then
+            echo "go mod download failed (attempt ${i}/${attempts}), retrying in $((i * 10))s..." >&2
+            sleep $((i * 10))
+          fi
+        done
+        echo "go mod download failed after ${attempts} attempts" >&2
+        exit 1
     # Root path permission workaround for caching https://github.com/actions/cache/issues/845#issuecomment-1252594999
     - run: sudo chown "$USER" /usr/local
       shell: bash
-    - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       id: cache-envtest
       with:
         path: /usr/local/kubebuilder/bin

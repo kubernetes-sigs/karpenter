@@ -54,6 +54,20 @@ var (
 		},
 		opmetrics.GA,
 	)
+	TopologyBuildDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "topology_build_duration_seconds",
+			Help:      "Duration of building the cluster topology used by scheduling simulations in seconds.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]opmetrics.Label{
+			metrics.Controller,
+		},
+		opmetrics.Alpha,
+	)
 	QueueDepth = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{

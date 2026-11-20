@@ -171,31 +171,6 @@ func WithHostnameSpread() DeploymentOptionModifier {
 	}
 }
 
-// WithZoneSpread adds topology spread constraints to spread pods across zones
-func WithZoneSpread() DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		// Get the current labels to use in the label selector
-		labels := opts.PodOptions.Labels
-		if labels == nil {
-			labels = map[string]string{"app": opts.Name}
-		}
-
-		constraint := v1.TopologySpreadConstraint{
-			MaxSkew:           1,
-			TopologyKey:       v1.LabelTopologyZone,
-			WhenUnsatisfiable: v1.DoNotSchedule,
-			LabelSelector: &metav1.LabelSelector{
-				MatchLabels: labels,
-			},
-		}
-
-		opts.PodOptions.TopologySpreadConstraints = append(
-			opts.PodOptions.TopologySpreadConstraints,
-			constraint,
-		)
-	}
-}
-
 // WithPodAntiAffinity adds pod anti-affinity to prevent pods from being scheduled on the same topology
 func WithPodAntiAffinity(topologyKey string) DeploymentOptionModifier {
 	return func(opts *DeploymentOptions) {
@@ -229,24 +204,6 @@ func WithTopologySpreadConstraints(constraints []v1.TopologySpreadConstraint) De
 	}
 }
 
-// WithResourceLimits adds resource limits to the pod containers
-func WithResourceLimits(cpuLimit, memoryLimit string) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		if opts.PodOptions.ResourceRequirements.Limits == nil {
-			opts.PodOptions.ResourceRequirements.Limits = make(v1.ResourceList)
-		}
-		opts.PodOptions.ResourceRequirements.Limits[v1.ResourceCPU] = resource.MustParse(cpuLimit)
-		opts.PodOptions.ResourceRequirements.Limits[v1.ResourceMemory] = resource.MustParse(memoryLimit)
-	}
-}
-
-// WithPriorityClass sets the priority class for the pods
-func WithPriorityClass(priorityClassName string) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.PriorityClassName = priorityClassName
-	}
-}
-
 // WithNodeSelector adds node selector requirements
 func WithNodeSelector(nodeSelector map[string]string) DeploymentOptionModifier {
 	return func(opts *DeploymentOptions) {
@@ -264,63 +221,7 @@ func WithTolerations(tolerations []v1.Toleration) DeploymentOptionModifier {
 	}
 }
 
-// WithTerminationGracePeriod sets the termination grace period for pods
-func WithTerminationGracePeriod(seconds int64) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.TerminationGracePeriodSeconds = &seconds
-	}
-}
-
-// WithNoResourceRequests removes resource requirements entirely (for backward compatibility)
-func WithNoResourceRequests() DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.ResourceRequirements = v1.ResourceRequirements{}
-	}
-}
-
-// WithImage sets a custom container image
-func WithImage(image string) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.Image = image
-	}
-}
-
-// WithRestartPolicy sets the pod restart policy
-func WithRestartPolicy(policy v1.RestartPolicy) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.RestartPolicy = policy
-	}
-}
-
-// WithReadinessProbe adds a readiness probe to the pod
-func WithReadinessProbe(probe *v1.Probe) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.ReadinessProbe = probe
-	}
-}
-
-// WithLivenessProbe adds a liveness probe to the pod
-func WithLivenessProbe(probe *v1.Probe) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.LivenessProbe = probe
-	}
-}
-
 // WithPodAntiAffinityHostname is a convenience function for hostname anti-affinity
 func WithPodAntiAffinityHostname() DeploymentOptionModifier {
 	return WithPodAntiAffinity(v1.LabelHostname)
-}
-
-// WithCommand sets a custom command for the container
-func WithCommand(command []string) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.Command = command
-	}
-}
-
-// WithPreStopSleep adds a pre-stop sleep hook to the container
-func WithPreStopSleep(seconds int64) DeploymentOptionModifier {
-	return func(opts *DeploymentOptions) {
-		opts.PodOptions.PreStopSleep = &seconds
-	}
 }

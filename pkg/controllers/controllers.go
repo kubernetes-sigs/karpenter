@@ -70,6 +70,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
@@ -102,7 +103,6 @@ func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[
 	}
 }
 
-//nolint:gocyclo
 func NewControllers(
 	ctx context.Context,
 	mgr manager.Manager,
@@ -121,7 +121,8 @@ func NewControllers(
 	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache, predictionStore)
 	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
+	driftBackoff := nodepoolbackoff.NewState(clock)
+	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, driftBackoff)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	controllers := []controller.Controller{
@@ -134,7 +135,7 @@ func NewControllers(
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
-		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost),
+		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost, driftBackoff),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
 		statenodeclaimgc.NewController(kubeClient, cluster),
@@ -159,19 +160,17 @@ func NewControllers(
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
-			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost),
+			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost, driftBackoff),
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
-				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey)...),
 			),
 			status.NewController[*v1.NodePool](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
-				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 			),
 			status.NewGenericObjectController[*corev1.Node](
@@ -202,7 +201,7 @@ func NewControllers(
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
 		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p, virtualPodCache))
 		if !options.FromContext(ctx).DisableClusterStateObservability {
-			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.
+			// Emit the operator_capacitybuffer_status_condition_* metrics for CapacityBuffer.
 			// A GenericObjectController reads status.conditions reflectively, so the
 			// upstream CapacityBuffer type is used as-is without implementing operatorpkg's
 			// status.Object interface or persisting a Karpenter-specific Ready condition.
@@ -210,7 +209,6 @@ func NewControllers(
 				status.NewGenericObjectController[*autoscalingv1beta1.CapacityBuffer](
 					kubeClient,
 					mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
-					status.EmitDeprecatedMetrics,
 					status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				),
 			)

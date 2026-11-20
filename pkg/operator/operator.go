@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -35,9 +37,12 @@ import (
 	"github.com/samber/lo"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -163,8 +168,8 @@ func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
 func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	opts := option.Resolve(o...)
 
-	// Root Context
-	ctx := context.Background()
+	// Root Context, canceled on SIGTERM/SIGINT so the manager stops and releases the leader lease
+	ctx := ctrl.SetupSignalHandler()
 
 	// Options
 	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
@@ -204,6 +209,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
 
+	if err := validateDRASupport(ctx, kubernetesInterface.Discovery()); err != nil {
+		log.FromContext(ctx).Error(err, "unsupported configuration")
+		os.Exit(1)
+	}
+
 	if cfg := options.FromContext(ctx).SchedulerConfig; cfg != nil && cfg.PodTopologySpread != nil && len(cfg.PodTopologySpread.DefaultConstraints) != 0 {
 		log.FromContext(ctx).WithValues("default-topology-spread-constraints", cfg.PodTopologySpread.DefaultConstraints).Info("scheduler-config is set: applying these default topology spread constraints during scheduling to pods that declare none of their own")
 	}
@@ -216,6 +226,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		LeaderElectionNamespace:       options.FromContext(ctx).LeaderElectionNamespace,
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,
+		GracefulShutdownTimeout:       new(15 * time.Second), // under the default 30s pod grace period, so the lease is released even if a runnable is slow to stop
 		LeaderElectionConfig:          leaderConfig,
 		LeaderElectionLabels:          opts.LeaderElectionLabels,
 		Metrics: server.Options{
@@ -231,6 +242,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			ByObject: map[client.Object]cache.ByObject{
 				&coordinationv1.Lease{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
+				},
+				// Services are only read for their spec.selector (to deduce default topology spread selectors), so
+				// drop managedFields before they're stored. This is roughly a quarter to a third of each cached Service.
+				&corev1.Service{}: {
+					Transform: cache.TransformStripManagedFields(),
 				},
 			},
 		},
@@ -292,6 +308,21 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		InstanceTypeStore:   instanceTypeStore,
 		PredictionStore:     predictionStore,
 	}
+}
+
+// validateDRASupport returns an error when DRA is enabled but the API server doesn't serve resource.k8s.io/v1.
+func validateDRASupport(ctx context.Context, dc discovery.DiscoveryInterface) error {
+	if options.FromContext(ctx).IgnoreDRARequests {
+		return nil
+	}
+	gv := resourcev1.SchemeGroupVersion.String()
+	if _, err := dc.ServerResourcesForGroupVersion(gv); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("--ignore-dra-requests=false (IGNORE_DRA_REQUESTS) requires the %s API, which is served by Kubernetes 1.34+, upgrade the cluster or set it to true", gv)
+		}
+		return fmt.Errorf("checking for the %s API required by --ignore-dra-requests=false (IGNORE_DRA_REQUESTS), %w", gv, err)
+	}
+	return nil
 }
 
 func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {

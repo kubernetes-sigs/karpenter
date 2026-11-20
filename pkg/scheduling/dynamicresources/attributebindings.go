@@ -89,13 +89,11 @@ func (ab AttributeBindings) Bound(nodePool string, instanceType InstanceTypeID, 
 // BuildAttributeBindings constructs the attribute binding graph from cloud provider instance type
 // metadata. It creates symmetric pairs for each declared binding and computes the transitive
 // closure per (attribute, nodePool, instanceType) triple.
-//
-//nolint:gocyclo
 func BuildAttributeBindings(instanceTypesByNodePool map[string][]*cloudprovider.InstanceType) AttributeBindings {
 	bindings := make(map[resourcev1.QualifiedName]map[string]map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
 	for nodePool, instanceTypes := range instanceTypesByNodePool {
 		for _, instanceType := range instanceTypes {
-			for _, itBinding := range instanceType.DynamicResources.AttributeBindings {
+			for _, itBinding := range instanceType.ResolvedAttributeBindings() {
 				if len(itBinding.Devices) < 2 {
 					continue
 				}

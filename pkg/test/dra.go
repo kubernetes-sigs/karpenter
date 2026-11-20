@@ -207,14 +207,6 @@ func ResourceSlice(overrides ...resourcev1.ResourceSlice) *resourcev1.ResourceSl
 	}
 }
 
-// Device builds a ResourceSlice device with the given name and optional attributes.
-func Device(name string, attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) resourcev1.Device {
-	return resourcev1.Device{
-		Name:       name,
-		Attributes: attributes,
-	}
-}
-
 // StringAttribute is a convenience for building a string-valued device attribute.
 func StringAttribute(value string) resourcev1.DeviceAttribute {
 	return resourcev1.DeviceAttribute{StringValue: new(value)}

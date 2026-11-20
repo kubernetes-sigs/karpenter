@@ -49,8 +49,9 @@ func makeOffering(price float64) *cloudprovider.Offering {
 			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"),
 			scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
 		),
-		Price:     price,
-		Available: true,
+		Price:      price,
+		Available:  true,
+		Compatible: true,
 	}
 }
 
@@ -476,8 +477,9 @@ var _ = Describe("Balanced Scoring", func() {
 			np := makeBalancedNodePool("pool-onDemand-only", nil)
 			sourceIT := fake.NewInstanceType("source-type",
 				fake.WithOfferings(cloudprovider.Offering{
-					Available: true,
-					Price:     0.50,
+					Available:  true,
+					Compatible: true,
+					Price:      0.50,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 						corev1.LabelTopologyZone: "test-zone-1",
@@ -490,16 +492,18 @@ var _ = Describe("Balanced Scoring", func() {
 			destIT := fake.NewInstanceType("dest-type",
 				fake.WithOfferings(
 					cloudprovider.Offering{
-						Available: true,
-						Price:     0.10,
+						Available:  true,
+						Compatible: true,
+						Price:      0.10,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 							corev1.LabelTopologyZone: "test-zone-1",
 						}),
 					},
 					cloudprovider.Offering{
-						Available: true,
-						Price:     0.40,
+						Available:  true,
+						Compatible: true,
+						Price:      0.40,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 							corev1.LabelTopologyZone: "test-zone-1",

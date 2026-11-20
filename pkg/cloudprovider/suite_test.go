@@ -119,8 +119,8 @@ var _ = Describe("Instance Type", func() {
 				},
 			},
 			Offerings: []*cloudprovider.Offering{
-				{Available: true},
-				{Available: true},
+				{Available: true, Compatible: true},
+				{Available: true, Compatible: true},
 			},
 		}
 		groups := it.AllocatableOfferingsList()
@@ -144,10 +144,11 @@ var _ = Describe("Instance Type", func() {
 				},
 			},
 			Offerings: []*cloudprovider.Offering{
-				{Available: true},
-				{Available: true},
+				{Available: true, Compatible: true},
+				{Available: true, Compatible: true},
 				{
 					Available:        true,
+					Compatible:       true,
 					CapacityOverride: v1.ResourceList{extendedResource: resource.MustParse("12")},
 					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
 						SystemReserved: v1.ResourceList{v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -155,6 +156,7 @@ var _ = Describe("Instance Type", func() {
 				},
 				{
 					Available:        true,
+					Compatible:       true,
 					CapacityOverride: v1.ResourceList{extendedResource: resource.MustParse("12")},
 					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
 						SystemReserved: v1.ResourceList{v1.ResourceMemory: resource.MustParse("3Gi")},

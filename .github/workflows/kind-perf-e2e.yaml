@@ -8,11 +8,11 @@ on:
     types:
       - completed
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   kind-perf-e2e:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
-    permissions:
-      issues: write
     strategy:
       fail-fast: false
       matrix:

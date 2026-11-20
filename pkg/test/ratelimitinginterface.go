@@ -28,12 +28,15 @@ import (
 
 // TypedRateLimitingInterface implements a TypedRateLimiting queue as a non-ratelimited queue for testing.
 // This helps testing by having functions that use a RateLimiting queue synchronously add items to the queue.
+//
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 type TypedRateLimitingInterface[T comparable] struct {
 	*workqueue.Typed[T]
 	AddedRateLimitedLock sync.Mutex
 	AddedRatelimited     []any
 }
 
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func NewTypedRateLimitingInterface[T comparable](queueConfig workqueue.TypedQueueConfig[T]) *TypedRateLimitingInterface[T] {
 	return &TypedRateLimitingInterface[T]{Typed: workqueue.NewTypedWithConfig[T](queueConfig)}
 }

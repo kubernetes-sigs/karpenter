@@ -15,6 +15,9 @@ jobs:
     permissions:
       issues: write
     runs-on: ubuntu-latest
+    # Passing legs take up to about 25 minutes. A leg with a hung test ran about 31 minutes
+    # before the 20m go test timeout failed it, so 45 still lets go test print its stack dump.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -33,3 +36,17 @@ jobs:
       env:
         COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: go tool -modfile=go.tools.mod goveralls -coverprofile=coverage.out -service=github
+  presubmit-result:
+    # One check name that does not change when the k8s version matrix changes.
+    # always() makes this job report failure instead of skipped when a leg fails or is cancelled.
+    if: always()
+    needs: [presubmit]
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - env:
+        RESULT: ${{ needs.presubmit.result }}
+      run: |
+        echo "presubmit result: ${RESULT}"
+        test "${RESULT}" = success

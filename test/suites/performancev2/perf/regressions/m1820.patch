@@ -1,0 +1,13 @@
+diff --git a/pkg/controllers/provisioning/scheduling/topologygroup.go b/pkg/controllers/provisioning/scheduling/topologygroup.go
+index 13db6967..78d35109 100644
+--- a/pkg/controllers/provisioning/scheduling/topologygroup.go
++++ b/pkg/controllers/provisioning/scheduling/topologygroup.go
+@@ -422,7 +422,7 @@ func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduli
+ 	// is less than our empty domains, this is going to be more efficient to iterate through
+ 	// This is particularly useful when considering the hostname topology key that can have a
+ 	// lot of t.domains but only a single nodeDomain
+-	if nodeDomains.Operator() == corev1.NodeSelectorOpIn && nodeDomains.Len() < len(t.emptyDomains) {
++	if false && nodeDomains.Operator() == corev1.NodeSelectorOpIn && nodeDomains.Len() < len(t.emptyDomains) {
+ 		for _, domain := range nodeDomains.Values() {
+ 			if t.emptyDomains.Has(domain) && podDomains.Has(domain) {
+ 				options.Insert(domain)

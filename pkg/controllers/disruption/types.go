@@ -147,7 +147,6 @@ func (c *Candidate) IsEmpty() bool {
 	return c.RescheduleDisruptionCost <= disruptionutils.PerNodeBaseDisruptionCost
 }
 
-//nolint:gocyclo // Candidate validation is clearer as one linear workflow.
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
 	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
 ) (*Candidate, error) {
@@ -294,6 +293,18 @@ const (
 	// TerminateFirstStaticAtLimit means a static NodePool at its node limit can't launch the replacement alongside the node.
 	TerminateFirstStaticAtLimit TerminateFirstReason = "static-at-limit"
 )
+
+// Explanation says in plain words why the node goes before its replacement, and is empty when it doesn't.
+func (r TerminateFirstReason) Explanation() string {
+	switch r {
+	case TerminateFirstNoReservedCapacity:
+		return "its capacity reservation is full"
+	case TerminateFirstStaticAtLimit:
+		return "its NodePool is at its node limit"
+	default:
+		return string(r)
+	}
+}
 
 func (c Command) Decision() Decision {
 	switch {

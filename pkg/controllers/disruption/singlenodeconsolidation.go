@@ -49,7 +49,6 @@ func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodO
 }
 
 // ComputeCommand generates a disruption command given candidates
-// nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if s.IsConsolidated() {
 		return []Command{}, nil

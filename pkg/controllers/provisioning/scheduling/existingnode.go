@@ -81,8 +81,6 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 // CanAdd returns whether the pod can be added to the ExistingNode
 // based on the taints/tolerations, volume requirements, host port compatibility,
 // requirements, resources, and topology requirements
-//
-//nolint:gocyclo
 func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData, volumes scheduling.Volumes, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, allocationResult *dynamicresources.AllocationResult, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {

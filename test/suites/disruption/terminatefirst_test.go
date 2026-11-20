@@ -157,7 +157,7 @@ var _ = Describe("TerminateFirst", Ordered, func() {
 
 	It("terminates first when repairing an at-limit static NodePool", func() {
 		if _, ok := env.RepairCondition(); !ok {
-			Skip("terminate-first repair requires --repair-condition for this provider")
+			Skip("[unsupported:repair-condition] terminate-first repair requires --repair-condition for this provider")
 		}
 		configureStaticNodePool()
 		env.ExpectCreated(nodeClass, nodePool)

@@ -112,9 +112,9 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
-		NewStaticDrift(cluster, provisioner, cp, recorder),
+		NewStaticDrift(cluster, provisioner, cp, recorder, queue.backoff),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-		NewDrift(kubeClient, cluster, provisioner, recorder, clk),
+		NewDrift(kubeClient, cluster, provisioner, recorder, clk, queue.backoff),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 		NewMultiNodeConsolidation(c),
 		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
@@ -133,7 +133,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -176,6 +175,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
+	clearUndriftedNodePoolBackoffs(ctx, c.cluster, c.queue.backoff)
+
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
@@ -184,7 +185,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil
 			}
-			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
+			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), "reason", strings.ToLower(string(m.Reason())))
 		}
 		if success {
 			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil

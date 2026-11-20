@@ -31,6 +31,9 @@ KWOK_REPO=kind.local make install-kwok apply-with-kind
 TEST_SUITE=regression make e2etests
 ```
 
+`apply-with-kind` installs the checked-in CRDs from `kwok/charts/crds` and does not regenerate them. If you
+changed API types under `pkg/apis`, run `make verify` first so the installed CRDs match the controller image.
+
 Specs that need it skip themselves on a cluster without that configuration, so the rest of the suite runs
 against any cluster with the KWOK provider installed.
 

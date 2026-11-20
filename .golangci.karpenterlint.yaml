@@ -1,0 +1,35 @@
+version: "2"
+# Karpenter specific analyzers for regressions that shipped more than once. Not part of
+# `make verify` yet; run with `make karpenterlint`. Each analyzer's package doc names the
+# issues it would have caught.
+run:
+  build-tags:
+    - test_performance
+  tests: true
+  timeout: 10m
+linters:
+  default: none
+  enable:
+    - karpenterlint
+  settings:
+    custom:
+      karpenterlint:
+        type: "module"
+        description: Karpenter specific analyzers for recurring regressions. Rule docs live in hack/tools/karpenterlint/internal/analyzers/*/.
+        settings:
+          disable: []
+  exclusions:
+    generated: lax
+    paths:
+      - tools
+      - website
+      - hack
+      - charts
+      - designs
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  fix: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

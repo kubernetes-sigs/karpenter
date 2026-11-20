@@ -28,10 +28,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -186,15 +188,50 @@ func deviceResultWithCapacity(device string, capacity map[resourcev1.QualifiedNa
 	}
 }
 
+// listErrorClient fails every List with err while err is set.
+type listErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c *listErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if c.err != nil {
+		return c.err
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
 // triggerHydration calls Hydrate() directly to close hydrationCh, making subsequent AllocatedDevices
 // calls non-blocking. In production this is triggered by a manager runnable after cache sync. Call
 // this at the start of any test that is not explicitly testing the hydration blocking behavior.
 func triggerHydration() {
-	controller.Hydrate(ctx)
+	GinkgoHelper()
+	Expect(controller.Hydrate(ctx)).To(Succeed())
 }
 
 var _ = Describe("DeviceAllocation Controller", func() {
 	Describe("Hydration", func() {
+		It("returns an error instead of panicking when ResourceClaims can't be listed, and retries on the next call", func() {
+			claim := resourceClaim("claim-a", deviceResult("device-0"))
+			ExpectApplied(ctx, env.Client, claim)
+			// What the client returns when the API server doesn't serve resource.k8s.io/v1.
+			kubeClient := &listErrorClient{Client: env.Client, err: &meta.NoKindMatchError{GroupKind: resourcev1.SchemeGroupVersion.WithKind("ResourceClaim").GroupKind(), SearchedVersions: []string{"v1"}}}
+			controller = deviceallocation.NewController(kubeClient)
+
+			Expect(controller.Hydrate(ctx)).To(MatchError(kubeClient.err))
+			_, err := controller.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(claim)})
+			Expect(err).To(MatchError(kubeClient.err))
+			timeoutCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			defer cancel()
+			_, err = controller.AllocatedDevices(timeoutCtx)
+			Expect(err).To(MatchError(context.DeadlineExceeded))
+
+			kubeClient.err = nil
+			triggerHydration()
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(collectDevices(seq)).To(Equal(expectedDevices(deviceID("device-0"))))
+		})
 		It("blocks until hydration completes", func() {
 			results := make(chan map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata, 1)
 			go func() {

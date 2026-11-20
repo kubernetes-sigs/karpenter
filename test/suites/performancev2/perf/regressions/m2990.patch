@@ -1,0 +1,13 @@
+diff --git a/pkg/controllers/nodeoverlay/store.go b/pkg/controllers/nodeoverlay/store.go
+index a0aaa619..be06dd47 100644
+--- a/pkg/controllers/nodeoverlay/store.go
++++ b/pkg/controllers/nodeoverlay/store.go
+@@ -141,7 +141,7 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
+ 	}
+ 
+ 	// Handle offerings - copy-on-write only for offerings that need price overlay
+-	if len(instanceTypeUpdate.Price) != 0 {
++	if instanceTypeUpdate.Price != nil {
+ 		overriddenInstanceType.Offerings = s.applyPriceOverlays(it.Offerings, instanceTypeUpdate.Price)
+ 	} else {
+ 		overriddenInstanceType.Offerings = it.Offerings // Shared - not modified

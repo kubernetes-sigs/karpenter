@@ -1059,6 +1059,74 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		DescribeTable("only requires Spot for an on-demand replacement when a Spot offering is available", func(spotAvailable bool) {
+			offerings := func(price float64) []cloudprovider.Offering {
+				return []cloudprovider.Offering{
+					{
+						Available:    true,
+						Compatible:   true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
+						Price:        price,
+					},
+					{
+						Available:    spotAvailable,
+						Compatible:   true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+						Price:        price / 2,
+					},
+				}
+			}
+			currentInstance := fake.NewInstanceType("current", fake.WithOfferings(offerings(1.5)...))
+			replacementInstance := fake.NewInstanceType("replacement", fake.WithOfferings(offerings(1.0)...))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{currentInstance, replacementInstance}
+			ExpectSingletonReconciled(ctx, pricingController)
+
+			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: currentInstance.Name,
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "test-zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ctReq := cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey)
+			Expect(ctReq.Has(v1.CapacityTypeSpot)).To(Equal(spotAvailable))
+			Expect(ctReq.Has(v1.CapacityTypeOnDemand)).To(Equal(!spotAvailable))
+		},
+			Entry("when a Spot offering is available", true),
+			Entry("when no Spot offering is available", false),
+		)
 		It("should price candidates with the NodeClaimPriceProvider", func() {
 			cloudprovider.SetNodeClaimPriceProvider(fixedPricer(0.001))
 			DeferCleanup(test.ResetNodeClaimPriceProvider)
@@ -1534,6 +1602,7 @@ var _ = Describe("Consolidation", func() {
 				}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -1544,6 +1613,7 @@ var _ = Describe("Consolidation", func() {
 				}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.4,
 				}),
@@ -2263,6 +2333,7 @@ var _ = Describe("Consolidation", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -2271,16 +2342,19 @@ var _ = Describe("Consolidation", func() {
 				fake.WithOfferings(
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        1.0,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.4,
 					},
@@ -2342,6 +2416,7 @@ var _ = Describe("Consolidation", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
 				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
+					Compatible:   true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
 				}),
@@ -2350,21 +2425,25 @@ var _ = Describe("Consolidation", func() {
 				fake.WithOfferings(
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.6,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.6,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 					},
 					cloudprovider.Offering{
 						Available:    true,
+						Compatible:   true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.3,
 					},
@@ -3143,7 +3222,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 			}
 			// Reset the disruption controller so consolidation methods are not cached as consolidated
-			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, nodePoolBackoff))
 			disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(NewMethodsWithNopValidator()...))
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -4067,6 +4146,101 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		DescribeTable("can merge 3 nodes into 1 without available Spot offerings", func(requirements []v1.NodeSelectorRequirementWithMinValues, includeUnavailableSpot bool) {
+			if requirements != nil {
+				nodePool.Spec.Template.Spec.Requirements = requirements
+			}
+			offerings := func(price float64) []cloudprovider.Offering {
+				result := []cloudprovider.Offering{{
+					Available:    true,
+					Compatible:   true,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1"}),
+					Price:        price,
+				}}
+				if includeUnavailableSpot {
+					result = append(result, cloudprovider.Offering{
+						Available:    false,
+						Compatible:   true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+						Price:        price / 2,
+					})
+				}
+				return result
+			}
+			currentInstance := fake.NewInstanceType("current-on-demand-only",
+				fake.WithOfferings(offerings(1.5)...),
+			)
+			replacementInstance := fake.NewInstanceType("replacement-on-demand-only",
+				fake.WithOfferings(offerings(1.0)...),
+			)
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{currentInstance, replacementInstance}
+			ExpectSingletonReconciled(ctx, pricingController)
+
+			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: currentInstance.Name,
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "test-zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			for i := range nodeClaims {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, nodes[0], nodes[1], nodes[2])
+
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
+			Expect(cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot)).To(BeFalse())
+
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0], nodeClaims[1], nodeClaims[2])
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
+		},
+			Entry("when the NodePool does not constrain capacity type", nil, false),
+			Entry("when the NodePool allows Spot and on-demand", []v1.NodeSelectorRequirementWithMinValues{{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand},
+			}}, true),
+		)
 		It("can merge 3 nodes into 1 if the candidates have both spot and on-demand", func() {
 			// By default all the 3 nodeClaims are OD.
 			nodeClaims = lo.Ternary(false, spotNodeClaims, nodeClaims)
@@ -4831,6 +5005,7 @@ var _ = Describe("Consolidation", func() {
 			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               mostExpensiveOffering.Price / 1_000_000.0,
 				Available:           true,
+				Compatible:          true,
 				ReservationCapacity: 10,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
@@ -4864,6 +5039,7 @@ var _ = Describe("Consolidation", func() {
 			leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
 				Price:               leastExpensiveOffering.Price / 1_000_000.0,
 				Available:           true,
+				Compatible:          true,
 				ReservationCapacity: 10,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,

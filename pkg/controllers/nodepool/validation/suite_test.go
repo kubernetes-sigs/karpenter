@@ -136,4 +136,13 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
 	})
+	It("should set the NodePoolValidationSucceeded status condition to false if the nodePool name is not a valid label value", func() {
+		nodePool.Name = strings.Repeat("a", 64)
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
+		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
+		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).Message).To(ContainSubstring("invalid nodepool name"))
+	})
 })

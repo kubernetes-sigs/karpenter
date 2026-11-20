@@ -60,16 +60,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1100), "Should have 1100 total pods")
 
 			// Performance assertions
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("doNotDisrupt/scaleOut", 4*time.Minute)),
-				"Total scale-out time should be less than 4 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("doNotDisrupt/scaleOut", 0.38)),
-				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("doNotDisrupt/scaleOut", 0.40)),
-				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("doNotDisrupt/scaleOut", 340)),
-				"Karpenter controller P95 live heap should be less than 340 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("doNotDisrupt/scaleOut", 1.10)),
-				"Karpenter controller avg CPU should be less than 1.10 cores during scale-out")
+			ExpectGates(scaleOutReport, "doNotDisrupt/scaleOut")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -104,16 +95,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.TotalPods).To(BeNumerically(">=", 600), "Should have at least 600 total pods after scale-in (250+250+100)")
 			Expect(consolidationReport.PodsNetChange).To(BeNumerically(">=", -500), "Should have net reduction of 500 pods")
 
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("doNotDisrupt/consolidation", 35*time.Minute)),
-				"Consolidation should complete within 35 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("doNotDisrupt/consolidation", 0.38)),
-				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("doNotDisrupt/consolidation", 0.40)),
-				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("doNotDisrupt/consolidation", 320)),
-				"Karpenter controller P95 live heap should be less than 320 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("doNotDisrupt/consolidation", 0.80)),
-				"Karpenter controller avg CPU should be less than 0.80 cores during consolidation")
+			ExpectGates(consolidationReport, "doNotDisrupt/consolidation")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()

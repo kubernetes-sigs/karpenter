@@ -72,7 +72,7 @@ var _ = Describe("Request Validation", func() {
 			makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 				withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
 		}
-		pools = dynamicresources.GatherPools(slices, reqs, "")
+		pools = dynamicresources.GatherPools(slices, reqs, "", true)
 	})
 
 	// makeTemplateDevices builds a map of instance type ID to template devices for use
@@ -703,7 +703,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				gpuPools := dynamicresources.GatherPools(slices, reqs, "")
+				gpuPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -818,7 +818,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				inClusterPools := dynamicresources.GatherPools(slices, reqs, "")
+				inClusterPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -886,7 +886,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				inClusterPools := dynamicresources.GatherPools(slices, reqs, "")
+				inClusterPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -926,7 +926,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s2", "nic.example.com", "pool-b", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices("nic-0")),
 				}
-				multiPools := dynamicresources.GatherPools(slices, reqs, "")
+				multiPools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(multiPools).To(HaveLen(2))
 
 				claim := &resourcev1.ResourceClaim{
@@ -995,7 +995,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				a100Pools := dynamicresources.GatherPools(slices, reqs, "")
+				a100Pools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -1053,7 +1053,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-big", "gpu.example.com", "pool-big", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				bigPools := dynamicresources.GatherPools(slices, reqs, "")
+				bigPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -1119,7 +1119,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-20", "gpu.example.com", "pool-20", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				largePools := dynamicresources.GatherPools(slices, reqs, "")
+				largePools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  10, // 20 + 10 = 30 <= 32
@@ -1163,7 +1163,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-15", "gpu.example.com", "pool-15", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				mixedPools := dynamicresources.GatherPools(slices, reqs, "")
+				mixedPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  5,  // 25 + 5 = 30 <= 32
@@ -1212,7 +1212,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-30", "gpu.example.com", "pool-30", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				largePools := dynamicresources.GatherPools(slices, reqs, "")
+				largePools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  5, // 30 + 5 = 35 > 32
@@ -1746,7 +1746,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-20", "gpu.example.com", "pool-20", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				largePools := dynamicresources.GatherPools(slices, reqs, "")
+				largePools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  10,
@@ -1797,7 +1797,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-30", "gpu.example.com", "pool-30", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				bigPools := dynamicresources.GatherPools(slices, reqs, "")
+				bigPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  5,
@@ -1844,7 +1844,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-25", "gpu.example.com", "pool-25", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				medPools := dynamicresources.GatherPools(slices, reqs, "")
+				medPools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  5,

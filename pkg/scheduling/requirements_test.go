@@ -711,7 +711,7 @@ var _ = Describe("Requirements", func() {
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=RequirementsProfile
-func TestRequirementsProfile(t *testing.T) {
+func TestRequirementsProfile(t *testing.T) { //nolint:karpenterlint // profiling harness run with -run=RequirementsProfile, not a spec
 	cpuf, err := os.Create("requirements.cpuprofile")
 	if err != nil {
 		t.Fatalf("error creating CPU profile: %s", err)

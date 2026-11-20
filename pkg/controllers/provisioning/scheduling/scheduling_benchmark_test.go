@@ -111,7 +111,7 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile
-func TestSchedulingProfile(t *testing.T) {
+func TestSchedulingProfile(t *testing.T) { //nolint:karpenterlint // profiling harness run with -run=SchedulingProfile, not a spec
 	tw := tabwriter.NewWriter(os.Stdout, 8, 8, 2, ' ', 0)
 
 	cpuf, err := os.Create("schedule.cpuprofile")

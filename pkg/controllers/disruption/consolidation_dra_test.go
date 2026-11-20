@@ -282,4 +282,82 @@ var _ = Describe("Consolidation/DRA", func() {
 		Expect(results.PodErrors[candidatePod]).To(BeNil())
 		Expect(results.AllNonPendingPodsScheduled()).To(BeTrue())
 	})
+	// Requirement-scoped DynamicResources: the fixture's GPU runs in DRA or device-plugin mode, selected by an
+	// offering-level mode label. The GPU's devices are only published by offerings in DRA mode.
+	Context("Requirement-scoped DynamicResources", func() {
+		modeNodeClaimAndNode := func(labels map[string]string) (*v1.NodeClaim, *corev1.Node) {
+			GinkgoHelper()
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: lo.Assign(map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: "mode-it",
+						corev1.LabelTopologyZone:       "test-zone-1",
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+					}, labels),
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16"), corev1.ResourcePods: resource.MustParse("100")},
+				},
+			})
+			node.Labels[corev1.LabelHostname] = node.Name
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			return nodeClaim, ExpectExists(ctx, env.Client, node)
+		}
+		replacementMode := func(results pscheduling.Results) []string {
+			GinkgoHelper()
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			return results.NewNodeClaims[0].Requirements.Get(fake.DriverModeGPULabelKey).Values()
+		}
+
+		BeforeEach(func() {
+			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey) })
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.DriverModeInstanceType("mode-it", 1, nil)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", test.GPUDriver))
+		})
+
+		It("keeps a DRA-mode candidate's replacement in DRA mode", func() {
+			_, node := modeNodeClaimAndNode(map[string]string{
+				fake.DriverModeGPULabelKey: fake.DriverModeDRA,
+				fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin,
+			})
+			ExpectApplied(ctx, env.Client, test.NodeLocalSlice(node, test.GPUDriver, "incluster-gpu-0"))
+			pod := gpuPodOnNode(node, "gpu-claim", test.NodeLocalPoolName(test.GPUDriver, node.Name), "incluster-gpu-0")
+
+			results := simulateConsolidation(node)
+
+			Expect(results.PodErrors[pod]).To(BeNil())
+			Expect(replacementMode(results)).To(ConsistOf(fake.DriverModeDRA))
+		})
+		It("replaces a legacy candidate without mode labels in DRA mode", func() {
+			_, node := modeNodeClaimAndNode(nil)
+			ExpectApplied(ctx, env.Client, test.NodeLocalSlice(node, test.GPUDriver, "incluster-gpu-0"))
+			pod := gpuPodOnNode(node, "gpu-claim", test.NodeLocalPoolName(test.GPUDriver, node.Name), "incluster-gpu-0")
+
+			results := simulateConsolidation(node)
+
+			Expect(results.PodErrors[pod]).To(BeNil())
+			Expect(replacementMode(results)).To(ConsistOf(fake.DriverModeDRA))
+		})
+		It("prices a candidate the same in every mode", func() {
+			price := cloudProvider.InstanceTypes[0].Offerings[0].Price
+			Expect(price).To(BeNumerically(">", 0))
+			for _, labels := range []map[string]string{
+				{fake.DriverModeGPULabelKey: fake.DriverModeDRA, fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin},
+				{fake.DriverModeGPULabelKey: fake.DriverModeDevicePlugin, fake.DriverModeNICLabelKey: fake.DriverModeDevicePlugin},
+				nil,
+			} {
+				_, node := modeNodeClaimAndNode(labels)
+				pdbs, err := pdb.NewLimits(ctx, env.Client)
+				Expect(err).To(Succeed())
+				nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
+				Expect(err).To(Succeed())
+				candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, ExpectStateNodeExists(cluster, node), pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
+				Expect(err).To(Succeed())
+				Expect(candidate.Price).To(Equal(price))
+			}
+		})
+	})
 })

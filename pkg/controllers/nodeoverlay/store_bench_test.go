@@ -296,8 +296,6 @@ func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType,
 }
 
 // BenchmarkNodeOverlayControllerScenario benchmarks a realistic controller scenario
-//
-//nolint:gocyclo
 func BenchmarkNodeOverlayControllerScenario(b *testing.B) {
 	// Simulate the scenario from GitHub issue #2655:
 	// - 200 instance types (m/r/c families, generations 6-7, large to 32xlarge)

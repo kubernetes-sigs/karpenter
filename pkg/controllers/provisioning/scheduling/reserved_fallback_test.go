@@ -49,6 +49,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 	reservedOffering := func(id string, available bool, capacity int) *cloudprovider.Offering {
 		return &cloudprovider.Offering{
 			Available:           available,
+			Compatible:          true,
 			ReservationCapacity: capacity,
 			Price:               0.001,
 			Requirements: pscheduling.NewLabelRequirements(map[string]string{

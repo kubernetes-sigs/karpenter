@@ -12,15 +12,13 @@ You are encouraged to bring your feature request to the [bi-weekly working group
 
 ### 2. Triage
 
-Maintainers evaluate feature requests during [issue triage meetings](https://github.com/kubernetes-sigs/karpenter#issue-triage-meetings). After triage, an issue will be in one of these states:
+Maintainers triage new feature requests. After triage, an issue will be in one of these states:
 
 | State | Labels | What it means |
 |-------|--------|---------------|
 | Accepted | `triage/accepted` | The feature is in scope |
 | Needs information | `triage/needs-information` | We can't evaluate this yet — the reporter needs to clarify |
 | Out of scope | Issue closed | The feature doesn't fit the project's scope (see [Scope Guidelines](SCOPE.md)) |
-
-If you would like to participate in the triaging process, attending [issue triage](https://github.com/kubernetes-sigs/karpenter#issue-triage-meetings) will let your voice be heard during the process.
 
 ### 3. Check the Priority
 
@@ -33,7 +31,7 @@ If a feature has an **assignee**, that means someone is actively working on it.
 
 If a feature is labelled `maintainer-owned`, a maintainer is driving the feature and we won't accept a contribution for it. Issues labelled `help-wanted` are especially good for community contributions.
 
-If a feature is in `backlog` and you want it moved up, add your use case to the issue and bring it to the [working group meeting](https://karpenter.sh/docs/contributing/community-meetings/) or [issue triage](https://github.com/kubernetes-sigs/karpenter#issue-triage-meetings). More voices and concrete user stories help maintainers reprioritize.
+If a feature is in `backlog` and you want it moved up, add your use case to the issue and bring it to the [working group meeting](https://karpenter.sh/docs/contributing/community-meetings/). More voices and concrete user stories help maintainers reprioritize.
 
 ### 4. Request for Comments (`needs-design`)
 

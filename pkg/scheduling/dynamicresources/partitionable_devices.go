@@ -489,7 +489,6 @@ func (a *allocator) countersFeasible() bool {
 	return true
 }
 
-//nolint:gocyclo
 func (a *allocator) allModeCountersFeasible(rd *RequestData) bool {
 	// For All mode, we must allocate all predetermined devices.
 	// Decrement from shadow copies of remaining counters as we iterate.

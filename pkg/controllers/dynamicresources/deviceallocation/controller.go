@@ -103,8 +103,8 @@ type Controller struct {
 	claimsPerDevice  map[cloudprovider.DeviceID]sets.Set[types.NamespacedName]
 	claimMetadata    map[types.NamespacedName]ClaimMetadata
 
-	hydrationCh   chan struct{}
-	hydrationOnce sync.Once
+	hydrationCh chan struct{}
+	hydrationMu sync.Mutex
 }
 
 func NewController(kubeClient client.Client) *Controller {
@@ -122,7 +122,9 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	c.Hydrate(ctx)
+	if err := c.Hydrate(ctx); err != nil {
+		return reconcile.Result{}, err
+	}
 
 	claim := &resourcev1.ResourceClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, claim, client.UnsafeDisableDeepCopy); err != nil {
@@ -136,19 +138,37 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Hydrate(ctx context.Context) {
-	c.hydrationOnce.Do(func() {
-		// SAFETY: This list hits the informer cache, and should not error since it's already guaranteed to be synced.
-		claimList := &resourcev1.ResourceClaimList{}
-		lo.Must0(c.kubeClient.List(ctx, claimList, client.UnsafeDisableDeepCopy))
-		for i := range claimList.Items {
-			c.reconcileClaim(ctx, client.ObjectKeyFromObject(&claimList.Items[i]), &claimList.Items[i])
-		}
-		close(c.hydrationCh)
-	})
+// Hydrate seeds the allocated device set from every ResourceClaim and unblocks AllocatedDevices. It's safe to call
+// repeatedly. A failed list leaves the controller unhydrated so a later call can retry.
+func (c *Controller) Hydrate(ctx context.Context) error {
+	if c.hydrated() {
+		return nil
+	}
+	c.hydrationMu.Lock()
+	defer c.hydrationMu.Unlock()
+	if c.hydrated() {
+		return nil
+	}
+	claimList := &resourcev1.ResourceClaimList{}
+	if err := c.kubeClient.List(ctx, claimList, client.UnsafeDisableDeepCopy); err != nil {
+		return fmt.Errorf("hydrating device allocations, listing resourceclaims, %w", err)
+	}
+	for i := range claimList.Items {
+		c.reconcileClaim(ctx, client.ObjectKeyFromObject(&claimList.Items[i]), &claimList.Items[i])
+	}
+	close(c.hydrationCh)
+	return nil
 }
 
-//nolint:gocyclo
+func (c *Controller) hydrated() bool {
+	select {
+	case <-c.hydrationCh:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName, claim *resourcev1.ResourceClaim) {
 	if claim.Status.Allocation == nil || len(claim.Status.Allocation.Devices.Results) == 0 {
 		c.finalizeClaim(ctx, nn)
@@ -301,10 +321,7 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Device
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	if err := m.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		c.Hydrate(ctx)
-		return nil
-	})); err != nil {
+	if err := m.Add(manager.RunnableFunc(c.Hydrate)); err != nil {
 		return fmt.Errorf("adding hydration runnable, %w", err)
 	}
 	return controllerruntime.NewControllerManagedBy(m).

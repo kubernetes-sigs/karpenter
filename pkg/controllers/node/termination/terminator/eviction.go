@@ -95,8 +95,8 @@ type Queue struct {
 	sync.Mutex
 
 	source chan event.TypedGenericEvent[*corev1.Pod]
-	// items maps each enqueued pod to its drain deadline. For a force-delete deadline, the reconciler decides evict vs
-	// force-delete per reconcile from that deadline plus the pod's own grace period; a nil deadline means "always evict".
+	// items maps each enqueued pod to its drain deadline. The reconciler decides per reconcile whether to evict or delete
+	// by the deadline, from that deadline plus the pod's own grace period; a nil deadline means "always evict".
 	// A timeout deadline only ever evicts, and drops the pod from the queue once it passes.
 	items map[QueueKey]queueItem
 
@@ -143,16 +143,16 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 }
 
 // Add enqueues pods for drain. The queue decides per reconcile whether to
-// evict (respecting PDB) or force-delete based on whether the pod's grace
+// evict (respecting PDB) or delete by the deadline based on whether the pod's grace
 // period would extend past nodeTerminationTime; pass nil to disable the
-// force-delete path entirely. Re-adding a pod keeps the earlier of the
+// delete-by-deadline path entirely. Re-adding a pod keeps the earlier of the
 // existing and new deadlines — a later Add can tighten the deadline but never
-// push it out or clear it, so an in-flight force-delete cannot be downgraded.
+// push it out or clear it, so an in-flight delete by the deadline cannot be downgraded.
 func (q *Queue) Add(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
 	q.add(queueItem{deadline: nodeTerminationTime}, pods...)
 }
 
-// AddWithTimeout enqueues pods for eviction until deadline. Pods are never force-deleted, and a pod still on the node
+// AddWithTimeout enqueues pods for eviction until deadline. Pods are never deleted, and a pod still on the node
 // once the deadline passes is dropped from the queue and left in place.
 func (q *Queue) AddWithTimeout(deadline time.Time, pods ...*corev1.Pod) {
 	q.add(queueItem{deadline: &deadline, timeout: true}, pods...)
@@ -177,7 +177,7 @@ func (q *Queue) add(item queueItem, pods ...*corev1.Pod) {
 	}
 }
 
-// merge combines a pod's queued item with a new one. A force-delete deadline replaces a timeout and is never replaced
+// merge combines a pod's queued item with a new one. A deadline that deletes replaces a timeout and is never replaced
 // by one; items of the same kind keep the earlier deadline.
 func merge(existing queueItem, enqueued bool, item queueItem) queueItem {
 	if !enqueued {
@@ -230,8 +230,8 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		q.complete(pod)
 		return reconcile.Result{}, nil
 	}
-	if !item.timeout && needsForceDelete(pod, item.deadline, q.clock) {
-		return q.forceDelete(ctx, pod, item.deadline)
+	if !item.timeout && needsDeleteByDeadline(pod, item.deadline, q.clock) {
+		return q.deleteByDeadline(ctx, pod, item.deadline)
 	}
 	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
 	// Reconcile won't fire again once the pod is gone, so this is our only chance to clean up.
@@ -241,20 +241,20 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	}
 	// Active but not evictable (do-not-disrupt). Stay enqueued under the queue's exponential backoff.
 	// The next reconcile picks the right path when the
-	// annotation clears or the deadline crosses needsForceDelete's threshold.
+	// annotation clears or the deadline crosses needsDeleteByDeadline's threshold.
 	if !podutils.IsEvictable(pod, q.clock, q.recorder) {
 		return reconcile.Result{Requeue: true}, nil
 	}
 	return q.evict(ctx, pod)
 }
 
-// needsForceDelete reports whether the pod should be force-deleted now: its
+// needsDeleteByDeadline reports whether the pod should be deleted now rather than evicted: its
 // grace period would (or already does) extend past nodeTerminationTime if
 // allowed to run on its own. Shared between Drain (which enqueues past-deadline
 // pods across all tiers immediately) and Queue.Reconcile (which re-evaluates on
-// every reconcile, so a pod stuck on a PDB upgrades to force-delete naturally
+// every reconcile, so a pod stuck on a PDB upgrades to deleteByDeadline naturally
 // once the deadline passes).
-func needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time, clk clock.Clock) bool {
+func needsDeleteByDeadline(pod *corev1.Pod, nodeTerminationTime *time.Time, clk clock.Clock) bool {
 	if nodeTerminationTime == nil {
 		return false
 	}
@@ -324,11 +324,11 @@ func (q *Queue) evict(ctx context.Context, pod *corev1.Pod) (reconcile.Result, e
 	return reconcile.Result{}, nil
 }
 
-// forceDelete removes a pod via kubeClient.Delete with a grace period clamped
+// deleteByDeadline removes a pod via kubeClient.Delete with a grace period clamped
 // to the node's remaining terminationGracePeriod. PDBs and the
 // do-not-disrupt annotation are bypassed: the node is being forcefully
 // terminated and the pod's full grace period would otherwise extend past it.
-func (q *Queue) forceDelete(ctx context.Context, pod *corev1.Pod, nodeTerminationTime *time.Time) (reconcile.Result, error) {
+func (q *Queue) deleteByDeadline(ctx context.Context, pod *corev1.Pod, nodeTerminationTime *time.Time) (reconcile.Result, error) {
 	// Clamp the grace period to the node's remaining terminationGracePeriod, with a minimum of 1s
 	// to prevent a force-deletion from etcd (gracePeriodSeconds=0), which would violate at-most-one
 	// pod semantics. The node's terminationGracePeriod may already have elapsed by the time we reconcile.
@@ -344,7 +344,7 @@ func (q *Queue) forceDelete(ctx context.Context, pod *corev1.Pod, nodeTerminatio
 			q.complete(pod)
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("force-deleting pod, %w", err)
+		return reconcile.Result{}, fmt.Errorf("deleting pod by deadline, %w", err)
 	}
 	log.FromContext(ctx).WithValues(
 		"namespace", pod.Namespace,

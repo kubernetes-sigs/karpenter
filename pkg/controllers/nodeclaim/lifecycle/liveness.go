@@ -61,7 +61,6 @@ const (
 // If we don't launch within this time, then we should delete the NodeClaim and try again
 var LaunchTimeout = time.Minute * 5
 
-//nolint:gocyclo
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {

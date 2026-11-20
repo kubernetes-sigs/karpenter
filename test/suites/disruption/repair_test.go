@@ -40,7 +40,7 @@ import (
 var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 	BeforeAll(func() {
 		if _, ok := env.RepairCondition(); !ok {
-			Skip("node repair regression specs require --repair-condition for this provider")
+			Skip("[unsupported:repair-condition] node repair regression specs require --repair-condition for this provider")
 		}
 	})
 
@@ -213,7 +213,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 	})
 
 	It("respects disruption budgets", func() {
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		appLabels := map[string]string{"app": "repair-budget"}
 		dep := test.Deployment(test.DeploymentOptions{Replicas: 1, PodOptions: test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: appLabels}}})
 		selector := labels.SelectorFromSet(appLabels)
@@ -264,7 +264,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		BeforeEach(func() {
 			// A real kubelet owns Ready and resets an injected value; only KWOK can pin it (see expectUnhealthy).
 			if !env.IsDefaultNodeClassKWOK() {
-				Skip("injecting kubelet Ready conditions requires the KWOK provider")
+				Skip("[unsupported:kwok] injecting kubelet Ready conditions requires the KWOK provider")
 			}
 			numPods = 1
 			// Add pods with a do-not-disrupt annotation so that we can check node metadata before we disrupt

@@ -20,19 +20,37 @@ import (
 	"unique"
 
 	resourcev1 "k8s.io/api/resource/v1"
+
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-// DynamicResources contains DRA device metadata for an instance type. Cloud providers populate this
-// to enable DRA-aware scheduling simulation.
+// DynamicResources is one DRA driver's device set for an instance type. Cloud providers populate these to enable
+// DRA-aware scheduling simulation. A set is published by the instance type's offerings that are compatible with its
+// Requirements, so mutually exclusive launch configurations (e.g. DRA vs. device plugin) can expose different devices.
+//
+// Cloud providers are expected to uphold the following conventions. Behavior is undefined if they're violated.
+//  1. Every template in a set has the same driver.
+//  2. For each driver, every offering is compatible with the requirements of at most one of that driver's sets.
+//  3. Every set is compatible with at least one of the instance type's offerings.
+//  4. Attribute bindings hold in every launch configuration in which the bound devices coexist.
+//  5. Every key a set's requirements reference is an offering-level, well-known label. The instance type's
+//     requirements define it as In the union of its offerings' values, or as DoesNotExist if no offering carries it.
+//  6. Each offering either omits a set key or carries it as a single In value, and within an instance type, offerings
+//     either all carry a given set key or all omit it. An offering carrying several values (e.g. both modes) would stay
+//     compatible with a set after the NodeClaim narrows to it, and its single CapacityOverride couldn't describe both
+//     modes. An offering that omits a key is compatible with every set on that key.
+//  7. Offerings that differ only in set keys have the same price, since consolidation prices a candidate without
+//     knowing which set it launched with.
+//
+// Sets may reuse pool and device names: core namespaces each set's template pools (see
+// InstanceType.AllDynamicResources), so devices, counter budgets, and attribute bindings stay distinct per set.
 type DynamicResources struct {
-	// ResourceSliceTemplates describes the DRA devices expected on this instance type.
-	// Each entry is an in-memory template for a ResourceSlice that the corresponding
-	// DRA driver is expected to publish once the node is running.
+	// Requirements selects the offerings that publish this set. It may only reference offering-level, well-known keys,
+	// which the instance type's requirements must define. If empty, every offering publishes this set.
+	Requirements scheduling.Requirements
+	// ResourceSliceTemplates describes the DRA devices in this set. Each entry is an in-memory template for a
+	// ResourceSlice that the corresponding DRA driver is expected to publish once the node is running.
 	ResourceSliceTemplates []*ResourceSliceTemplate
-
-	// AttributeBindings declares sets of devices that will share a common attribute
-	// value at runtime, even though the concrete value is not known at simulation time.
-	AttributeBindings []*AttributeBinding
 }
 
 // ResourceSliceTemplate is the cloud provider's in-memory representation of a ResourceSlice.

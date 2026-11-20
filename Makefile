@@ -42,7 +42,7 @@ install-vpa: ## Install VPA CRD and admission controller webhook
 	./hack/install-vpa-webhook.sh
 
 
-apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+apply-with-kind: build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
@@ -52,7 +52,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
-apply-with-kind-dra: verify build-with-kind ## Deploy the kwok controller for DRA testing
+apply-with-kind-dra: build-with-kind ## Deploy the kwok controller for DRA testing
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
@@ -115,7 +115,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 test: ## Run tests
-	go test ./pkg/... \
+	go test ./pkg/... ./kwok/... \
 		-race \
 		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
@@ -162,6 +162,12 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		-v \
 		./pkg/...
 
+karpenterlint: ## Run linters for recurring regressions (not yet part of verify)
+	go tool -modfile=go.tools.mod golangci-lint-karpenter run -c .golangci.karpenterlint.yaml
+
+test-karpenterlint: ## Test the karpenterlint analyzers
+	cd hack/tools/karpenterlint && go test ./...
+
 vulncheck: ## Verify code vulnerabilities
 	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
 
@@ -202,4 +208,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake karpenterlint test-karpenterlint vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra
