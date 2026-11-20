@@ -14,9 +14,9 @@ A self-contained, plugin-style perf suite. Shared scenarios live in `perf/scenar
 
 To show the smoke test catches a regression, dispatch `perf-smoke` with `regression: mconc1`. Any patch in `perf/regressions/` works.
 
-## Audit it: `go run ./test/suites/performancev2/cmd/inventory`
+## Audit it: `make perf-inventory`
 
-The inventory prints every phase's gated and measured metrics, grouped by kind (duration, outcome, resource). Each bound comes with the calibration evidence behind it. It's generated from the same values the suite runs, plus the checked-in `calibration/<provider>.json`, and it needs no cluster.
+The inventory prints every phase's gated and measured metrics, grouped by kind (duration, outcome, resource). Each bound comes with the calibration evidence behind it. It's generated from the same values the suite runs, plus the checked-in `calibration/<provider>.json`, and it needs no cluster. `make perf-inventory` is `go run ./test/suites/performancev2/cmd/inventory`.
 
 The command fails in two cases:
 - A level names an undeclared phase.
@@ -51,6 +51,13 @@ go run ./test/suites/performancev2/cmd/calibrate -dir runs/ -provider kwok-ci -s
 ```
 
 Write to a temp file first: the calibration is embedded, and redirecting straight into it empties it before `go run` compiles.
+
+`make perf-calibrate` does both steps. `PROVIDER` defaults to `kwok`:
+
+```sh
+make perf-calibrate DIR=runs/ SOURCE="cluster, controller size"
+make perf-calibrate DIR=runs/ PROVIDER=kwok-ci SOURCE="GitHub kind runner"
+```
 
 How to read the evidence columns:
 - **MDE50 and MDE80:** the smallest regression a single run breaches the bound with 50% and 80% power. MDE50 is the median's distance from the bound.
@@ -138,7 +145,7 @@ A scenario's `Sweep` declares a grid. `KARPENTER_PERF_SWEEP=nodepools` runs one 
 ```sh
 OUTPUT_DIR=/tmp/sweep KARPENTER_PERF_SWEEP=nodepools TEST_SUITE=Performancev2 make e2etests
 KARPENTER_PERF_SWEEP_GRID='{"pods":[100,500],"nodepools":[1,100]}' ...   # smaller grid
-go run ./test/suites/performancev2/cmd/plot -dir /tmp/sweep    # writes perf.html
+make perf-plot DIR=/tmp/sweep    # writes perf.html; same as go run ./test/suites/performancev2/cmd/plot -dir /tmp/sweep
 ```
 
 ![30-cell sweep on EKS](docs/sweep-eks.png)
