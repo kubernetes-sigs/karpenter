@@ -93,7 +93,7 @@ type Validator interface {
 	Validate(context.Context, Command, time.Duration) (Command, error)
 }
 
-// Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
+// Validation is used to perform validation on a consolidation command.  It makes an assumption that when reused, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
 type validation struct {
