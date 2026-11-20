@@ -572,6 +572,30 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
 		})
+		It("should count a pod with a well-known node selector toward a hostname spread on a claim that does not constrain the label", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelHostname,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			// X sorts first by requests, so the order it is scheduled in does not depend on map iteration.
+			x := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				ResourceRequirements:      corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}},
+				TopologySpreadConstraints: topology,
+			})
+			y := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				NodeSelector:              map[string]string{corev1.LabelOSStable: "linux"},
+				TopologySpreadConstraints: topology,
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, x, y)
+			ExpectScheduled(ctx, env.Client, x)
+			ExpectScheduled(ctx, env.Client, y)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		})
 		It("balance multiple deployments with hostname topology spread", func() {
 			// Issue #1425
 			spreadPod := func(appName string) test.PodOptions {

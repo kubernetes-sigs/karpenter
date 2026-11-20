@@ -68,7 +68,7 @@ func MakeTopologyNodeFilter(p *corev1.Pod, taintPolicy corev1.NodeInclusionPolic
 func (t TopologyNodeFilter) Matches(taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
 	matchesAffinity := true
 	if t.AffinityPolicy == corev1.NodeInclusionPolicyHonor {
-		matchesAffinity = t.matchesRequirements(requirements)
+		matchesAffinity = t.matchesRequirements(requirements, compatibilityOptions...)
 	}
 	matchesTaints := true
 	if t.TaintPolicy == corev1.NodeInclusionPolicyHonor {
