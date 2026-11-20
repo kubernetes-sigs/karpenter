@@ -223,7 +223,7 @@ func NewControllers(
 		)
 	}
 	if o.enableVPAPrediction && options.FromContext(ctx).FeatureGates.PredictionEnabled {
-		controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore, cluster, recorder))
+		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), mgr.GetCache(), predictionStore, cluster, recorder))
 	}
 
 	return controllers
