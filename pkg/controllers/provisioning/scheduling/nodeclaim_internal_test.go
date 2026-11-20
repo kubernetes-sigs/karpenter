@@ -58,7 +58,7 @@ var _ = Describe("InstanceTypeFilterError", func() {
 		return err
 	}
 
-	It("should report the offering as the missing criteria when an instance type has room but no compatible offering", func() {
+	It("should report the offering as the missing criterion when an instance type has room but no compatible offering", func() {
 		// The aggregate requirements intersect (zone-1 and spot are each offered) and the instance type has
 		// room, but no single offering is both zone-1 and spot.
 		err := filter(
@@ -69,7 +69,7 @@ var _ = Describe("InstanceTypeFilterError", func() {
 		Expect(err).To(MatchError(ContainSubstring("no instance type has the required offering")))
 	})
 
-	It("should report resources as the missing criteria when the offering is compatible but the pod is too large", func() {
+	It("should report resources as the missing criterion when the offering is compatible but the pod is too large", func() {
 		err := filter(
 			map[string]string{corev1.LabelTopologyZone: "test-zone-1", v1.CapacityTypeLabelKey: "spot"},
 			corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1000")},
@@ -81,7 +81,7 @@ var _ = Describe("InstanceTypeFilterError", func() {
 	It("should report the requirements/resources pair when one instance type met both but lacked an offering", func() {
 		// "arm-no-offering" meets the requirements and has room, but has no zone-1 spot offering.
 		// "amd-launchable" has room and a zone-1 spot offering, but is the wrong architecture. Each individual
-		// criteria is therefore met by some instance type, so the failure is only visible pairwise.
+		// criterion is therefore met by some instance type, so the failure is only visible pairwise.
 		err := filter(
 			map[string]string{
 				corev1.LabelArchStable:   "arm64",
@@ -93,5 +93,18 @@ var _ = Describe("InstanceTypeFilterError", func() {
 			instanceType("amd-launchable", "amd64", offering("spot", "test-zone-1")),
 		)
 		Expect(err).To(MatchError(ContainSubstring("no instance type which met the scheduling requirements and had enough resources, had a required offering")))
+	})
+
+	It("should report the requirements/offering pair when a capacity override leaves the required offering without room", func() {
+		// The only offering overrides CPU down to 1, so the base group has room but no offerings, and the
+		// offering's group has the required offering but no room.
+		overridden := offering("spot", "test-zone-1")
+		overridden.CapacityOverride = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}
+		err := filter(
+			map[string]string{corev1.LabelTopologyZone: "test-zone-1", v1.CapacityTypeLabelKey: "spot"},
+			corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")},
+			instanceType("overridden", "amd64", overridden),
+		)
+		Expect(err).To(MatchError(ContainSubstring("no instance type which met the scheduling requirements and the required offering had the required resources")))
 	})
 })
