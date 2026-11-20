@@ -107,4 +107,23 @@ var _ = Describe("InstanceTypeFilterError", func() {
 		)
 		Expect(err).To(MatchError(ContainSubstring("no instance type which met the scheduling requirements and the required offering had the required resources")))
 	})
+
+	It("should not report the resources/offering pair when a capacity override leaves the required offering without room", func() {
+		// Both instance types have room only in their base group and the required offering only in an override
+		// group without room. "amd-overridden" is also the wrong architecture, so it fails two criteria and
+		// shouldn't be reported as having had enough resources and the required offering.
+		overridden := offering("spot", "test-zone-1")
+		overridden.CapacityOverride = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}
+		err := filter(
+			map[string]string{
+				corev1.LabelArchStable:   "arm64",
+				corev1.LabelTopologyZone: "test-zone-1",
+				v1.CapacityTypeLabelKey:  "spot",
+			},
+			corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")},
+			instanceType("amd-overridden", "amd64", overridden),
+			instanceType("arm-overridden", "arm64", overridden),
+		)
+		Expect(err).To(MatchError(ContainSubstring("no instance type which met the scheduling requirements and the required offering had the required resources")))
+	})
 })
