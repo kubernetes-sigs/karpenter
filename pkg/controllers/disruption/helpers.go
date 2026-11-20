@@ -180,12 +180,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     replaces-first with these Results (as it always has).
 //
 //  2. Only if pass 1 leaves pods pending AND terminateFirstEnabled is set by the caller AND the candidate itself holds a
-//     reservation: re-simulate in strict mode with the candidate's reservation slot credited back (modeling the slot it
-//     will free on termination). If every pod then places, terminateFirst is true — deleting the candidate is exactly
-//     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
-//     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
-//     uselessly. Even then, if the NodePool's non-reserved fallback is only transiently unavailable (e.g. ICE), we wait
-//     for it rather than terminating first, as a static NodePool does.
+//     reservation: if the NodePool's non-reserved fallback is only transiently unavailable (e.g. ICE), we wait for it
+//     rather than terminating first, as a static NodePool does, and skip this pass. Otherwise, re-simulate in strict
+//     mode with the candidate's reservation slot credited back (modeling the slot it will free on termination). If every
+//     pod then places, terminateFirst is true — deleting the candidate is exactly what unblocks the reschedule. Strict
+//     mode makes surplus pods that wouldn't fit the freed slot fail rather than fall back, and a reservation that is
+//     unavailable for another reason stays unschedulable, so we don't terminate uselessly.
 //
 // A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, unchanged.
 func SimulateSchedulingWithReservedFallback(
@@ -455,8 +455,18 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 // GetInstanceTypes is NodeClass-scoped, so the template's requirements still apply. An offering outside its instance
 // type's zones (e.g. one the type isn't offered in, or the NodeClass has no subnet in) can never launch.
 func templateCompatible(nct *scheduling.NodeClaimTemplate, it *cloudprovider.InstanceType, o *cloudprovider.Offering) bool {
+	return templateCompatibleInstanceType(nct, it) && templateCompatibleOffering(nct, it, o)
+}
+
+// templateCompatibleInstanceType is templateCompatible's instance-type half, for callers that check it once per
+// instance type rather than per offering.
+func templateCompatibleInstanceType(nct *scheduling.NodeClaimTemplate, it *cloudprovider.InstanceType) bool {
+	return nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels)
+}
+
+// templateCompatibleOffering is templateCompatible's offering half.
+func templateCompatibleOffering(nct *scheduling.NodeClaimTemplate, it *cloudprovider.InstanceType, o *cloudprovider.Offering) bool {
 	return it.Requirements.Get(corev1.LabelTopologyZone).Has(o.Zone()) &&
-		nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) &&
 		nct.Requirements.IsCompatible(o.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels)
 }
 
@@ -473,9 +483,13 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 	}
 	offered := sets.New[string]()
 	for _, it := range its {
+		// Nearly every offering passes the cheap field check below, so check the instance type once, not per offering.
+		if !templateCompatibleInstanceType(nct, it) {
+			continue
+		}
 		for _, o := range it.Offerings {
 			reserved := o.CapacityType() == v1.CapacityTypeReserved
-			if (!reserved && !o.Compatible) || !templateCompatible(nct, it, o) {
+			if (!reserved && !o.Compatible) || !templateCompatibleOffering(nct, it, o) {
 				continue
 			}
 			if !reserved || o.Launchable() {
