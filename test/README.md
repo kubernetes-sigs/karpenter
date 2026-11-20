@@ -236,4 +236,4 @@ If you encounter issues while integrating Karpenter tests:
 
 - Join the [#karpenter-dev](https://kubernetes.slack.com/archives/C04JW2J5J5P) channel in Kubernetes Slack
 - Attend the bi-weekly working group meetings
-- Open issues in the [Karpenter Core repository](https://github.com/aws/karpenter-core/issues)
+- Open issues in the [Karpenter Core repository](https://github.com/kubernetes-sigs/karpenter/issues)
