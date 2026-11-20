@@ -48,7 +48,8 @@ func (in *NodeOverlaySpec) validateRequirements(ctx context.Context) (errs error
 
 func (in *NodeOverlaySpec) validateCapacity() (errs error) {
 	for n := range in.Capacity {
-		if v1.WellKnownResources.Has(n) {
+		// CPU is intentionally supported for simulation calibration use cases (e.g. SMT disabled nodes).
+		if n == corev1.ResourceMemory || n == corev1.ResourceEphemeralStorage || n == corev1.ResourcePods {
 			errs = multierr.Append(errs, fmt.Errorf("invalid capacity: %s in resource, restricted", n))
 		}
 	}
