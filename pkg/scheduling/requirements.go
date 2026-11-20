@@ -73,12 +73,17 @@ func NewLabelRequirements(labels map[string]string) Requirements {
 
 // NewPodRequirements constructs requirements from a pod and treats any preferred requirements as required.
 func NewPodRequirements(pod *corev1.Pod) Requirements {
-	return newPodRequirements(pod, podRequirementTypeAll)
+	return newPodRequirements(pod, podRequirementTypeAll, 0)
 }
 
 // NewStrictPodRequirements constructs requirements from a pod and only includes true requirements (not preferences).
 func NewStrictPodRequirements(pod *corev1.Pod) Requirements {
-	return newPodRequirements(pod, podRequirementTypeRequiredOnly)
+	return newPodRequirements(pod, podRequirementTypeRequiredOnly, 0)
+}
+
+// NewStrictPodRequirementsForTerm is NewStrictPodRequirements with the required node affinity term at the given index.
+func NewStrictPodRequirementsForTerm(pod *corev1.Pod, term int) Requirements {
+	return newPodRequirements(pod, podRequirementTypeRequiredOnly, term)
 }
 
 type podRequirementType byte
@@ -88,7 +93,7 @@ const (
 	podRequirementTypeRequiredOnly
 )
 
-func newPodRequirements(pod *corev1.Pod, typ podRequirementType) Requirements {
+func newPodRequirements(pod *corev1.Pod, typ podRequirementType, term int) Requirements {
 	requirements := NewLabelRequirements(pod.Spec.NodeSelector)
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
 		return requirements
@@ -102,10 +107,10 @@ func newPodRequirements(pod *corev1.Pod, typ podRequirementType) Requirements {
 		}
 	}
 
-	// Select first requirement. An outer loop will iteratively remove OR requirements if unsatisfiable
+	// Select the requirement at index term. An outer loop will iteratively remove OR requirements if unsatisfiable
 	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil &&
-		len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > 0 {
-		requirements.Add(NewNodeSelectorRequirements(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions...).Values()...)
+		len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > term {
+		requirements.Add(NewNodeSelectorRequirements(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[term].MatchExpressions...).Values()...)
 	}
 	return requirements
 }
