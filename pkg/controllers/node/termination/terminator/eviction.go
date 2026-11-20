@@ -347,8 +347,7 @@ func (q *Queue) deleteByDeadline(ctx context.Context, pod *corev1.Pod, nodeTermi
 		return reconcile.Result{}, fmt.Errorf("deleting pod by deadline, %w", err)
 	}
 	log.FromContext(ctx).WithValues(
-		"namespace", pod.Namespace,
-		"name", pod.Name,
+		"Pod", klog.KObj(pod),
 		"pod.terminationGracePeriodSeconds", lo.FromPtr(pod.Spec.TerminationGracePeriodSeconds),
 		"delete.gracePeriodSeconds", lo.FromPtr(gracePeriodSeconds),
 		"nodeclaim.terminationTime", lo.FromPtr(nodeTerminationTime),

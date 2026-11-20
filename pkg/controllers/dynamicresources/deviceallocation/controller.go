@@ -132,7 +132,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			c.finalizeClaim(ctx, req.NamespacedName)
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting resourceclaim, %w", err), "resourceclaim", klog.KRef(req.Namespace, req.Name))
+		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting resourceclaim, %w", err), "ResourceClaim", klog.KRef(req.Namespace, req.Name))
 	}
 	c.reconcileClaim(ctx, req.NamespacedName, claim)
 	return reconcile.Result{}, nil

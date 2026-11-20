@@ -18,6 +18,7 @@ package disruption_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -49,6 +51,7 @@ import (
 	clock "k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -1064,6 +1067,26 @@ var _ = Describe("Pod Eviction Cost", func() {
 			}},
 		})
 		Expect(cost).To(BeNumerically(">", costWithOnlyDeletionCost))
+	})
+	It("should log an unparsable disruption-cost under the Pod key", func() {
+		var lines []map[string]any
+		logger := funcr.NewJSON(func(obj string) {
+			line := map[string]any{}
+			Expect(json.Unmarshal([]byte(obj), &line)).To(Succeed())
+			lines = append(lines, line)
+		}, funcr.Options{})
+
+		cost := disruptionutils.EvictionCost(log.IntoContext(ctx, logger), &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "web-0", Namespace: "default", Annotations: map[string]string{
+				v1.DisruptionCostAnnotationKey: "not-a-number",
+			}},
+		})
+
+		Expect(cost).To(BeNumerically("==", standardPodCost))
+		Expect(lines).To(HaveLen(1))
+		Expect(lines[0]).To(HaveKeyWithValue("msg", "failed parsing disruption cost"))
+		Expect(lines[0]).To(HaveKeyWithValue("Pod", HaveKeyWithValue("name", "web-0")))
+		Expect(lines[0]).ToNot(HaveKey("pod"))
 	})
 	It("should prefer disruption-cost over pod-deletion-cost when the gate is on", func() {
 		// Gate=ON twin of the spec above: DisruptionCost short-circuits before the

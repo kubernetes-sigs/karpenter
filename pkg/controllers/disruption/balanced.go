@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/samber/lo"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -161,7 +162,7 @@ func EvaluateBalancedMove(ctx context.Context, cmd Command, nodePoolTotals map[s
 		perPool[poolName] = result
 
 		log.FromContext(ctx).V(1).Info("consolidation score",
-			"nodepool", poolName,
+			"NodePool", klog.KRef("", poolName),
 			"score", result.Score(),
 			"savings_fraction", result.SavingsFraction,
 			"disruption_fraction", result.DisruptionFraction,

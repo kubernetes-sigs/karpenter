@@ -250,7 +250,7 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	emptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
 		pods, err := node.Pods(ctx, c.kubeClient)
 		if err != nil {
-			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
+			log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name())).Error(err, "unable to list pods, treating as non-empty")
 			return false
 		}
 		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock, c.recorder) })
@@ -281,7 +281,7 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 
 		pods, err := node.Pods(ctx, c.kubeClient)
 		if err != nil {
-			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, skipping node")
+			log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name())).Error(err, "unable to list pods, skipping node")
 			return NonEmptyNode{}, false
 		}
 
