@@ -225,7 +225,12 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(instanceTypes, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues)
+	// A full reservation can't take this NodeClaim, so an instance type that only offers one mustn't stay an option or count toward minValues.
+	var skipOffering func(*cloudprovider.Offering) bool
+	if opts.FromContext(ctx).FeatureGates.ReservedCapacity {
+		skipOffering = n.isFullReservation
+	}
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(instanceTypes, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues, skipOffering)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
@@ -311,6 +316,17 @@ func (n *NodeClaim) releaseReservedOfferings(current, updated cloudprovider.Offe
 	}
 }
 
+// isFullReservation reports whether the offering is a reservation with no slot for this NodeClaim.
+// A reservation with a slot credited back for this loop (the terminate-first "would the pods fit once the slot is freed?" pass) isn't full, even though its static capacity is 0.
+func (n *NodeClaim) isFullReservation(o *cloudprovider.Offering) bool {
+	req, ok := o.Requirements[v1.CapacityTypeLabelKey]
+	if !ok || !req.Has(v1.CapacityTypeReserved) || o.ReservationCapacity != 0 {
+		return false
+	}
+	// ReservationID allocates, so only look it up when something was credited.
+	return len(n.creditReservationCapacity) == 0 || n.creditReservationCapacity[o.ReservationID()] == 0
+}
+
 // reserveOfferings handles the reservation of `karpenter.sh/capacity-type: reserved` offerings, returning the set of
 // reserved offerings. If the ReservedOfferingMode is set to strict, this function may also return an error if it failed
 // to reserve compatible offerings when some were available.
@@ -323,14 +339,9 @@ func (n *NodeClaim) offeringsToReserve(
 		return nil, nil
 	}
 
-	// We distinguish three kinds of compatible offering because, once availability (health) and reservation capacity are
-	// decoupled, "the reservation is full" (ReservationCapacity==0, still Available) and "the reservation has capacity but
-	// I couldn't grab a slot this pessimistic pass" (ReservationCapacity>0, CanReserve==false) require opposite handling in
-	// strict mode: the former should fall back to on-demand/spot (or, with no fallback, fail), while the latter must defer
-	// so pessimistic reservation only schedules one NodeClaim per loop.
-	reservedWithCapacity := false  // compatible reserved offering with real capacity (cap>0) — a pessimism candidate
-	reservedFull := false          // compatible reserved offering that is full right now (Available, cap==0)
-	hasUnreservedFallback := false // compatible on-demand/spot offering to fall back to
+	// Once availability (health) and reservation capacity are decoupled, "the reservation is full" (ReservationCapacity==0, still Available) and "the reservation has capacity but I couldn't grab a slot this pessimistic pass" (ReservationCapacity>0, CanReserve==false) require opposite handling in strict mode: the former should fall back to on-demand/spot, while the latter must defer so pessimistic reservation only schedules one NodeClaim per loop.
+	// An instance type whose only compatible offerings are full reservations never gets here: fits skips full reservations, so filterInstanceTypesByRequirements has already removed it.
+	reservedWithCapacity := false // compatible reserved offering with real capacity (cap>0) — a pessimism candidate
 	var reservedOfferings cloudprovider.Offerings
 	for _, it := range instanceTypes {
 		for _, o := range it.Offerings {
@@ -343,17 +354,13 @@ func (n *NodeClaim) offeringsToReserve(
 				continue
 			}
 			if o.CapacityType() != v1.CapacityTypeReserved {
-				hasUnreservedFallback = true
 				continue
 			}
 			// A full-but-healthy reservation (Available=true, ReservationCapacity=0) can't be reserved right now, but it is
 			// NOT a pessimism candidate — it has no real capacity to wait for this loop, so it must not force a defer that
-			// would starve the on-demand/spot fallback. Track it separately for the reserved-only exhaustion case below.
-			// A reservation with a slot credited back for this loop (a disruption candidate that will free it) is treated
-			// as reservable even though its static capacity is 0 — this is the terminate-first "would the pods fit once
-			// the slot is freed?" pass. The ReservationManager was credited to match, so CanReserve reflects the slot.
-			if o.ReservationCapacity == 0 && n.creditReservationCapacity[o.ReservationID()] == 0 {
-				reservedFull = true
+			// would starve the on-demand/spot fallback.
+			// A credited reservation isn't full, and the ReservationManager was credited to match, so CanReserve reflects the slot.
+			if n.isFullReservation(o) {
 				continue
 			}
 			reservedWithCapacity = true
@@ -367,26 +374,12 @@ func (n *NodeClaim) offeringsToReserve(
 	}
 
 	strict := n.reservedOfferingMode == ReservedOfferingModeStrict
-	// onlyFullReservations: the pod's only compatible option is a reservation that is full right now — no reserved
-	// offering with real (or credited) capacity, and no on-demand/spot fallback. A reservation with a slot credited
-	// back for this loop is classified reservable above, so this is false for the terminate-first credit-back pass.
-	onlyFullReservations := reservedFull && !reservedWithCapacity && !hasUnreservedFallback
 
 	// Pessimism: a compatible reserved offering has real capacity but we couldn't reserve any this pass (another
 	// NodeClaim in this loop pessimistically holds it). Defer and retry next loop rather than falling back — this is
 	// what limits provisioning to one NodeClaim per loop when a pod is compatible with multiple reserved offerings.
 	if strict && reservedWithCapacity && len(reservedOfferings) == 0 {
 		return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
-	}
-
-	// The only compatible option is a full reservation. Fail with a PLAIN error rather than creating a NodeClaim that
-	// getCapacityType would default to on-demand, which would mislaunch a reserved-only pool. This is NOT a
-	// ReservedOfferingError: there's no capacity to wait for this loop, so the scheduler should fall through to a
-	// lower-weight NodePool or relax the pod's preferences (e.g. a preferred capacity-type=reserved under
-	// PreferencePolicy=Respect, which hides an on-demand/spot fallback). This reproduces the pre-decouple behavior, where a
-	// full reservation was Available=false and simply wasn't offered here.
-	if onlyFullReservations {
-		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
 	}
 
 	// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
@@ -581,7 +574,7 @@ func (e InstanceTypeFilterError) Error() string {
 	return fmt.Sprintf("no instance type met the requirements/resources/offering tuple, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 }
 
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup, totalRequests corev1.ResourceList, relaxMinValues bool, skipOffering func(*cloudprovider.Offering) bool) (cloudprovider.InstanceTypes, map[string]int, error) {
 	unsatisfiableKeys := map[string]int{}
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
 	// to reduce the CPU load of having to generate the error string for a failed scheduling simulation
@@ -622,7 +615,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
 			// about why scheduling failed
 			itCompat := compatible(it, requirements)
-			itFits, itHasOffering := fits(it, totalRequestsForInstanceType, requirements)
+			itFits, itHasOffering := fits(it, totalRequestsForInstanceType, requirements, skipOffering)
 
 			// track if any single instance type met a single criteria
 			err.requirementsMet = err.requirementsMet || itCompat
@@ -664,10 +657,16 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
-func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements) (itFits bool, hasOffering bool) {
+// fits reports whether the instance type has a compatible offering with enough allocatable for the requests.
+// Offerings for which skipOffering returns true are not offerings for the pod.
+// A nil skipOffering skips none.
+func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements, skipOffering func(*cloudprovider.Offering) bool) (itFits bool, hasOffering bool) {
 	for _, group := range instanceType.AllocatableOfferingsList() {
 		resourceFit := resources.Fits(requests, group.Allocatable)
 		for _, of := range group.Offerings {
+			if skipOffering != nil && skipOffering(of) {
+				continue
+			}
 			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				hasOffering = true
 				if resourceFit {
