@@ -65,7 +65,6 @@ import (
 const (
 	queueBaseDelay          = 1 * time.Second
 	queueMaxDelay           = 10 * time.Second
-	minRetryDuration        = 10 * time.Minute
 	maxRetryDuration        = 1 * time.Hour
 	maxConcurrentReconciles = 100
 	retryDurationScale      = 80 * time.Millisecond
@@ -87,12 +86,15 @@ func IsUnrecoverableError(err error) bool {
 	return stderrors.As(err, &unrecoverableError)
 }
 
-func (q *Queue) GetMaxRetryDuration() time.Duration {
+// GetMaxRetryDuration returns how long a command may wait for its replacements to initialize. It is never less than
+// the configured disruption replacement timeout, and the 1 hour ceiling is raised to match if that timeout exceeds it.
+func (q *Queue) GetMaxRetryDuration(ctx context.Context) time.Duration {
 	q.RLock()
 	numCommands := len(q.ProviderIDToCommand)
 	q.RUnlock()
+	minRetryDuration := options.FromContext(ctx).DisruptionReplacementTimeout
 	retryDuration := retryDurationScale * time.Duration(numCommands)
-	return lo.Clamp(retryDuration, minRetryDuration, maxRetryDuration)
+	return lo.Clamp(retryDuration, minRetryDuration, max(minRetryDuration, maxRetryDuration))
 }
 
 type Queue struct {
@@ -222,7 +224,7 @@ func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// We use the number of commands in the queue as a proxy for cloud provider traffic.
 	// As the number of commands increase, we expect more delays and scale the retry duration accordingly.
-	retryDuration := q.GetMaxRetryDuration()
+	retryDuration := q.GetMaxRetryDuration(ctx)
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
 		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
