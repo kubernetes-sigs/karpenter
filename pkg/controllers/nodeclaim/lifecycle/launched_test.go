@@ -54,8 +54,7 @@ var _ = Describe("Launched Registry", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		throttle.Store(true)
 
-		// Throttled for 10m: longer than the 5m launch timeout and longer than the 5m minimum instance age proposed
-		// for instance garbage collection.
+		// Past the 5m launch timeout
 		for range 10 {
 			ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim)
 			env.Clock.Step(time.Minute)
@@ -76,7 +75,6 @@ var _ = Describe("Launched Registry", func() {
 		Expect(nodeClaim.Status.ProviderID).To(Equal(providerID))
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 
-		// The entry is dropped once the persisted launch result is observed
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
 		Expect(registry.ProviderIDs()).To(BeEmpty())
 	})
@@ -99,7 +97,6 @@ var _ = Describe("Launched Registry", func() {
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
 
-		// The first Delete terminates the instance, the second observes it is gone
 		Expect(cloudProvider.DeleteCalls).To(HaveLen(2))
 		Expect(cloudProvider.CreatedNodeClaims).ToNot(HaveKey(providerID))
 		ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -107,7 +104,7 @@ var _ = Describe("Launched Registry", func() {
 	})
 })
 
-// throttledStatusClient fails NodeClaim status writes with 429 while throttle is set, like an API server shedding load
+// throttledStatusClient fails NodeClaim status writes with a 429 while throttle is set
 type throttledStatusClient struct {
 	client.Client
 	throttle *atomic.Bool

@@ -50,7 +50,7 @@ type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
-	launched      *launched.Registry // holds launch results until they are observed as persisted
+	launched      *launched.Registry
 	recorder      events.Recorder
 	clock         clock.Clock
 }

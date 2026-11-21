@@ -79,9 +79,6 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-// NewController constructs the lifecycle controller. launchedRegistry is shared with any other component that needs to
-// see launch results before they are persisted on the NodeClaim (e.g. provider instance garbage collection); a private
-// registry is used when it is nil.
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, nodePoolState *nodepoolhealth.State, launchedRegistry *launched.Registry, registrationHooks []cloudprovider.NodeLifecycleHook) *Controller {
 	if launchedRegistry == nil {
 		launchedRegistry = launched.NewRegistry()
@@ -236,8 +233,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, nil
 		}
 	}
-	// The launch result may not have been persisted yet (e.g. the status write was throttled). Fall back to the
-	// in-memory launch result so we don't skip terminating an instance we launched.
+	// The providerID may not be persisted yet if the launch status write failed
 	if nodeClaim.Status.ProviderID == "" {
 		if created, ok := c.launched.Get(nodeClaim.UID); ok && created.Status.ProviderID != "" {
 			nodeClaim.Status.ProviderID = created.Status.ProviderID

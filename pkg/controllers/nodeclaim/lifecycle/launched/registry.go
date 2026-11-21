@@ -14,13 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package launched tracks NodeClaims that the CloudProvider has launched but whose launch result has not yet been
-// observed as persisted on the NodeClaim. Status writes can lag a successful Create by a long time (API server
-// throttling, conflicts, informer lag), and during that window the NodeClaim in the informer cache has no providerID.
-// The Registry lets every component in the leader process (launch, finalization, provider garbage collection) see the
-// launch result in the meantime. It only ever holds providerIDs returned by CloudProvider.Create.
-//
-// The Registry is in-memory, so it does not survive a restart or a leader change.
+// Package launched holds CloudProvider.Create results until they are observed as persisted on the NodeClaim.
 package launched
 
 import (
@@ -33,26 +27,18 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// TTL bounds how long an entry lives without being refreshed. Entries are normally removed once the launch result is
-// observed as persisted or the NodeClaim is finalized. Launch refreshes the entry on every reconcile, so a NodeClaim
-// whose status write keeps failing stays registered.
-const TTL = time.Hour
-
-// Registry maps NodeClaim UID to the NodeClaim returned by CloudProvider.Create. It is safe for concurrent use.
 type Registry struct {
 	cache *cache.Cache
 }
 
 func NewRegistry() *Registry {
-	return &Registry{cache: cache.New(TTL, time.Minute)}
+	return &Registry{cache: cache.New(time.Hour, time.Minute)}
 }
 
-// Add records (or refreshes) the result of CloudProvider.Create for the NodeClaim with the given UID.
 func (r *Registry) Add(uid types.UID, created *v1.NodeClaim) {
 	r.cache.SetDefault(string(uid), created)
 }
 
-// Get returns the launch result for the NodeClaim with the given UID.
 func (r *Registry) Get(uid types.UID) (*v1.NodeClaim, bool) {
 	if ret, ok := r.cache.Get(string(uid)); ok {
 		return ret.(*v1.NodeClaim), true
@@ -60,13 +46,10 @@ func (r *Registry) Get(uid types.UID) (*v1.NodeClaim, bool) {
 	return nil, false
 }
 
-// Delete removes the entry for the NodeClaim with the given UID.
 func (r *Registry) Delete(uid types.UID) {
 	r.cache.Delete(string(uid))
 }
 
-// ProviderIDs returns the providerIDs of every launch whose result has not yet been observed as persisted. A nil
-// Registry holds nothing.
 func (r *Registry) ProviderIDs() sets.Set[string] {
 	ids := sets.New[string]()
 	if r == nil {

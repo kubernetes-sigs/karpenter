@@ -82,9 +82,7 @@ type ControllerOptions struct {
 	launchedRegistry    *launched.Registry
 }
 
-// WithLaunchedRegistry shares a registry of launch results that have not yet been observed as persisted on their
-// NodeClaims. Cloud providers pass the same registry to controllers that act on cloud instances (e.g. instance garbage
-// collection) so that they don't treat a launched instance as orphaned while its NodeClaim status write is pending.
+// WithLaunchedRegistry shares unpersisted launch results with provider controllers, e.g. instance garbage collection.
 func WithLaunchedRegistry(registry *launched.Registry) option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
 		o.launchedRegistry = registry
