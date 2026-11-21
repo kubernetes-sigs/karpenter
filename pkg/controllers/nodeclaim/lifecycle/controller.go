@@ -233,13 +233,6 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, nil
 		}
 	}
-	// The providerID may not be persisted yet if the launch status write failed
-	if nodeClaim.Status.ProviderID == "" {
-		if created, ok := c.launched.Get(nodeClaim.UID); ok && created.Status.ProviderID != "" {
-			nodeClaim.Status.ProviderID = created.Status.ProviderID
-			ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", created.Status.ProviderID))
-		}
-	}
 	// We can expect ProviderID to be empty when there is a failure while launching the nodeClaim
 	if nodeClaim.Status.ProviderID != "" {
 		deleteErr := c.cloudProvider.Delete(ctx, nodeClaim)

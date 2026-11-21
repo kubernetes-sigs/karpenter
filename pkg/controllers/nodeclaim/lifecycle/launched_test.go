@@ -78,7 +78,7 @@ var _ = Describe("Launched Registry", func() {
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
 		Expect(registry.ProviderIDs()).To(BeEmpty())
 	})
-	It("should terminate the launched instance when a NodeClaim is deleted before its providerID is persisted", func() {
+	It("should drop the launch result when a NodeClaim is deleted before its providerID is persisted", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
 		nodeClaim.Status.ProviderID = "" // not launched yet
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -95,10 +95,9 @@ var _ = Describe("Launched Registry", func() {
 		throttle.Store(false)
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed()) // held by the termination finalizer
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
 
-		Expect(cloudProvider.DeleteCalls).To(HaveLen(2))
-		Expect(cloudProvider.CreatedNodeClaims).ToNot(HaveKey(providerID))
+		// Finalization doesn't wait on the instance; provider garbage collection reclaims it once it's unregistered
+		Expect(cloudProvider.DeleteCalls).To(BeEmpty())
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 		Expect(registry.ProviderIDs()).To(BeEmpty())
 	})
