@@ -517,7 +517,7 @@ var _ = Describe("Drift", func() {
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 			},
-			Entry("Annoations", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
+			Entry("Annotations", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
 			Entry("Labels", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
 			Entry("Taints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Taints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
 			Entry("StartupTaints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{StartupTaints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),

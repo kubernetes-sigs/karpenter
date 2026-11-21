@@ -407,7 +407,7 @@ var _ = Describe("Initialization", func() {
 		node.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
 		ExpectApplied(ctx, env.Client, node)
 
-		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
+		// Reconcile the nodeClaim and the nodeClaim/Node should now be initialized
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
