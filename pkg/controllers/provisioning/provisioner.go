@@ -131,6 +131,11 @@ func (p *Provisioner) TriggerReconcile() {
 	p.batcher.TriggerNow()
 }
 
+// CloudProvider is the cloud provider the provisioner resolves instance types from.
+func (p *Provisioner) CloudProvider() cloudprovider.CloudProvider {
+	return p.cloudProvider
+}
+
 func (p *Provisioner) Name() string {
 	return "provisioner"
 }
