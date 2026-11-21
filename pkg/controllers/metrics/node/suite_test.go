@@ -61,11 +61,14 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
+	// A cloud provider can add well-known labels at startup, so add one here to check that the node metrics are created
+	// with the controller, not before.
+	v1.WellKnownLabels.Insert("karpenter.test.sh/added-at-startup")
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
-	metricsStateController = node.NewController(cluster)
+	metricsStateController = node.NewController(env.Clock, cluster)
 })
 
 var _ = AfterSuite(func() {

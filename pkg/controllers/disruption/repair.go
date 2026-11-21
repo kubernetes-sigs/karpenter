@@ -24,11 +24,12 @@ import (
 	"sort"
 	"time"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,16 +38,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
-)
-
-const (
-	// repairUnhealthyThreshold stops repair for a NodePool when a correlated failure makes more than this fraction of
-	// its nodes unhealthy. Disruption budgets continue to pace concurrent repairs below this safety threshold.
-	repairUnhealthyThreshold = "20%"
 )
 
 // Repair is a voluntary disruption method that remediates unhealthy nodes. It replaces the standalone node.health
@@ -56,6 +54,19 @@ type Repair struct {
 	consolidation
 	policyMatcher *health.RepairPolicyMatcher
 	rebootHistory *RebootHistory
+	breakerLog    *health.BreakerLog
+	// blocked holds why repair held back each node this pass, by provider ID. Only the disruption controller's Reconcile
+	// touches it, one run at a time, so it needs no lock.
+	blocked map[string]blockedNode
+	// blockedStore remembers the series that repair set, so a later pass can delete the ones it no longer sets.
+	blockedStore *metrics.Store
+}
+
+var _ passObserver = (*Repair)(nil)
+
+type blockedNode struct {
+	nodePool string
+	reason   string
 }
 
 // NewRepair constructs the repair method around the matcher cluster state matches Nodes with. It panics when cluster
@@ -69,6 +80,9 @@ func NewRepair(c consolidation) *Repair {
 		consolidation: c,
 		policyMatcher: policyMatcher,
 		rebootHistory: newRebootHistory(c.clock),
+		breakerLog:    health.NewBreakerLog(c.clock),
+		blocked:       map[string]blockedNode{},
+		blockedStore:  metrics.NewStore(),
 	}
 }
 
@@ -93,18 +107,69 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound. It's
 	// checked once a policy is eligible (its toleration has elapsed), so the veto is reported only from then on, and
 	// ahead of the drain-bound check, which it overrides.
-	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
+	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424), here and in
+	// RepairPastDueSince.
 	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
 		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
 			fmt.Sprintf("repair is blocked through the %q annotation", v1.DoNotRepairAnnotationKey))...)
+		r.block(c, RepairBlockedDoNotRepair)
 		return false
 	}
-	if c.hasPodBlockers && c.RepairPolicyResult.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
+	if c.hasPodBlockers && repairDrainBound(c.NodeClaim, c.RepairPolicyResult) == nil {
 		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
 			"repair requires a termination grace period to bypass blocking pods")...)
+		r.block(c, RepairBlockedBlockingPods)
 		return false
 	}
 	return true
+}
+
+// RepairPastDueSince returns cluster state's repair result for the node and when the node became past due, or false if
+// it isn't past due. A node is past due once the node registration timeout and repair's drain bound have passed since
+// its earliest policy became eligible.
+func RepairPastDueSince(n *state.StateNode, now time.Time) (health.RepairResult, time.Time, bool) {
+	// Repair only acts on managed nodes with a NodePool, and do-not-repair vetoes it.
+	if !n.Managed() || n.Labels()[v1.NodePoolLabelKey] == "" || n.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
+		return health.RepairResult{}, time.Time{}, false
+	}
+	result := n.GetRepairResult(now)
+	// A reboot in progress is repair acting, unless the NodeClaim is being deleted, as after a failed reboot.
+	if result.Action == "" || (n.RebootInProgress() && !n.Deleted()) {
+		return health.RepairResult{}, time.Time{}, false
+	}
+	since := repairDueAt(n, result.FirstEligibleAt)
+	if now.Before(since) {
+		return health.RepairResult{}, time.Time{}, false
+	}
+	return result, since, true
+}
+
+// RepairPastDueReason returns why repair hasn't finished with a past-due node. heldBack is why repair's latest pass held
+// the node back, or empty if it didn't.
+func RepairPastDueReason(n *state.StateNode, heldBack string) string {
+	// Deleting and queued nodes come first: repair skips them, so any reason it gave one is from before then.
+	switch {
+	case n.Deleted():
+		return RepairBlockedDeleting.Name
+	// The disruption queue marks a node from when it takes the node until it deletes it.
+	case n.MarkedForDeletion():
+		return RepairBlockedReplacing.Name
+	// A node with do-not-repair is never past due, so that reason can only be from before the annotation was removed.
+	case heldBack != "" && heldBack != RepairBlockedDoNotRepair.Name:
+		return heldBack
+	default:
+		return RepairBlockedUnknown.Name
+	}
+}
+
+// repairDueAt returns when repair should have finished with the node: firstEligibleAt, when its earliest policy became
+// eligible, plus the node registration timeout to launch a replacement, plus its drain bound, if any.
+func repairDueAt(n *state.StateNode, firstEligibleAt time.Time) time.Time {
+	// Use the drain bound as of firstEligibleAt, so a policy that becomes eligible later can't move the deadline. An
+	// unbounded drain adds no time, since repair can't say when it would end.
+	drainBound := repairDrainBound(n.NodeClaim, n.GetRepairResult(firstEligibleAt))
+	// Add each one separately, since their sum can overflow for a huge drain bound.
+	return firstEligibleAt.Add(lifecycle.RegistrationTimeout).Add(lo.FromPtr(drainBound))
 }
 
 // ComputeCommands orders eligible candidates by the repair score and returns one command for the highest-scoring
@@ -142,25 +207,34 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 	if err != nil {
 		return []Command{}, err
 	}
+	// Breaker and budget blocks are checked for every candidate up front, so every node they hold back gets its reason,
+	// even though the loop below stops at the first candidate it acts on.
+	var actionable []*Candidate
 	for _, candidate := range candidates {
-		if trippedPools[candidate.NodePool.Name] {
+		if breaker, tripped := trippedPools[candidate.NodePool.Name]; tripped {
+			r.breakerLog.Blocked(ctx, candidate.NodePool.Name, breaker)
 			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
-				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold, candidate.NodePool.Name))...)
+				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", health.UnhealthyThreshold, candidate.NodePool.Name))...)
+			r.block(candidate, RepairBlockedBreaker)
 			continue
 		}
 		// Budgets only count initialized nodes, since an uninitialized node runs no workload to protect, so repairing one
 		// neither needs nor consumes budget.
 		if candidate.Initialized() && disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
+			r.block(candidate, RepairBlockedBudget)
 			continue
 		}
+		actionable = append(actionable, candidate)
+	}
+	for _, candidate := range actionable {
 		// Repair admits nodes with blocking (PDB / do-not-disrupt) pods only on the promise of this drain bound, so it
 		// must be stamped before either replacement path returns a command.
-		candidate.TerminationGracePeriod = effectiveDrainBound(candidate, candidate.RepairPolicyResult)
+		candidate.TerminationGracePeriod = effectiveDrainBound(candidate.NodeClaim, candidate.RepairPolicyResult)
 		// Reboot is in-place, so skip replacement and termination paths.
 		if candidate.RepairPolicyResult.Action == cloudprovider.RebootNode {
 			committed, err := r.commitReboot(ctx, candidate)
 			if err != nil {
-				return []Command{}, err
+				return []Command{}, serrors.Wrap(fmt.Errorf("committing reboot, %w", err), "Node", klog.KObj(candidate.Node), "NodeClaim", klog.KObj(candidate.NodeClaim))
 			}
 			if !committed {
 				continue
@@ -192,11 +266,12 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
 				// Other candidates don't depend on this one, so one NodePool's failure doesn't stop repair for the rest.
 				if err != nil {
-					log.FromContext(ctx).Error(err, "skipping repair candidate, failed checking capacity reservations")
+					log.FromContext(ctx).WithValues("Node", klog.KObj(candidate.Node)).Error(err, "skipping repair candidate, failed checking capacity reservations")
 					continue
 				}
 				if full && !holdsOfferedReservation(candidate, offered) {
 					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
+					r.block(candidate, RepairBlockedNoReplacement)
 					continue
 				}
 				reservationsFull = full
@@ -215,6 +290,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
 						"static NodePool's capacity reservations are full and cannot stage a replacement",
 						"static NodePool is at its node limit and cannot stage a replacement"))...)
+					r.block(candidate, RepairBlockedNoReplacement)
 					continue
 				}
 				return []Command{{
@@ -238,7 +314,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return []Command{}, err
+			return []Command{}, serrors.Wrap(fmt.Errorf("simulating scheduling, %w", err), "Node", klog.KObj(candidate.Node), "NodeClaim", klog.KObj(candidate.NodeClaim))
 		}
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
@@ -251,6 +327,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		}
 		if !results.AllNonPendingPodsScheduled() {
 			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
+			r.block(candidate, lo.Ternary(waitingOnUninitializedNodes(results), RepairBlockedWaitingOnInitialization, RepairBlockedNoReplacement))
 			continue
 		}
 		return []Command{{
@@ -273,11 +350,7 @@ func (r *Repair) commitReboot(ctx context.Context, candidate *Candidate) (bool, 
 	if nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue() || !nodeClaim.DeletionTimestamp.IsZero() {
 		return false, nil
 	}
-	// Fall back to the NodeClaim TGP; no TGP means an unbounded drain.
-	tgp := candidate.TerminationGracePeriod
-	if tgp == nil && nodeClaim.Spec.TerminationGracePeriod != nil {
-		tgp = &nodeClaim.Spec.TerminationGracePeriod.Duration
-	}
+	tgp := repairDrainBound(nodeClaim, candidate.RepairPolicyResult)
 	stored := nodeClaim.DeepCopy()
 	if tgp != nil {
 		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
@@ -307,10 +380,10 @@ func (r *Repair) commitReboot(ctx context.Context, candidate *Candidate) (bool, 
 	return true, nil
 }
 
-// breakerTrippedPools returns the NodePools whose unhealthy-node fraction exceeds repairUnhealthyThreshold. A node
+// breakerTrippedPools returns the NodePools whose unhealthy-node fraction exceeds health.UnhealthyThreshold. A node
 // counts as unhealthy as soon as one of its current conditions matches the provider policy set, regardless of policy
 // toleration. The threshold rounds up so one unhealthy node does not halt repair in small pools.
-func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]bool, error) {
+func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]health.Breaker, error) {
 	// TODO: cache unhealthy node counts by NodePool from Node updates instead of recalculating them on every repair pass.
 	nodeList := &corev1.NodeList{}
 	if err := r.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
@@ -329,32 +402,79 @@ func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]bool, erro
 			unhealthy[nodePool]++
 		}
 	}
-	tripped := map[string]bool{}
-	thresholdValue := intstr.FromString(repairUnhealthyThreshold)
+	tripped := map[string]health.Breaker{}
 	for nodePool, count := range total {
-		threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(&thresholdValue, count, true))
-		if unhealthy[nodePool] > threshold {
-			tripped[nodePool] = true
+		if breaker := health.CheckBreaker(count, unhealthy[nodePool]); breaker.Tripped {
+			tripped[nodePool] = breaker
 		}
 	}
 	return tripped, nil
 }
 
-// effectiveDrainBound returns the drain bound for the candidate, carried on the Command and applied by the queue
-// immediately before requesting deletion: min(matched policy TGP, NodeClaim TGP), or 0 for a forceful policy. nil
-// means the policy sets no bound, so the NodeClaim's own TerminationGracePeriod is inherited (the default disruption
-// behavior).
+// waitingOnUninitializedNodes reports whether every pod repair must move fails only because it would land on a node
+// that hasn't initialized, so repair is waiting for that node rather than lacking room.
+func waitingOnUninitializedNodes(results pscheduling.Results) bool {
+	errs := results.NonPendingPodErrors()
+	return len(errs) > 0 && lo.EveryBy(lo.Values(errs), func(err error) bool {
+		_, ok := lo.ErrorsAs[*UninitializedNodeError](err)
+		return ok
+	})
+}
+
+// block records why repair held back the candidate this pass.
+func (r *Repair) block(c *Candidate, reason opmetrics.Value) {
+	r.blocked[c.ProviderID()] = blockedNode{nodePool: c.NodePool.Name, reason: reason.Name}
+}
+
+// startPass clears the previous pass's nodes, so only nodes held back this pass have a reason.
+func (r *Repair) startPass() {
+	r.blocked = map[string]blockedNode{}
+}
+
+// endPass saves why repair held back each node this pass in cluster state, and publishes how many nodes it held back
+// by NodePool and reason. It doesn't clear them, since the controller calls it again when the Reconcile returns.
+func (r *Repair) endPass() {
+	r.cluster.UpdateRepairBlockedReasons(lo.MapValues(r.blocked, func(b blockedNode, _ string) string { return b.reason }))
+	storeMetrics := map[string][]*metrics.StoreMetric{}
+	for b, count := range lo.CountValues(lo.Values(r.blocked)) {
+		storeMetrics[b.nodePool] = append(storeMetrics[b.nodePool], &metrics.StoreMetric{
+			GaugeMetric: NodeClaimsUnhealthyBlocked,
+			Value:       float64(count),
+			Labels:      map[string]string{metrics.NodePoolLabel: b.nodePool, repairBlockedReasonLabel: b.reason},
+		})
+	}
+	// The store compares every old series with every new one under the same key, so one key per NodePool keeps that
+	// cheap. ReplaceAll also deletes the series of NodePools with no blocked nodes this pass.
+	r.blockedStore.ReplaceAll(storeMetrics)
+}
+
+// effectiveDrainBound returns the drain bound for the candidate's NodeClaim, carried on the Command and applied by the
+// queue immediately before requesting deletion: min(matched policy TGP, NodeClaim TGP), or 0 for a forceful policy.
+// nil means the policy sets no bound, so the NodeClaim's own TerminationGracePeriod is inherited (the default
+// disruption behavior).
 // TODO: the termination-timestamp deadline is a stopgap — replace once the termination flow has a formal contract
 // (kubernetes-sigs/karpenter#3029, Formalize Node Termination Contract).
-func effectiveDrainBound(c *Candidate, result health.RepairResult) *time.Duration {
+func effectiveDrainBound(nodeClaim *v1.NodeClaim, result health.RepairResult) *time.Duration {
 	if result.TerminationGracePeriod == nil {
 		return nil // inherit the NodeClaim's own TerminationGracePeriod
 	}
 	effective := *result.TerminationGracePeriod
-	if ncTGP := c.NodeClaim.Spec.TerminationGracePeriod; ncTGP != nil && ncTGP.Duration < effective {
+	if ncTGP := nodeClaim.Spec.TerminationGracePeriod; ncTGP != nil && ncTGP.Duration < effective {
 		effective = ncTGP.Duration
 	}
 	return &effective
+}
+
+// repairDrainBound returns how long repair lets the node drain, counting the NodeClaim's own bound, which
+// effectiveDrainBound leaves to termination. nil means the drain is unbounded.
+func repairDrainBound(nodeClaim *v1.NodeClaim, result health.RepairResult) *time.Duration {
+	if bound := effectiveDrainBound(nodeClaim, result); bound != nil {
+		return bound
+	}
+	if tgp := nodeClaim.Spec.TerminationGracePeriod; tgp != nil {
+		return new(tgp.Duration)
+	}
+	return nil
 }
 
 func (r *Repair) Reason() v1.DisruptionReason { return v1.DisruptionReasonUnhealthy }

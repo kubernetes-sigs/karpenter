@@ -18,8 +18,10 @@ package node
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -30,12 +32,14 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -50,7 +54,7 @@ const (
 
 // Fixed node metric dimensions. The remaining dimensions are the cloud
 // provider's well-known labels, which are self-describing and wrapped without
-// help text (see nodeLabelNames).
+// help text (see nodeLabelNamesWithoutNodeName).
 var (
 	nodeNameLabel  = opmetrics.Label{Name: nodeName, Help: "The name of the node."}
 	nodePhaseLabel = opmetrics.Label{Name: nodePhase, Help: "The node's lifecycle phase, e.g. `Pending`, `Running`."}
@@ -58,14 +62,16 @@ var (
 )
 
 var (
-	Allocatable         opmetrics.GaugeMetric
-	TotalPodRequests    opmetrics.GaugeMetric
-	TotalPodLimits      opmetrics.GaugeMetric
-	TotalDaemonRequests opmetrics.GaugeMetric
-	TotalDaemonLimits   opmetrics.GaugeMetric
-	SystemOverhead      opmetrics.GaugeMetric
-	Lifetime            opmetrics.GaugeMetric
-	ClusterUtilization  opmetrics.GaugeMetric
+	Allocatable                  opmetrics.GaugeMetric
+	TotalPodRequests             opmetrics.GaugeMetric
+	TotalPodLimits               opmetrics.GaugeMetric
+	TotalDaemonRequests          opmetrics.GaugeMetric
+	TotalDaemonLimits            opmetrics.GaugeMetric
+	SystemOverhead               opmetrics.GaugeMetric
+	Lifetime                     opmetrics.GaugeMetric
+	ClusterUtilization           opmetrics.GaugeMetric
+	RepairPastDueTimeSeconds     opmetrics.GaugeMetric
+	RepairPastDueDurationSeconds opmetrics.ObservationMetric
 )
 
 // Initialize metrics at runtime to ensure cloud provider's well-known labels are properly
@@ -159,6 +165,30 @@ func initializeMetrics() {
 		[]opmetrics.Label{metrics.ResourceType},
 		opmetrics.Alpha,
 	)
+	RepairPastDueTimeSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due_time_seconds",
+			Help:      "How long a node has been past due on repair, or 0 while it isn't. Every node that Karpenter manages and that has a NodePool reports a value, so the number of past-due nodes is the number of values above 0, for example `count by (nodepool, condition) (karpenter_nodes_repair_past_due_time_seconds > 0)` in Prometheus. A node is past due once it is still unhealthy after all the time repair gets. That time starts when the first of the node's repair policies becomes eligible, and is the 15 minute node registration timeout plus the drain bound at that point: the shortest termination grace period that the NodeClaim and the policies eligible by then set, if any. Policies that become eligible later don't change it. Nodes that repair holds back, such as for disruption budgets, still become past due. Nodes with do-not-repair, and nodes that repair is rebooting, report 0. Labeled like karpenter_nodes_current_lifetime_seconds: node_name, phase, managed and the node's well-known labels, such as nodepool, zone and capacity_type. It also has the condition repair acts on, and blocked_reason, why repair hasn't finished with the node, for example `budget` or `replacing`. Both are empty while the node isn't past due. Not reported when node repair is off, with --legacy-node-repair, or before cluster state first syncs.",
+		},
+		append(nodeLabelNames(), repairLabels()...),
+		opmetrics.Alpha,
+	)
+	RepairPastDueDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_past_due_duration_seconds",
+			Help:      "How long a node was past due on repair, as karpenter_nodes_repair_past_due_time_seconds defines it. Recorded each time a node stops being past due: it is gone, repair starts a reboot, it recovers, or repair stops acting on it, such as for do-not-repair. Labeled by phase, managed, the node's well-known labels, such as nodepool, zone and capacity_type, and the condition repair acted on, all as of the last time the node was past due. Also labeled by blocked_reason, the reason the node had for the most time while it was past due. Time that Karpenter didn't see, such as before it restarted, counts as unknown. A stretch that ends while Karpenter is down isn't recorded. Not recorded when node repair is off, with --legacy-node-repair, or before cluster state first syncs.",
+			Buckets:   prometheus.ExponentialBuckets(60, 2, 12), // 1m, 2m, 4m, ... up to about 34h
+		},
+		// Histogram series are never removed, so leave out node_name, which is different for every node.
+		append(nodeLabelNamesWithoutNodeName(), repairLabels()...),
+		opmetrics.Alpha,
+	)
 }
 
 func nodeLabelNamesWithResourceType() []opmetrics.Label {
@@ -168,7 +198,22 @@ func nodeLabelNamesWithResourceType() []opmetrics.Label {
 	)
 }
 
+// repairLabels are the labels both past-due metrics add to the node labels, so the two can't differ.
+func repairLabels() []opmetrics.Label {
+	return []opmetrics.Label{
+		disruption.RepairCondition,
+		disruption.RepairBlockedReason,
+	}
+}
+
 func nodeLabelNames() []opmetrics.Label {
+	return append(
+		[]opmetrics.Label{nodeNameLabel},
+		nodeLabelNamesWithoutNodeName()...,
+	)
+}
+
+func nodeLabelNamesWithoutNodeName() []opmetrics.Label {
 	return append(
 		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
 		// If we do, prometheus will panic since there would be duplicate labels.
@@ -176,27 +221,38 @@ func nodeLabelNames() []opmetrics.Label {
 		lo.Map(sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(), func(l string, _ int) opmetrics.Label {
 			return opmetrics.Label{Name: l}
 		}),
-		nodeNameLabel,
 		nodePhaseLabel,
 		managedLabel,
 	)
 }
 
 type Controller struct {
+	clock       clock.Clock
 	cluster     *state.Cluster
 	metricStore *metrics.Store
+	// pastDueRepairs is nil when the repair disruption method doesn't run.
+	pastDueRepairs *pastDueRepairs
 }
 
-func NewController(cluster *state.Cluster) *Controller {
-	initializeMetrics()
+// initializeMetricsOnce lets tests build more than one controller, since registering a metric twice panics.
+var initializeMetricsOnce sync.Once
+
+func NewController(clk clock.Clock, cluster *state.Cluster) *Controller {
+	initializeMetricsOnce.Do(initializeMetrics)
 	return &Controller{
-		cluster:     cluster,
-		metricStore: metrics.NewStore(),
+		clock:          clk,
+		cluster:        cluster,
+		metricStore:    metrics.NewStore(),
+		pastDueRepairs: newPastDueRepairs(cluster.RepairPolicyMatcher()),
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
+	// Cluster state may miss nodes until another controller, such as disruption, marks it synced.
+	reportPastDue := c.pastDueRepairs != nil && c.cluster.HasSynced()
+	// Read the reasons before copying the nodes, so a node that repair acts on in between doesn't show as unknown.
+	heldBack := c.cluster.RepairBlockedReasons()
 
 	nodes := lo.Reject(c.cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
@@ -209,6 +265,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	// Build cluster level metric
 	metricsMap["clusterUtilization"] = buildClusterUtilizationMetric(nodes)
+
+	if reportPastDue {
+		maps.Copy(metricsMap, c.pastDueRepairs.update(nodes, c.clock.Now(), heldBack))
+	}
 
 	c.metricStore.ReplaceAll(metricsMap)
 

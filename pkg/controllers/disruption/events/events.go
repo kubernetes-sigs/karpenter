@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
@@ -37,7 +38,7 @@ func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.
 			Reason:         events.NodeRepairBlocked,
 			Message:        msg,
 			DedupeValues:   []string{string(node.UID)},
-			DedupeTimeout:  15 * time.Minute,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 		{
 			InvolvedObject: nodeClaim,
@@ -45,7 +46,7 @@ func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.
 			Reason:         events.NodeRepairBlocked,
 			Message:        msg,
 			DedupeValues:   []string{string(nodeClaim.UID)},
-			DedupeTimeout:  15 * time.Minute,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 		{
 			InvolvedObject: nodePool,
@@ -53,7 +54,7 @@ func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.
 			Reason:         events.NodeRepairBlocked,
 			Message:        msg,
 			DedupeValues:   []string{string(nodePool.UID)},
-			DedupeTimeout:  15 * time.Minute,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 	}
 }

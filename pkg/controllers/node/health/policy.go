@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -63,7 +64,8 @@ type RepairPolicyMatcher struct {
 
 // RepairResult merges all eligible policies for one Node. Condition, ConditionStatus, Reason, ReasonRegex, Fallback,
 // and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
-// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it.
+// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it. FirstEligibleAt is
+// when the earliest of the eligible policies became eligible, or zero if none is eligible.
 type RepairResult struct {
 	Action                           cloudprovider.RepairAction
 	Condition                        corev1.NodeConditionType
@@ -72,6 +74,7 @@ type RepairResult struct {
 	ReasonRegex                      string
 	Fallback                         bool
 	SelectedEligibleAt               time.Time
+	FirstEligibleAt                  time.Time
 	TerminationGracePeriod           *time.Duration
 	TerminationGracePeriodCondition  corev1.NodeConditionType
 	selectedPriority                 int
@@ -311,19 +314,20 @@ func MatchInputsEqual(a, b *corev1.Node) bool {
 	return true
 }
 
+// TransitionTime returns when the condition took its current status, but no earlier than the Node's creation. A
+// condition can't predate its Node, and an unset transition time needs a lower bound.
+func TransitionTime(node *corev1.Node, condition corev1.NodeCondition) time.Time {
+	return lo.Latest(newMatchCondition(condition).lastTransition, matchCreated(node))
+}
+
 // Match returns every policy that matches one of the Node's conditions, regardless of toleration. Provider policies are
 // immutable after construction, so duration pointers in the resolved result must be treated as read-only.
 func (p *RepairPolicyMatcher) Match(node *corev1.Node) []RepairPolicyMatch {
-	created := matchCreated(node)
 	var matches []RepairPolicyMatch
 	for i := range node.Status.Conditions {
 		c := newMatchCondition(node.Status.Conditions[i])
 		condition := corev1.NodeCondition{Type: c.conditionType, Status: c.status, Reason: c.reason}
-		// A condition cannot predate its Node; clamping also gives an omitted transition time a durable lower bound.
-		transitionTime := c.lastTransition
-		if transitionTime.Before(created) {
-			transitionTime = created
-		}
+		transitionTime := TransitionTime(node, node.Status.Conditions[i])
 		specificPolicies, ok := p.groups[policyKey{conditionType: c.conditionType, conditionStatus: c.status}]
 		if !ok {
 			continue
@@ -367,6 +371,22 @@ func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
 	return ok
 }
 
+// UnhealthySince returns when the Node became unhealthy, and false if it is healthy. The breaker counts a Node as soon
+// as Matches covers one of its conditions, so it has been unhealthy since the earliest of those took its status.
+func (p *RepairPolicyMatcher) UnhealthySince(node *corev1.Node) (time.Time, bool) {
+	var since time.Time
+	unhealthy := false
+	for i := range node.Status.Conditions {
+		if !p.Matches(node.Status.Conditions[i]) {
+			continue
+		}
+		if t := TransitionTime(node, node.Status.Conditions[i]); !unhealthy || t.Before(since) {
+			since, unhealthy = t, true
+		}
+	}
+	return since, unhealthy
+}
+
 func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, eligibleAt, now time.Time) {
 	condition := policy.Condition
 	if eligibleAt.After(now) {
@@ -374,6 +394,9 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, eligibleAt, 
 	}
 	// Read this before anything below changes the result: no Action yet means no eligible policy has been merged.
 	isFirstEligiblePolicy := r.Action == ""
+	if isFirstEligiblePolicy || eligibleAt.Before(r.FirstEligibleAt) {
+		r.FirstEligibleAt = eligibleAt
+	}
 	r.mergeScore(rank, eligibleAt, now, isFirstEligiblePolicy)
 	if policy.TerminationGracePeriod != nil && r.shorterTerminationGracePeriod(*policy.TerminationGracePeriod, condition.Type, eligibleAt) {
 		r.TerminationGracePeriod = policy.TerminationGracePeriod

@@ -17,11 +17,10 @@ limitations under the License.
 package legacyrepair
 
 import (
-	"time"
-
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
@@ -33,7 +32,7 @@ func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.
 			Reason:         events.NodeRepairBlocked,
 			Message:        reason,
 			DedupeValues:   []string{string(node.UID)},
-			DedupeTimeout:  time.Minute * 15,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 		{
 			InvolvedObject: node,
@@ -41,7 +40,7 @@ func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.
 			Reason:         events.NodeRepairBlocked,
 			Message:        reason,
 			DedupeValues:   []string{string(nodeClaim.UID)},
-			DedupeTimeout:  time.Minute * 15,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 		{
 			InvolvedObject: node,
@@ -49,7 +48,7 @@ func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.
 			Reason:         events.NodeRepairBlocked,
 			Message:        reason,
 			DedupeValues:   []string{string(nodePool.UID)},
-			DedupeTimeout:  time.Minute * 15,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 	}
 }
@@ -62,7 +61,7 @@ func NodeRepairBlockedUnmanagedNodeClaim(node *corev1.Node, nodeClaim *v1.NodeCl
 			Reason:         events.NodeRepairBlocked,
 			Message:        reason,
 			DedupeValues:   []string{string(node.UID)},
-			DedupeTimeout:  time.Minute * 15,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 		{
 			InvolvedObject: node,
@@ -70,7 +69,7 @@ func NodeRepairBlockedUnmanagedNodeClaim(node *corev1.Node, nodeClaim *v1.NodeCl
 			Reason:         events.NodeRepairBlocked,
 			Message:        reason,
 			DedupeValues:   []string{string(nodeClaim.UID)},
-			DedupeTimeout:  time.Minute * 15,
+			DedupeTimeout:  health.BlockedRepeatInterval,
 		},
 	}
 }
