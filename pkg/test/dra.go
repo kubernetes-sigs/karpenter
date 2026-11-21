@@ -123,6 +123,15 @@ func ExactDeviceRequestWithCapacity(name, className string, count int64, capacit
 	return req
 }
 
+// AdminExactDeviceRequest builds an ExactCount DeviceRequest with adminAccess enabled (KEP-5018). Admin-access
+// requests may bind to already-allocated devices and do not consume them. The containing namespace must carry the
+// resource.kubernetes.io/admin-access label or the apiserver rejects the claim.
+func AdminExactDeviceRequest(name, className string, count int64) resourcev1.DeviceRequest {
+	req := ExactDeviceRequest(name, className, count)
+	req.Exactly.AdminAccess = lo.ToPtr(true)
+	return req
+}
+
 // AllDeviceRequest builds a DeviceRequest in "All" allocation mode for the given class.
 func AllDeviceRequest(name, className string) resourcev1.DeviceRequest {
 	return resourcev1.DeviceRequest{
