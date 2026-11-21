@@ -84,7 +84,7 @@ type Controller struct {
 // registry is used when it is nil.
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, nodePoolState *nodepoolhealth.State, launchedRegistry *launched.Registry, registrationHooks []cloudprovider.NodeLifecycleHook) *Controller {
 	if launchedRegistry == nil {
-		launchedRegistry = launched.NewRegistry(clk)
+		launchedRegistry = launched.NewRegistry()
 	}
 	return &Controller{
 		clock:         clk,
@@ -239,9 +239,9 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 	// The launch result may not have been persisted yet (e.g. the status write was throttled). Fall back to the
 	// in-memory launch result so we don't skip terminating an instance we launched.
 	if nodeClaim.Status.ProviderID == "" {
-		if providerID := c.launched.ProviderID(nodeClaim.UID); providerID != "" {
-			nodeClaim.Status.ProviderID = providerID
-			ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", providerID))
+		if created, ok := c.launched.Get(nodeClaim.UID); ok && created.Status.ProviderID != "" {
+			nodeClaim.Status.ProviderID = created.Status.ProviderID
+			ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", created.Status.ProviderID))
 		}
 	}
 	// We can expect ProviderID to be empty when there is a failure while launching the nodeClaim

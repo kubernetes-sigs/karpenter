@@ -42,7 +42,7 @@ var _ = Describe("Launched Registry", func() {
 	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
-		registry = launched.NewRegistry(env.Clock)
+		registry = launched.NewRegistry()
 		throttle = &atomic.Bool{}
 		controller = nodeclaimlifecycle.NewController(env.Clock, &throttledStatusClient{Client: env.Client, throttle: throttle}, cloudProvider, recorder, cluster, nodepoolhealth.NewState(), registry, nil)
 		nodePool = test.NodePool()
@@ -64,9 +64,11 @@ var _ = Describe("Launched Registry", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
 		Expect(nodeClaim.Status.ProviderID).To(BeEmpty())
-		providerID := registry.ProviderID(nodeClaim.UID)
+		launchResult, ok := registry.Get(nodeClaim.UID)
+		Expect(ok).To(BeTrue())
+		providerID := launchResult.Status.ProviderID
 		Expect(providerID).ToNot(BeEmpty())
-		Expect(registry.HasProviderID(providerID)).To(BeTrue())
+		Expect(registry.ProviderIDs().Has(providerID)).To(BeTrue())
 
 		throttle.Store(false)
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
@@ -76,8 +78,7 @@ var _ = Describe("Launched Registry", func() {
 
 		// The entry is dropped once the persisted launch result is observed
 		ExpectObjectReconciled(ctx, env.Client, controller, nodeClaim)
-		Expect(registry.HasProviderID(providerID)).To(BeFalse())
-		Expect(registry.Len()).To(BeZero())
+		Expect(registry.ProviderIDs()).To(BeEmpty())
 	})
 	It("should terminate the launched instance when a NodeClaim is deleted before its providerID is persisted", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
@@ -86,7 +87,9 @@ var _ = Describe("Launched Registry", func() {
 		throttle.Store(true)
 		ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		providerID := registry.ProviderID(nodeClaim.UID)
+		launchResult, ok := registry.Get(nodeClaim.UID)
+		Expect(ok).To(BeTrue())
+		providerID := launchResult.Status.ProviderID
 		Expect(providerID).ToNot(BeEmpty())
 		Expect(nodeClaim.Status.ProviderID).To(BeEmpty())
 		Expect(cloudProvider.CreatedNodeClaims).To(HaveKey(providerID))
@@ -100,7 +103,7 @@ var _ = Describe("Launched Registry", func() {
 		Expect(cloudProvider.DeleteCalls).To(HaveLen(2))
 		Expect(cloudProvider.CreatedNodeClaims).ToNot(HaveKey(providerID))
 		ExpectNotFound(ctx, env.Client, nodeClaim)
-		Expect(registry.Len()).To(BeZero())
+		Expect(registry.ProviderIDs()).To(BeEmpty())
 	})
 })
 

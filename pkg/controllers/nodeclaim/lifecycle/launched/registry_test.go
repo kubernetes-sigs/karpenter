@@ -18,12 +18,9 @@ package launched_test
 
 import (
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/types"
-	clock "k8s.io/utils/clock/testing"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
@@ -39,52 +36,40 @@ func created(providerID string) *v1.NodeClaim {
 }
 
 var _ = Describe("Registry", func() {
-	var clk *clock.FakeClock
 	var registry *launched.Registry
 
 	BeforeEach(func() {
-		clk = clock.NewFakeClock(time.Now())
-		registry = launched.NewRegistry(clk)
+		registry = launched.NewRegistry()
 	})
 
-	It("should look up launch results by UID and providerID", func() {
+	It("should return launch results by UID", func() {
 		registry.Add("a", created("p-a"))
-		Expect(registry.ProviderID("a")).To(Equal("p-a"))
-		Expect(registry.HasProviderID("p-a")).To(BeTrue())
-		Expect(registry.HasProviderID("p-b")).To(BeFalse())
-		Expect(registry.HasProviderID("")).To(BeFalse())
-		Expect(registry.ProviderID("b")).To(BeEmpty())
+		nc, ok := registry.Get("a")
+		Expect(ok).To(BeTrue())
+		Expect(nc.Status.ProviderID).To(Equal("p-a"))
+		_, ok = registry.Get("b")
+		Expect(ok).To(BeFalse())
 	})
-	It("should remove both indexes on delete", func() {
+	It("should list providerIDs, skipping empty ones", func() {
 		registry.Add("a", created("p-a"))
-		registry.Delete("a")
-		Expect(registry.ProviderID("a")).To(BeEmpty())
-		Expect(registry.HasProviderID("p-a")).To(BeFalse())
-		Expect(registry.Len()).To(BeZero())
+		registry.Add("b", created("p-b"))
+		registry.Add("c", created(""))
+		Expect(registry.ProviderIDs().UnsortedList()).To(ConsistOf("p-a", "p-b"))
 	})
-	It("should drop the old providerID when a UID is re-added with a new one", func() {
+	It("should replace the providerID when a UID is re-added", func() {
 		registry.Add("a", created("p-1"))
 		registry.Add("a", created("p-2"))
-		Expect(registry.HasProviderID("p-1")).To(BeFalse())
-		Expect(registry.HasProviderID("p-2")).To(BeTrue())
+		Expect(registry.ProviderIDs().UnsortedList()).To(ConsistOf("p-2"))
 	})
-	It("should not index an empty providerID", func() {
-		registry.Add("a", created(""))
-		_, ok := registry.Get("a")
-		Expect(ok).To(BeTrue())
-		Expect(registry.HasProviderID("")).To(BeFalse())
-	})
-	It("should expire entries that are not refreshed within the TTL", func() {
+	It("should drop deleted entries", func() {
 		registry.Add("a", created("p-a"))
-		clk.Step(launched.TTL - time.Second)
-		registry.Add("a", created("p-a")) // refresh
-		clk.Step(launched.TTL - time.Second)
-		Expect(registry.HasProviderID("p-a")).To(BeTrue())
-		clk.Step(time.Second)
-		Expect(registry.HasProviderID("p-a")).To(BeFalse())
+		registry.Delete("a")
 		_, ok := registry.Get("a")
 		Expect(ok).To(BeFalse())
-		registry.Add(types.UID("b"), created("p-b")) // sweeps expired entries
-		Expect(registry.Len()).To(Equal(1))
+		Expect(registry.ProviderIDs()).To(BeEmpty())
+	})
+	It("should hold nothing when nil", func() {
+		var nilRegistry *launched.Registry
+		Expect(nilRegistry.ProviderIDs()).To(BeEmpty())
 	})
 })

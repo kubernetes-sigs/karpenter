@@ -24,125 +24,58 @@ limitations under the License.
 package launched
 
 import (
-	"sync"
 	"time"
 
+	"github.com/patrickmn/go-cache"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/clock"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// TTL bounds how long an entry lives without being refreshed. Entries are normally removed explicitly once the launch
-// result is observed as persisted or the NodeClaim is finalized; the TTL only stops a NodeClaim that disappears without
-// either from pinning its entry. Launch refreshes the entry on every reconcile, so a NodeClaim whose status write keeps
-// failing stays registered.
+// TTL bounds how long an entry lives without being refreshed. Entries are normally removed once the launch result is
+// observed as persisted or the NodeClaim is finalized. Launch refreshes the entry on every reconcile, so a NodeClaim
+// whose status write keeps failing stays registered.
 const TTL = time.Hour
 
-type entry struct {
-	created   *v1.NodeClaim
-	expiresAt time.Time
-}
-
-// Registry is safe for concurrent use.
+// Registry maps NodeClaim UID to the NodeClaim returned by CloudProvider.Create. It is safe for concurrent use.
 type Registry struct {
-	clock clock.Clock
-
-	mu           sync.RWMutex
-	byUID        map[types.UID]*entry
-	byProviderID map[string]types.UID
+	cache *cache.Cache
 }
 
-func NewRegistry(clk clock.Clock) *Registry {
-	return &Registry{
-		clock:        clk,
-		byUID:        map[types.UID]*entry{},
-		byProviderID: map[string]types.UID{},
-	}
+func NewRegistry() *Registry {
+	return &Registry{cache: cache.New(TTL, time.Minute)}
 }
 
 // Add records (or refreshes) the result of CloudProvider.Create for the NodeClaim with the given UID.
 func (r *Registry) Add(uid types.UID, created *v1.NodeClaim) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if e, ok := r.byUID[uid]; ok && e.created.Status.ProviderID != created.Status.ProviderID {
-		delete(r.byProviderID, e.created.Status.ProviderID)
-	}
-	r.byUID[uid] = &entry{created: created, expiresAt: r.clock.Now().Add(TTL)}
-	if created.Status.ProviderID != "" {
-		r.byProviderID[created.Status.ProviderID] = uid
-	}
-	r.sweepLocked()
+	r.cache.SetDefault(string(uid), created)
 }
 
 // Get returns the launch result for the NodeClaim with the given UID.
 func (r *Registry) Get(uid types.UID) (*v1.NodeClaim, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	e, ok := r.byUID[uid]
-	if !ok || r.expired(e) {
-		return nil, false
+	if ret, ok := r.cache.Get(string(uid)); ok {
+		return ret.(*v1.NodeClaim), true
 	}
-	return e.created, true
-}
-
-// ProviderID returns the providerID launched for the NodeClaim with the given UID, or "" if there is none.
-func (r *Registry) ProviderID(uid types.UID) string {
-	if created, ok := r.Get(uid); ok {
-		return created.Status.ProviderID
-	}
-	return ""
-}
-
-// HasProviderID reports whether providerID was launched for a NodeClaim whose launch result has not yet been observed
-// as persisted. A nil Registry holds nothing.
-func (r *Registry) HasProviderID(providerID string) bool {
-	if r == nil || providerID == "" {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	uid, ok := r.byProviderID[providerID]
-	if !ok {
-		return false
-	}
-	e, ok := r.byUID[uid]
-	return ok && !r.expired(e)
+	return nil, false
 }
 
 // Delete removes the entry for the NodeClaim with the given UID.
 func (r *Registry) Delete(uid types.UID) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.deleteLocked(uid)
+	r.cache.Delete(string(uid))
 }
 
-// Len returns the number of entries, including any that have expired but not yet been swept.
-func (r *Registry) Len() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.byUID)
-}
-
-func (r *Registry) expired(e *entry) bool {
-	return !r.clock.Now().Before(e.expiresAt)
-}
-
-func (r *Registry) deleteLocked(uid types.UID) {
-	if e, ok := r.byUID[uid]; ok {
-		if r.byProviderID[e.created.Status.ProviderID] == uid {
-			delete(r.byProviderID, e.created.Status.ProviderID)
-		}
-		delete(r.byUID, uid)
+// ProviderIDs returns the providerIDs of every launch whose result has not yet been observed as persisted. A nil
+// Registry holds nothing.
+func (r *Registry) ProviderIDs() sets.Set[string] {
+	ids := sets.New[string]()
+	if r == nil {
+		return ids
 	}
-}
-
-// sweepLocked drops expired entries. The registry only holds in-flight launches, so it stays small and a full scan on
-// insert is cheap.
-func (r *Registry) sweepLocked() {
-	for uid, e := range r.byUID {
-		if r.expired(e) {
-			r.deleteLocked(uid)
+	for _, item := range r.cache.Items() {
+		if providerID := item.Object.(*v1.NodeClaim).Status.ProviderID; providerID != "" {
+			ids.Insert(providerID)
 		}
 	}
+	return ids
 }
