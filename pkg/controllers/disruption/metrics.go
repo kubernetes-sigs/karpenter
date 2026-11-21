@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -312,7 +313,7 @@ var (
 	}
 	RepairBlockedBreaker = opmetrics.Value{
 		Name: "breaker",
-		Help: "More than " + repairUnhealthyThreshold + " of the NodePool's nodes, rounded up, are unhealthy, so repair is paused for the NodePool. Every node in the NodePool counts, including nodes still starting up, and a node counts as unhealthy as soon as one of its conditions matches a repair policy, before its toleration passes.",
+		Help: "More than " + health.UnhealthyThreshold + " of the NodePool's nodes, rounded up, are unhealthy, so repair is paused for the NodePool. Every node in the NodePool counts, including nodes still starting up, and a node counts as unhealthy as soon as one of its conditions matches a repair policy, before its toleration passes.",
 	}
 	RepairBlockedBudget = opmetrics.Value{
 		Name: "budget",
