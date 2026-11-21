@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -32,6 +31,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -50,7 +50,7 @@ type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
-	cache         *cache.Cache // exists due to eventual consistency on the cache
+	launched      *launched.Registry
 	recorder      events.Recorder
 	clock         clock.Clock
 }
@@ -61,7 +61,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 		nodeClaim.StatusConditions(status.WithClock(l.clock)).Set(*cond)
 		if cond.IsTrue() {
 			// Once the NodeClaim has successfully marked as launched, we no longer need to store it
-			l.cache.Delete(string(nodeClaim.UID))
+			l.launched.Delete(nodeClaim.UID)
 		}
 		return reconcile.Result{}, nil
 	}
@@ -74,8 +74,8 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	//     patching failed on the status. In this case, we use the in-memory cached value for the created NodeClaim.
 	//  2. It is a standard NodeClaim launch where we should call CloudProvider Create() and fill in details of the launched
 	//     NodeClaim into the NodeClaim CR.
-	if ret, ok := l.cache.Get(string(nodeClaim.UID)); ok {
-		created = ret.(*v1.NodeClaim)
+	if ret, ok := l.launched.Get(nodeClaim.UID); ok {
+		created = ret
 	} else {
 		created, err = l.launchNodeClaim(ctx, nodeClaim)
 	}
@@ -83,7 +83,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	if err != nil || created == nil {
 		return reconcile.Result{}, err
 	}
-	l.cache.SetDefault(string(nodeClaim.UID), created)
+	l.launched.Add(nodeClaim.UID, created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
 	nodeClaim.StatusConditions(status.WithClock(l.clock)).SetTrue(v1.ConditionTypeLaunched)
 	return reconcile.Result{}, nil
