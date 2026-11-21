@@ -25,6 +25,7 @@ import (
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -55,10 +57,17 @@ type Repair struct {
 	breakerLog    *health.BreakerLog
 	// blocked holds why repair held back each node this pass, by provider ID. Only the disruption controller's Reconcile
 	// touches it, one run at a time, so it needs no lock.
-	blocked map[string]string
+	blocked map[string]blockedNode
+	// blockedStore remembers the series that repair set, so a later pass can delete the ones it no longer sets.
+	blockedStore *metrics.Store
 }
 
 var _ passObserver = (*Repair)(nil)
+
+type blockedNode struct {
+	nodePool string
+	reason   string
+}
 
 // NewRepair constructs the repair method around the matcher cluster state matches Nodes with. It panics when cluster
 // state has none, since health.NewRepairPolicyMatcher only returns nil when node repair is disabled or replaced by --legacy-node-repair.
@@ -72,7 +81,8 @@ func NewRepair(c consolidation) *Repair {
 		policyMatcher: policyMatcher,
 		rebootHistory: newRebootHistory(c.clock),
 		breakerLog:    health.NewBreakerLog(c.clock),
-		blocked:       map[string]string{},
+		blocked:       map[string]blockedNode{},
+		blockedStore:  metrics.NewStore(),
 	}
 }
 
@@ -102,7 +112,7 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
 		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
 			fmt.Sprintf("repair is blocked through the %q annotation", v1.DoNotRepairAnnotationKey))...)
-		// No reason is recorded, since a node with do-not-repair is never past due.
+		r.block(c, RepairBlockedDoNotRepair)
 		return false
 	}
 	if c.hasPodBlockers && repairDrainBound(c.NodeClaim, c.RepairPolicyResult) == nil {
@@ -144,7 +154,8 @@ func RepairPastDueReason(n *state.StateNode, heldBack string) string {
 	// The disruption queue marks a node from when it takes the node until it deletes it.
 	case n.MarkedForDeletion():
 		return RepairBlockedReplacing.Name
-	case heldBack != "":
+	// A node with do-not-repair is never past due, so that reason can only be from before the annotation was removed.
+	case heldBack != "" && heldBack != RepairBlockedDoNotRepair.Name:
 		return heldBack
 	default:
 		return RepairBlockedUnknown.Name
@@ -223,7 +234,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if candidate.RepairPolicyResult.Action == cloudprovider.RebootNode {
 			committed, err := r.commitReboot(ctx, candidate)
 			if err != nil {
-				return []Command{}, err
+				return []Command{}, serrors.Wrap(fmt.Errorf("committing reboot, %w", err), "Node", klog.KObj(candidate.Node), "NodeClaim", klog.KObj(candidate.NodeClaim))
 			}
 			if !committed {
 				continue
@@ -255,7 +266,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
 				// Other candidates don't depend on this one, so one NodePool's failure doesn't stop repair for the rest.
 				if err != nil {
-					log.FromContext(ctx).Error(err, "skipping repair candidate, failed checking capacity reservations")
+					log.FromContext(ctx).WithValues("Node", klog.KObj(candidate.Node)).Error(err, "skipping repair candidate, failed checking capacity reservations")
 					continue
 				}
 				if full && !holdsOfferedReservation(candidate, offered) {
@@ -303,7 +314,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return []Command{}, err
+			return []Command{}, serrors.Wrap(fmt.Errorf("simulating scheduling, %w", err), "Node", klog.KObj(candidate.Node), "NodeClaim", klog.KObj(candidate.NodeClaim))
 		}
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
@@ -412,18 +423,29 @@ func waitingOnUninitializedNodes(results pscheduling.Results) bool {
 
 // block records why repair held back the candidate this pass.
 func (r *Repair) block(c *Candidate, reason opmetrics.Value) {
-	r.blocked[c.ProviderID()] = reason.Name
+	r.blocked[c.ProviderID()] = blockedNode{nodePool: c.NodePool.Name, reason: reason.Name}
 }
 
 // startPass clears the previous pass's nodes, so only nodes held back this pass have a reason.
 func (r *Repair) startPass() {
-	r.blocked = map[string]string{}
+	r.blocked = map[string]blockedNode{}
 }
 
-// endPass saves why repair held back each node this pass in cluster state. It doesn't clear them, since the controller
-// calls it again when the Reconcile returns.
+// endPass saves why repair held back each node this pass in cluster state, and publishes how many nodes it held back
+// by NodePool and reason. It doesn't clear them, since the controller calls it again when the Reconcile returns.
 func (r *Repair) endPass() {
-	r.cluster.UpdateRepairBlockedReasons(r.blocked)
+	r.cluster.UpdateRepairBlockedReasons(lo.MapValues(r.blocked, func(b blockedNode, _ string) string { return b.reason }))
+	storeMetrics := map[string][]*metrics.StoreMetric{}
+	for b, count := range lo.CountValues(lo.Values(r.blocked)) {
+		storeMetrics[b.nodePool] = append(storeMetrics[b.nodePool], &metrics.StoreMetric{
+			GaugeMetric: NodeClaimsUnhealthyBlocked,
+			Value:       float64(count),
+			Labels:      map[string]string{metrics.NodePoolLabel: b.nodePool, repairBlockedReasonLabel: b.reason},
+		})
+	}
+	// The store compares every old series with every new one under the same key, so one key per NodePool keeps that
+	// cheap. ReplaceAll also deletes the series of NodePools with no blocked nodes this pass.
+	r.blockedStore.ReplaceAll(storeMetrics)
 }
 
 // effectiveDrainBound returns the drain bound for the candidate's NodeClaim, carried on the Command and applied by the

@@ -34,9 +34,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -99,7 +101,7 @@ func (c *patchErrorClient) Patch(ctx context.Context, obj client.Object, patch c
 }
 
 // reasonsReader is a disruption method that never disrupts. It calls read for each candidate it sees, so a spec can
-// check what cluster state holds while a method after repair runs.
+// check what cluster state and the gauge hold while a method after repair runs.
 type reasonsReader struct {
 	read func()
 }
@@ -117,10 +119,14 @@ func (r *reasonsReader) Reason() v1.DisruptionReason { return v1.DisruptionReaso
 func (r *reasonsReader) Class() string               { return disruption.GracefulDisruptionClass }
 func (r *reasonsReader) ConsolidationType() string   { return "" }
 
-// expectHeldBack checks that repair's latest pass held back the node for the reason, and that the label lists it.
+// expectHeldBack checks that repair's latest pass held back the node for the reason, and that the labels list it. Only
+// the held-back count's label lists do-not-repair, since a node with it is never past due.
 func expectHeldBack(n *corev1.Node, reason opmetrics.Value) {
 	GinkgoHelper()
-	Expect(disruption.RepairBlockedReason.Values).To(ContainElement(reason))
+	Expect(disruption.UnhealthyBlockedReason.Values).To(ContainElement(reason))
+	if reason != disruption.RepairBlockedDoNotRepair {
+		Expect(disruption.RepairBlockedReason.Values).To(ContainElement(reason))
+	}
 	Expect(cluster.RepairBlockedReasons()).To(HaveKeyWithValue(n.Spec.ProviderID, reason.Name), "reason for node %s", n.Name)
 }
 
@@ -130,6 +136,28 @@ func expectNotHeldBack(nodes ...*corev1.Node) {
 	for _, n := range nodes {
 		Expect(cluster.RepairBlockedReasons()).ToNot(HaveKey(n.Spec.ProviderID), "reason for node %s", n.Name)
 	}
+}
+
+func blockedLabels(np *v1.NodePool, reason opmetrics.Value) map[string]string {
+	return map[string]string{metrics.NodePoolLabel: np.Name, disruption.UnhealthyBlockedReason.Name: reason.Name}
+}
+
+func blockedSeriesFound(labels map[string]string) bool {
+	GinkgoHelper()
+	_, found := FindMetricWithLabelValues(ExpectMetricName(disruption.NodeClaimsUnhealthyBlocked.(*opmetrics.PrometheusGauge)), labels)
+	return found
+}
+
+// expectBlocked checks how many of the NodePool's nodes the gauge counts under the reason.
+func expectBlocked(np *v1.NodePool, reason opmetrics.Value, count float64) {
+	GinkgoHelper()
+	ExpectMetricGaugeValue(disruption.NodeClaimsUnhealthyBlocked, count, blockedLabels(np, reason))
+}
+
+// expectNoneBlocked checks that the gauge has no series for the NodePool.
+func expectNoneBlocked(np *v1.NodePool) {
+	GinkgoHelper()
+	Expect(blockedSeriesFound(map[string]string{metrics.NodePoolLabel: np.Name})).To(BeFalse(), "nodepool %s still has a blocked series", np.Name)
 }
 
 // tickingClock is a fake clock that moves on a millisecond every time it is read.
@@ -594,6 +622,7 @@ var _ = Describe("Repair", func() {
 
 		ExpectSingletonReconciled(ctx, repairController)
 		Expect(queue.GetCommands()).To(HaveLen(0))
+		expectBlocked(nodePool, disruption.RepairBlockedDoNotRepair, 1)
 		// The veto is reported on both the Node and the NodeClaim, and again on the next pass, so it stays visible.
 		vetoEvents := lo.Filter(recorder.Events(), func(e karpenterevents.Event, _ int) bool {
 			return e.Reason == karpenterevents.DisruptionBlocked && e.Message == `repair is blocked through the "karpenter.sh/do-not-repair" annotation`
@@ -633,18 +662,21 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		Expect(recorder.DetectedEvent(`repair is blocked through the "karpenter.sh/do-not-repair" annotation`)).To(BeTrue())
 		Expect(recorder.DetectedEvent("repair requires a termination grace period to bypass blocking pods")).To(BeFalse())
-		// A node with do-not-repair is never past due, so it gets no reason, not even for its blocking pods.
-		expectNotHeldBack(node)
+		// The veto comes first, so the node counts under do-not-repair, not blocking-pods.
+		expectHeldBack(node, disruption.RepairBlockedDoNotRepair)
+		expectBlocked(nodePool, disruption.RepairBlockedDoNotRepair, 1)
 	})
 
 	It("should not report the do-not-repair veto while the node is still within its policy's toleration", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
+		env.Clock.Step(29 * time.Minute)
 
 		ExpectSingletonReconciled(ctx, repairController)
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		Expect(recorder.Calls(karpenterevents.DisruptionBlocked)).To(Equal(0))
+		expectNoneBlocked(nodePool)
 	})
 
 	It("should still repair a node carrying only the do-not-disrupt annotation", func() {
@@ -657,6 +689,7 @@ var _ = Describe("Repair", func() {
 		// do-not-disrupt does not block repair: a command is still produced.
 		Expect(queue.GetCommands()).To(HaveLen(1))
 		expectNotHeldBack(node)
+		expectNoneBlocked(nodePool)
 	})
 
 	// do-not-repair blocks only on the literal value "true"; any other value does not block repair.
@@ -681,6 +714,7 @@ var _ = Describe("Repair", func() {
 
 		Expect(queue.GetCommands()).To(BeEmpty())
 		expectHeldBack(node, disruption.RepairBlockedBudget)
+		expectBlocked(nodePool, disruption.RepairBlockedBudget, 1)
 	})
 
 	It("should repair when a disruption budget without reasons is zero", func() {
@@ -693,6 +727,7 @@ var _ = Describe("Repair", func() {
 		ExpectSingletonReconciled(ctx, repairController)
 
 		Expect(queue.GetCommands()).To(HaveLen(1))
+		expectNoneBlocked(nodePool)
 	})
 
 	It("should repair with the full policy decision once a blocking budget lifts", func() {
@@ -708,6 +743,7 @@ var _ = Describe("Repair", func() {
 		ExpectSingletonReconciled(ctx, repairController)
 		Expect(queue.GetCommands()).To(BeEmpty())
 		expectHeldBack(node, disruption.RepairBlockedBudget)
+		expectBlocked(nodePool, disruption.RepairBlockedBudget, 1)
 
 		// The second pass reaches the same decision, which must still carry the policy's action and drain bound.
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
@@ -716,6 +752,7 @@ var _ = Describe("Repair", func() {
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
 		expectNotHeldBack(node)
+		expectNoneBlocked(nodePool)
 		Expect(*cmds[0].Candidates[0].TerminationGracePeriod).To(Equal(5 * time.Minute))
 	})
 
@@ -738,6 +775,7 @@ var _ = Describe("Repair", func() {
 		expectHeldBack(nodes[0], disruption.RepairBlockedBreaker)
 		// The other two are still within their toleration, so they aren't repair candidates and get no reason.
 		expectNotHeldBack(nodes[1], nodes[2])
+		expectBlocked(nodePool, disruption.RepairBlockedBreaker, 1)
 		blockedEvents := lo.Filter(recorder.Events(), func(event karpenterevents.Event, _ int) bool {
 			return event.Reason == karpenterevents.NodeRepairBlocked
 		})
@@ -819,6 +857,8 @@ var _ = Describe("Repair", func() {
 		Expect(lo.Map(blockedEvents, func(event karpenterevents.Event, _ int) string {
 			return string(event.InvolvedObject.(metav1.Object).GetUID())
 		})).To(ConsistOf(string(nodes[0].UID), string(nodeClaims[0].UID), string(nodePool.UID)))
+		// The gauge follows repair's own breaker check, not the breaker metrics.
+		expectBlocked(nodePool, disruption.RepairBlockedBreaker, 1)
 	})
 
 	It("should stop repair only in the NodePool whose breaker trips", func() {
@@ -1248,6 +1288,7 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		Expect(recorder.DetectedEvent("repair requires a termination grace period to bypass blocking pods")).To(BeTrue())
 		expectHeldBack(node, disruption.RepairBlockedBlockingPods)
+		expectBlocked(nodePool, disruption.RepairBlockedBlockingPods, 1)
 	})
 
 	It("should bypass a blocking pod when only the NodeClaim bounds the drain, without stamping a deadline", func() {
@@ -1364,6 +1405,7 @@ var _ = Describe("Repair", func() {
 
 		Expect(queue.GetCommands()).To(BeEmpty())
 		expectHeldBack(nodes[0], disruption.RepairBlockedNoReplacement)
+		expectBlocked(nodePool, disruption.RepairBlockedNoReplacement, 1)
 	})
 
 	It("should release a static replacement reservation when command admission loses a race", func() {
@@ -1547,6 +1589,7 @@ var _ = Describe("Repair", func() {
 			ExpectSingletonReconciled(ctx, repairController)
 			Expect(queue.GetCommands()).To(HaveLen(1))
 			expectNotHeldBack(node)
+			expectNoneBlocked(nodePool)
 		})
 
 		It("should not consume disruption budget for initialized nodes", func() {
@@ -1633,6 +1676,7 @@ var _ = Describe("Repair", func() {
 			Expect(queue.GetCommands()).To(BeEmpty())
 			expectHeldBack(nodes[0], disruption.RepairBlockedBreaker)
 			expectHeldBack(nodes[1], disruption.RepairBlockedBreaker)
+			expectBlocked(nodePool, disruption.RepairBlockedBreaker, 2)
 		})
 
 		// registerRoomyNode registers a node that never initializes but has room for the candidate's pods.
@@ -1660,6 +1704,7 @@ var _ = Describe("Repair", func() {
 			})
 			Expect(waited).To(BeTrue())
 			expectHeldBack(node, disruption.RepairBlockedWaitingOnInitialization)
+			expectBlocked(nodePool, disruption.RepairBlockedWaitingOnInitialization, 1)
 		})
 
 		It("should still give waiting-on-initialization when an unrelated pending pod can't be scheduled", func() {
@@ -1674,6 +1719,7 @@ var _ = Describe("Repair", func() {
 			ExpectSingletonReconciled(ctx, repairController)
 			Expect(queue.GetCommands()).To(BeEmpty())
 			expectHeldBack(node, disruption.RepairBlockedWaitingOnInitialization)
+			expectBlocked(nodePool, disruption.RepairBlockedWaitingOnInitialization, 1)
 		})
 
 		It("should give no-replacement when one pod can't be scheduled anywhere, even if others wait for an initializing node", func() {
@@ -1688,12 +1734,13 @@ var _ = Describe("Repair", func() {
 			ExpectSingletonReconciled(ctx, repairController)
 			Expect(queue.GetCommands()).To(BeEmpty())
 			expectHeldBack(node, disruption.RepairBlockedNoReplacement)
+			expectBlocked(nodePool, disruption.RepairBlockedNoReplacement, 1)
 		})
 	})
 
 	Context("held-back reasons", func() {
 		// holdBackOnBudget makes the suite's node unhealthy past its toleration in a nodepool whose budget allows no
-		// repairs, and checks that a run of dc gives it the budget reason.
+		// repairs, and checks that a run of dc gives it the budget reason and counts it.
 		holdBackOnBudget := func(dc *disruption.Controller) {
 			GinkgoHelper()
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
@@ -1703,6 +1750,7 @@ var _ = Describe("Repair", func() {
 			env.Clock.Step(31 * time.Minute)
 			ExpectSingletonReconciled(ctx, dc)
 			expectHeldBack(node, disruption.RepairBlockedBudget)
+			expectBlocked(nodePool, disruption.RepairBlockedBudget, 1)
 		}
 
 		It("should give the breaker reason when the nodepool is also out of budget", func() {
@@ -1726,6 +1774,25 @@ var _ = Describe("Repair", func() {
 			expectHeldBack(nodes[0], disruption.RepairBlockedBreaker)
 			expectHeldBack(nodes[1], disruption.RepairBlockedBreaker)
 			expectNotHeldBack(nodes[2])
+			expectBlocked(nodePool, disruption.RepairBlockedBreaker, 2)
+		})
+
+		It("should count a vetoed node under do-not-repair even when its nodepool's breaker is tripped", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+			nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
+			for i := range nodes {
+				initNode(nodeClaims[i], nodes[i])
+			}
+			// Two unhealthy nodes out of three trip the 20% breaker.
+			markUnhealthy(nodes[0], "BadNode")
+			markUnhealthy(nodes[1], "BadNode")
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			expectHeldBack(nodes[0], disruption.RepairBlockedDoNotRepair)
+			expectHeldBack(nodes[1], disruption.RepairBlockedBreaker)
+			expectBlocked(nodePool, disruption.RepairBlockedDoNotRepair, 1)
+			expectBlocked(nodePool, disruption.RepairBlockedBreaker, 1)
 		})
 
 		It("should give breaker and budget reasons even when repair acts on another nodepool first", func() {
@@ -1757,6 +1824,9 @@ var _ = Describe("Repair", func() {
 			expectHeldBack(nodes[1], disruption.RepairBlockedBreaker)
 			expectHeldBack(budgetNode, disruption.RepairBlockedBudget)
 			expectNotHeldBack(otherNode, nodes[2])
+			expectBlocked(nodePool, disruption.RepairBlockedBreaker, 2)
+			expectBlocked(budgetNodePool, disruption.RepairBlockedBudget, 1)
+			expectNoneBlocked(otherNodePool)
 			// Repair checks every candidate against the breaker first, so nodes ranked after the one it acts on get the event.
 			breakerEvents := lo.Filter(recorder.Events(), func(e karpenterevents.Event, _ int) bool { return e.Reason == karpenterevents.NodeRepairBlocked })
 			Expect(lo.Map(breakerEvents, func(e karpenterevents.Event, _ int) string {
@@ -1770,6 +1840,7 @@ var _ = Describe("Repair", func() {
 			markHealthy(node, "BadNode")
 			ExpectSingletonReconciled(ctx, repairController)
 			expectNotHeldBack(node)
+			expectNoneBlocked(nodePool)
 		})
 
 		It("should give a node its new reason when another reason now holds it back", func() {
@@ -1784,11 +1855,14 @@ var _ = Describe("Repair", func() {
 			env.Clock.Step(31 * time.Minute)
 			ExpectSingletonReconciled(ctx, repairController)
 			expectHeldBack(nodes[0], disruption.RepairBlockedBudget)
+			expectBlocked(nodePool, disruption.RepairBlockedBudget, 1)
 
 			// A second unhealthy node trips the breaker, which now holds the first node back instead.
 			markUnhealthy(nodes[1], "BadNode")
 			ExpectSingletonReconciled(ctx, repairController)
 			expectHeldBack(nodes[0], disruption.RepairBlockedBreaker)
+			expectBlocked(nodePool, disruption.RepairBlockedBreaker, 1)
+			Expect(blockedSeriesFound(blockedLabels(nodePool, disruption.RepairBlockedBudget))).To(BeFalse())
 		})
 
 		It("should give reasons only for the nodes a failed repair pass checked", func() {
@@ -1807,6 +1881,7 @@ var _ = Describe("Repair", func() {
 			first := addNodeWithBlockingPod()
 			holdBackOnBudget(failingController)
 			expectHeldBack(first, disruption.RepairBlockedBlockingPods)
+			expectBlocked(blockedNodePool, disruption.RepairBlockedBlockingPods, 1)
 
 			// The second node is new, so its reason can only come from the failed pass below.
 			second := addNodeWithBlockingPod()
@@ -1821,6 +1896,8 @@ var _ = Describe("Repair", func() {
 			expectHeldBack(first, disruption.RepairBlockedBlockingPods)
 			expectHeldBack(second, disruption.RepairBlockedBlockingPods)
 			expectNotHeldBack(node)
+			expectBlocked(blockedNodePool, disruption.RepairBlockedBlockingPods, 2)
+			expectNoneBlocked(nodePool)
 
 			// NodePool lists fail now, so the pass fails while gathering candidates and gives no reasons at all.
 			failingClient.failList = &v1.NodePoolList{}
@@ -1828,6 +1905,8 @@ var _ = Describe("Repair", func() {
 			Expect(err).To(MatchError(injectedErr))
 			Expect(err).To(MatchError(ContainSubstring("determining candidates")))
 			Expect(cluster.RepairBlockedReasons()).To(BeEmpty())
+			expectNoneBlocked(nodePool)
+			expectNoneBlocked(blockedNodePool)
 		})
 
 		It("should drop a node's budget reason once the budget lifts, even when the pass then fails", func() {
@@ -1838,8 +1917,11 @@ var _ = Describe("Repair", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 			nodePool.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "NotReady", "NotReady")
 			ExpectApplied(ctx, env.Client, nodePool)
-			Expect(ExpectSingletonReconcileFailed(ctx, repairController)).To(MatchError(provisioning.ErrNodePoolsNotFound))
+			err := ExpectSingletonReconcileFailed(ctx, repairController)
+			Expect(err).To(MatchError(provisioning.ErrNodePoolsNotFound))
+			Expect(err).To(MatchError(ContainSubstring("Node=" + node.Name)))
 			expectNotHeldBack(node)
+			expectNoneBlocked(nodePool)
 		})
 
 		It("should keep the reasons given before a later candidate fails the pass", func() {
@@ -1882,24 +1964,32 @@ var _ = Describe("Repair", func() {
 			expectHeldBack(breakerNodes[0], disruption.RepairBlockedBreaker)
 			expectHeldBack(breakerNodes[1], disruption.RepairBlockedBreaker)
 			expectNotHeldBack(node)
+			expectBlocked(staticNodePool, disruption.RepairBlockedNoReplacement, 1)
+			expectBlocked(budgetNodePool, disruption.RepairBlockedBudget, 1)
+			expectBlocked(breakerNodePool, disruption.RepairBlockedBreaker, 2)
+			expectNoneBlocked(nodePool)
 		})
 
-		It("should save each pass's reasons before the methods after repair run", func() {
-			// seen records, each time the later method sees a candidate, whether cluster state has a reason for node.
-			var seen []bool
+		It("should save each pass's reasons and counts before the methods after repair run", func() {
+			// seen and counted record, each time the later method sees a candidate, whether cluster state has a reason for
+			// node and whether the gauge counts it under budget.
+			var seen, counted []bool
 			reader := &reasonsReader{read: func() {
 				_, found := cluster.RepairBlockedReasons()[node.Spec.ProviderID]
 				seen = append(seen, found)
+				counted = append(counted, blockedSeriesFound(blockedLabels(nodePool, disruption.RepairBlockedBudget)))
 			}}
 			dc := disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(repair, reader))
 			holdBackOnBudget(dc)
 			Expect(seen).To(Equal([]bool{true}))
+			Expect(counted).To(Equal([]bool{true}))
 
-			// Once the node recovers, the later method already sees its reason dropped.
+			// Once the node recovers, the later method already sees its reason and count dropped.
 			markHealthy(node, "BadNode")
 			ExpectSingletonReconciled(ctx, dc)
 			Expect(seen).To(Equal([]bool{true, false}))
+			Expect(counted).To(Equal([]bool{true, false}))
 		})
 
 		It("should give no reasons while cluster state isn't synced, since repair doesn't run", func() {
@@ -1913,6 +2003,7 @@ var _ = Describe("Repair", func() {
 			Expect(cluster.Synced(ctx)).To(BeFalse())
 			ExpectSingletonReconciled(ctx, repairController)
 			Expect(cluster.RepairBlockedReasons()).To(BeEmpty())
+			expectNoneBlocked(nodePool)
 
 			// Once cluster state syncs, the next pass gives the node its reason again.
 			launching = ExpectExists(ctx, env.Client, launching)
@@ -1922,6 +2013,7 @@ var _ = Describe("Repair", func() {
 			Expect(cluster.Synced(ctx)).To(BeTrue())
 			ExpectSingletonReconciled(ctx, repairController)
 			expectHeldBack(node, disruption.RepairBlockedBudget)
+			expectBlocked(nodePool, disruption.RepairBlockedBudget, 1)
 		})
 
 		It("should give no reasons while a leftover disruption taint can't be removed, since repair doesn't run", func() {
@@ -1938,11 +2030,13 @@ var _ = Describe("Repair", func() {
 			patchClient.err = apierrors.NewConflict(corev1.Resource("nodes"), node.Name, errors.New("injected conflict"))
 			ExpectSingletonReconciled(ctx, patchController)
 			Expect(cluster.RepairBlockedReasons()).To(BeEmpty())
+			expectNoneBlocked(nodePool)
 
 			// Once the patch succeeds, the next run removes the taint and gives the node its reason again.
 			patchClient.err = nil
 			ExpectSingletonReconciled(ctx, patchController)
 			expectHeldBack(node, disruption.RepairBlockedBudget)
+			expectBlocked(nodePool, disruption.RepairBlockedBudget, 1)
 		})
 
 		It("should give a past-due node repair's reason, unless the node is queued or deleting", func() {
@@ -1960,6 +2054,38 @@ var _ = Describe("Repair", func() {
 			ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 			Expect(disruption.RepairPastDueReason(ExpectStateNodeExists(cluster, node), budget)).To(Equal(disruption.RepairBlockedDeleting.Name))
+		})
+
+		It("should not give a past-due node do-not-repair, which repair can have recorded before the annotation was removed", func() {
+			initNode(nodeClaim, node)
+			Expect(disruption.RepairPastDueReason(ExpectStateNodeExists(cluster, node), disruption.RepairBlockedDoNotRepair.Name)).To(Equal(disruption.RepairBlockedUnknown.Name))
+		})
+
+		It("should name the node when its reboot fails the pass, and still requeue on a conflict", func() {
+			useRepairPolicies([]cloudprovider.RepairPolicy{
+				// The drain bound makes the reboot patch the NodeClaim's annotations, which is the patch that fails.
+				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, TerminationGracePeriod: lo.ToPtr(5 * time.Minute), Action: cloudprovider.RebootNode},
+				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			})
+			failingClient := &patchErrorClient{Client: env.Client, failPatch: &v1.NodeClaim{}}
+			_, failingController := newRepairControllerWith(failingClient)
+			initNode(nodeClaim, node)
+			markUnhealthyWithReason(node, "BadNode", "RebootMe")
+			env.Clock.Step(11 * time.Minute)
+
+			// A conflict still makes the run retry without an error.
+			failingClient.err = apierrors.NewConflict(schema.GroupResource{Group: apis.Group, Resource: "nodeclaims"}, nodeClaim.Name, errors.New("injected conflict"))
+			result, err := failingController.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			injectedErr := errors.New("injected nodeclaim patch failure")
+			failingClient.err = injectedErr
+			err = ExpectSingletonReconcileFailed(ctx, failingController)
+			Expect(err).To(MatchError(injectedErr))
+			Expect(err).To(MatchError(ContainSubstring("Node=" + node.Name)))
+			Expect(err).To(MatchError(ContainSubstring("NodeClaim=" + nodeClaim.Name)))
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeFalse())
 		})
 
 		It("should label the node's past-due time with the reason repair's latest pass gave", func() {

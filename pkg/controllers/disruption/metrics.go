@@ -21,8 +21,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 const (
@@ -287,6 +289,18 @@ var (
 		[]opmetrics.Label{metrics.NodePool},
 		opmetrics.Alpha,
 	)
+	// NodeClaimsUnhealthyBlocked shows why repair is holding unhealthy nodes back, which EligibleNodes doesn't.
+	NodeClaimsUnhealthyBlocked = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeClaimSubsystem,
+			Name:      "unhealthy_blocked",
+			Help:      "Number of unhealthy nodeclaims past their repair toleration that node repair is holding back, with no series rather than 0 for a nodepool and reason with none. Nodes that repair skips for other reasons, such as nodes nominated for pending pods, aren't counted, and a failed repair pass counts only the nodes it checked before it failed. There are no series at all with --legacy-node-repair or the " + options.NodeRepairFeatureGate.Name + " feature gate off, or while repair can't run, such as while cluster state isn't synced during a node launch or a leftover disruption taint or condition can't be removed. Labeled by nodepool and the reason repair holds the nodes back.",
+		},
+		[]opmetrics.Label{metrics.NodePool, UnhealthyBlockedReason},
+		opmetrics.Alpha,
+	)
 )
 
 const (
@@ -307,6 +321,10 @@ var (
 )
 
 var (
+	RepairBlockedDoNotRepair = opmetrics.Value{
+		Name: "do-not-repair",
+		Help: "The node carries the " + v1.DoNotRepairAnnotationKey + ": \"true\" annotation.",
+	}
 	RepairBlockedBlockingPods = opmetrics.Value{
 		Name: "blocking-pods",
 		Help: "The node has pods that block eviction, such as do-not-disrupt pods or pods whose PodDisruptionBudget allows no disruptions right now, and neither the repair policies it is eligible for so far nor its NodeClaim set a termination grace period.",
@@ -353,6 +371,21 @@ var (
 			RepairBlockedReplacing,
 			RepairBlockedDeleting,
 			RepairBlockedUnknown,
+		},
+	}
+	// UnhealthyBlockedReason has only the reasons repair holds a node back for. Unlike RepairBlockedReason, it includes
+	// do-not-repair, which a past-due node never has.
+	UnhealthyBlockedReason = opmetrics.Label{
+		Name: repairBlockedReasonLabel,
+		Help: "Why node repair is holding back an unhealthy node. Each node is counted once, under the first reason that applies, in the order listed. no-replacement and waiting-on-initialization can undercount, since each pass stops checking nodes once repair acts on one.",
+		// Listed in the order repair checks them, which the Help relies on.
+		Values: []opmetrics.Value{
+			RepairBlockedDoNotRepair,
+			RepairBlockedBlockingPods,
+			RepairBlockedBreaker,
+			RepairBlockedBudget,
+			RepairBlockedNoReplacement,
+			RepairBlockedWaitingOnInitialization,
 		},
 	}
 )
