@@ -34,6 +34,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
@@ -178,6 +179,18 @@ var _ = Describe("Repair Past Due", func() {
 			return pastDueTime{nodeName: labels["node_name"], nodePool: labels["nodepool"], condition: labels["condition"], pastDue: time.Duration(m.GetGauge().GetValue() * float64(time.Second))}
 		})
 	}
+	// pastDueReasons returns each row's blocked reason, by node name.
+	pastDueReasons := func() map[string]string {
+		return lo.SliceToMap(pastDueTimeSeries(), func(m *prometheusmodel.Metric) (string, string) {
+			return labelsOf(m)["node_name"], labelsOf(m)["blocked_reason"]
+		})
+	}
+	// holdBack sets why repair's latest pass held back each node, as the repair disruption method would.
+	holdBack := func(reasons map[*corev1.Node]opmetrics.Value) {
+		repairCluster.UpdateRepairBlockedReasons(lo.MapEntries(reasons, func(n *corev1.Node, reason opmetrics.Value) (string, string) {
+			return n.Spec.ProviderID, reason.Name
+		}))
+	}
 	// expectPastDueIn runs a pass and checks how many nodes are past due under each condition in the nodepool, which are
 	// the rows with that condition. It also checks that each managed node in a NodePool has one row, and that every row
 	// without a condition is 0.
@@ -196,6 +209,11 @@ var _ = Describe("Repair Past Due", func() {
 			if row.condition == "" {
 				Expect(row.pastDue).To(BeZero(), row.nodeName+" isn't past due, so it should report 0")
 			}
+		}
+		// A row has a blocked reason exactly when it has a condition, so both are empty while the node isn't past due.
+		for _, m := range pastDueTimeSeries() {
+			labels := labelsOf(m)
+			Expect(labels["blocked_reason"] == "").To(Equal(labels["condition"] == ""), "row for "+labels["node_name"])
 		}
 		for condition, count := range counts {
 			Expect(lo.CountBy(rows, func(row pastDueTime) bool {
@@ -310,15 +328,126 @@ var _ = Describe("Repair Past Due", func() {
 				HaveKeyWithValue("arch", "arm64"),
 				HaveKeyWithValue("capacity_type", v1.CapacityTypeOnDemand),
 			))
-			Expect(onlyLabels(pastDueTimeSeries())).To(Equal(lo.Assign(nodeLabels, map[string]string{"condition": ""})))
+			Expect(onlyLabels(pastDueTimeSeries())).To(Equal(lo.Assign(nodeLabels, map[string]string{"condition": "", "blocked_reason": ""})))
 
+			// No repair pass runs in this suite, so a past-due node's reason is unknown unless a spec sets one.
 			env.Clock.Step(56 * time.Minute)
 			expectPastDue(map[string]int{"bad_node": 1})
-			Expect(onlyLabels(pastDueTimeSeries())).To(Equal(lo.Assign(nodeLabels, map[string]string{"condition": "bad_node"})))
+			Expect(onlyLabels(pastDueTimeSeries())).To(Equal(lo.Assign(nodeLabels, map[string]string{"condition": "bad_node", "blocked_reason": "unknown"})))
 
 			applyCondition(n, healthyNodeCondition)
 			expectPastDue(map[string]int{"bad_node": 0})
-			Expect(onlyLabels(pastDueDurationSeries())).To(Equal(lo.Assign(lo.OmitByKeys(nodeLabels, []string{"node_name"}), map[string]string{"condition": "bad_node"})))
+			Expect(onlyLabels(pastDueDurationSeries())).To(Equal(lo.Assign(lo.OmitByKeys(nodeLabels, []string{"node_name"}), map[string]string{"condition": "bad_node", "blocked_reason": "unknown"})))
+		})
+		It("should label a past-due node with why repair's latest pass held it back, or unknown", func() {
+			held := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			// Step the clock before each new node, since applyCondition moves the clock up to a new node's creation time,
+			// which would add time to the earlier nodes.
+			env.Clock.Step(time.Minute)
+			unexplained := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			env.Clock.Step(29 * time.Minute)
+			early := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			// At 60m, the first two nodes are past due, and the last isn't until 85m.
+			env.Clock.Step(30 * time.Minute)
+			holdBack(map[*corev1.Node]opmetrics.Value{held: disruption.RepairBlockedBudget, early: disruption.RepairBlockedBreaker})
+			expectPastDue(map[string]int{"bad_node": 2})
+			// A node that isn't past due has an empty blocked_reason, even when repair holds it back.
+			Expect(pastDueReasons()).To(Equal(map[string]string{held.Name: "budget", unexplained.Name: "unknown", early.Name: ""}))
+		})
+		It("should label a past-due node replacing and then deleting once repair acts on it, and record the reason it had longest", func() {
+			nodeClaim := nodePoolNodeClaim()
+			n := unhealthyNode(nodeClaim, badNodeCondition)
+			holdBack(map[*corev1.Node]opmetrics.Value{n: disruption.RepairBlockedBudget})
+			// The budget holds the node back from when it is past due at 55m until 65m.
+			env.Clock.Step(55 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(pastDueReasons()).To(HaveKeyWithValue(n.Name, "budget"))
+
+			// The disruption queue marks the node while its replacement launches, which beats repair's older reason.
+			env.Clock.Step(10 * time.Minute)
+			repairCluster.MarkForDeletion(n.Spec.ProviderID)
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(pastDueReasons()).To(HaveKeyWithValue(n.Name, "replacing"))
+
+			// The queue deletes the node at 67m.
+			env.Clock.Step(2 * time.Minute)
+			ExpectDeletionTimestampSet(repairCtx, env.Client, nodeClaim, n)
+			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(pastDueReasons()).To(HaveKeyWithValue(n.Name, "deleting"))
+
+			// It's gone at 68m: past due for 13m, 10m of them held back by the budget.
+			env.Clock.Step(time.Minute)
+			ExpectFinalizersRemoved(repairCtx, env.Client, nodeClaim, n)
+			ExpectNotFound(repairCtx, env.Client, nodeClaim, n)
+			ExpectReconcileSucceeded(repairCtx, repairNodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(repairCtx, repairNodeController, client.ObjectKeyFromObject(n))
+			ExpectSingletonReconciled(repairCtx, repairMetricsController)
+			expectRecordedWith(map[string]string{"condition": "bad_node", "blocked_reason": "budget"}, 1, 13*time.Minute)
+			Expect(pastDueDurationSeries()).To(HaveLen(1))
+		})
+		It("should replace a past-due node's row when its reason changes, and keep counting its time", func() {
+			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			holdBack(map[*corev1.Node]opmetrics.Value{n: disruption.RepairBlockedBudget})
+			env.Clock.Step(60 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(pastDueReasons()).To(Equal(map[string]string{n.Name: "budget"}))
+			expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 5 * time.Minute})
+
+			// The breaker holds the node back now. The node keeps one row, and its time still counts from 55m.
+			holdBack(map[*corev1.Node]opmetrics.Value{n: disruption.RepairBlockedBreaker})
+			env.Clock.Step(10 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			Expect(pastDueReasons()).To(Equal(map[string]string{n.Name: "breaker"}))
+			expectPastDueTimes(pastDueTime{n.Name, "default", "bad_node", 15 * time.Minute})
+			expectRecorded("bad_node", 0, 0)
+		})
+		// expectRecordedReason holds the node back for first, then for second, and checks the reason the stretch is
+		// recorded under. A nil reason means repair gave none.
+		expectRecordedReason := func(first opmetrics.Value, firstFor time.Duration, second *opmetrics.Value, secondFor time.Duration, want string) {
+			GinkgoHelper()
+			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			holdBack(map[*corev1.Node]opmetrics.Value{n: first})
+			// The node is past due from 55m.
+			env.Clock.Step(55 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			holdBack(lo.Ternary(second == nil, nil, map[*corev1.Node]opmetrics.Value{n: lo.FromPtr(second)}))
+			env.Clock.Step(firstFor)
+			expectPastDue(map[string]int{"bad_node": 1})
+			env.Clock.Step(secondFor)
+			applyCondition(n, healthyNodeCondition)
+			expectPastDue(map[string]int{"bad_node": 0})
+			expectRecordedWith(map[string]string{"condition": "bad_node", "blocked_reason": want}, 1, firstFor+secondFor)
+			Expect(pastDueDurationSeries()).To(HaveLen(1))
+		}
+		It("should record a stretch under the reason it had for the most time, not the one the label lists first", func() {
+			// The label lists breaker before budget, so only the times can pick budget.
+			expectRecordedReason(disruption.RepairBlockedBreaker, 2*time.Minute, &disruption.RepairBlockedBudget, 8*time.Minute, "budget")
+		})
+		It("should record a stretch as unknown when repair gave no reason for most of it", func() {
+			expectRecordedReason(disruption.RepairBlockedBudget, 2*time.Minute, nil, 8*time.Minute, "unknown")
+		})
+		DescribeTable("should record a stretch under the reason the label lists first when two reasons tie",
+			func(first, second opmetrics.Value) {
+				// The label lists breaker before budget, whichever came first.
+				expectRecordedReason(first, 5*time.Minute, &second, 5*time.Minute, "breaker")
+			},
+			Entry("when budget comes first", disruption.RepairBlockedBudget, disruption.RepairBlockedBreaker),
+			Entry("when breaker comes first", disruption.RepairBlockedBreaker, disruption.RepairBlockedBudget),
+		)
+		It("should record the time before a restart as unknown, since no pass saw it", func() {
+			n := unhealthyNode(nodePoolNodeClaim(), badNodeCondition)
+			// The node is past due from 55m, but this controller first runs at 75m, as after a restart.
+			holdBack(map[*corev1.Node]opmetrics.Value{n: disruption.RepairBlockedBudget})
+			env.Clock.Step(75 * time.Minute)
+			expectPastDue(map[string]int{"bad_node": 1})
+			// The budget holds it back for the 10 minutes this controller sees.
+			env.Clock.Step(10 * time.Minute)
+			applyCondition(n, healthyNodeCondition)
+			expectPastDue(map[string]int{"bad_node": 0})
+			expectRecordedWith(map[string]string{"condition": "bad_node", "blocked_reason": "unknown"}, 1, 30*time.Minute)
+			Expect(pastDueDurationSeries()).To(HaveLen(1))
 		})
 		It("should record a stretch under the node's labels from the last pass in which it was past due", func() {
 			reserved := map[string]string{v1.NodePoolLabelKey: "default", v1.CapacityTypeLabelKey: v1.CapacityTypeReserved}

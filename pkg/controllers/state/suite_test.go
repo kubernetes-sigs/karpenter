@@ -3068,3 +3068,26 @@ var _ = Describe("Buffer Pod Counts", func() {
 		Expect(cluster.HasBufferPods("provider-b")).To(BeTrue())
 	})
 })
+
+var _ = Describe("Repair Blocked Reasons", func() {
+	It("should have no reasons before repair's first pass", func() {
+		Expect(state.NewCluster(env.Clock, env.Client, cloudProvider).RepairBlockedReasons()).To(BeEmpty())
+	})
+	It("should keep only the latest pass's reasons", func() {
+		cluster.UpdateRepairBlockedReasons(map[string]string{"provider-a": "budget", "provider-b": "breaker"})
+		cluster.UpdateRepairBlockedReasons(map[string]string{"provider-b": "budget"})
+		Expect(cluster.RepairBlockedReasons()).To(Equal(map[string]string{"provider-b": "budget"}))
+	})
+	It("should not change when the caller changes its map later", func() {
+		reasons := map[string]string{"provider-a": "budget"}
+		cluster.UpdateRepairBlockedReasons(reasons)
+		reasons["provider-b"] = "breaker"
+		cluster.RepairBlockedReasons()["provider-c"] = "breaker"
+		Expect(cluster.RepairBlockedReasons()).To(Equal(map[string]string{"provider-a": "budget"}))
+	})
+	It("should clear the reasons on reset", func() {
+		cluster.UpdateRepairBlockedReasons(map[string]string{"provider-a": "budget"})
+		cluster.Reset()
+		Expect(cluster.RepairBlockedReasons()).To(BeEmpty())
+	})
+})

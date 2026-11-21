@@ -103,6 +103,11 @@ type Cluster struct {
 	// into the pending set. Any replacement must fit both real and virtual pods.
 	bufferPodCountsMu sync.RWMutex
 	bufferPodCounts   map[string]int
+
+	// repairBlockedReasons holds why node repair's latest pass held back each node, by provider ID. Repair replaces it
+	// after each pass, and the past-due node metrics read it.
+	repairBlockedReasonsMu sync.RWMutex
+	repairBlockedReasons   map[string]string
 }
 
 type ClusterOptions struct {
@@ -133,7 +138,8 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 
 		NodePoolState: NewNodePoolState(),
 
-		bufferPodCounts: map[string]int{},
+		bufferPodCounts:      map[string]int{},
+		repairBlockedReasons: map[string]string{},
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -342,6 +348,21 @@ func (c *Cluster) BufferPodCount(providerID string) int {
 	c.bufferPodCountsMu.RLock()
 	defer c.bufferPodCountsMu.RUnlock()
 	return c.bufferPodCounts[providerID]
+}
+
+// UpdateRepairBlockedReasons replaces the held-back reasons with those from repair's latest pass, by provider ID, so a
+// node repair didn't hold back in that pass has no reason.
+func (c *Cluster) UpdateRepairBlockedReasons(reasons map[string]string) {
+	c.repairBlockedReasonsMu.Lock()
+	defer c.repairBlockedReasonsMu.Unlock()
+	c.repairBlockedReasons = maps.Clone(reasons)
+}
+
+// RepairBlockedReasons returns a copy of why repair's latest pass held back each node, by provider ID.
+func (c *Cluster) RepairBlockedReasons() map[string]string {
+	c.repairBlockedReasonsMu.RLock()
+	defer c.repairBlockedReasonsMu.RUnlock()
+	return maps.Clone(c.repairBlockedReasons)
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
@@ -688,6 +709,7 @@ func (c *Cluster) Reset() {
 	c.podsSchedulableTimes = sync.Map{}
 	c.podToNodeClaim = sync.Map{}
 	c.bufferPodCounts = map[string]int{}
+	c.UpdateRepairBlockedReasons(map[string]string{})
 }
 
 // sets the cluster to be synced or unsynced for unit testing
