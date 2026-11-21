@@ -280,6 +280,16 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.ScoreAt(now.Add(35 * time.Minute))).To(BeNumerically("~", 25.0/30.0))
 		})
 
+		It("keeps FirstEligibleAt at the earliest eligibility whatever the policy order, even when a later policy is selected", func() {
+			reversed := slices.Clone(policies)
+			slices.Reverse(reversed)
+			for _, orderedPolicies := range [][]cloudprovider.RepairPolicy{policies, reversed} {
+				result := evaluate(newMatcher(orderedPolicies), now.Add(35*time.Minute), condition)
+				Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
+				Expect(result.FirstEligibleAt).To(Equal(now.Add(10 * time.Minute)))
+			}
+		})
+
 		It("retains the earliest eligibility across same-action policies", func() {
 			sameActionPolicies := []cloudprovider.RepairPolicy{
 				{
@@ -625,6 +635,7 @@ var _ = Describe("Repair Policies", func() {
 		result := Resolve(matches, notBefore.Add(10*time.Minute), notBefore)
 		Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 		Expect(result.SelectedEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
+		Expect(result.FirstEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
 	})
 
 	DescribeTable("comparing match inputs",

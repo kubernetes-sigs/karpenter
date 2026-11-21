@@ -63,7 +63,8 @@ type RepairPolicyMatcher struct {
 
 // RepairResult merges all eligible policies for one Node. Condition, ConditionStatus, Reason, ReasonRegex, Fallback,
 // and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
-// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it.
+// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it. FirstEligibleAt is
+// when the earliest of the eligible policies became eligible, or zero if none is eligible.
 type RepairResult struct {
 	Action                           cloudprovider.RepairAction
 	Condition                        corev1.NodeConditionType
@@ -72,6 +73,7 @@ type RepairResult struct {
 	ReasonRegex                      string
 	Fallback                         bool
 	SelectedEligibleAt               time.Time
+	FirstEligibleAt                  time.Time
 	TerminationGracePeriod           *time.Duration
 	TerminationGracePeriodCondition  corev1.NodeConditionType
 	selectedPriority                 int
@@ -374,6 +376,9 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, eligibleAt, 
 	}
 	// Read this before anything below changes the result: no Action yet means no eligible policy has been merged.
 	isFirstEligiblePolicy := r.Action == ""
+	if isFirstEligiblePolicy || eligibleAt.Before(r.FirstEligibleAt) {
+		r.FirstEligibleAt = eligibleAt
+	}
 	r.mergeScore(rank, eligibleAt, now, isFirstEligiblePolicy)
 	if policy.TerminationGracePeriod != nil && r.shorterTerminationGracePeriod(*policy.TerminationGracePeriod, condition.Type, eligibleAt) {
 		r.TerminationGracePeriod = policy.TerminationGracePeriod

@@ -289,17 +289,69 @@ var (
 )
 
 const (
-	conditionLabel = "condition"
-	imageIDLabel   = "image_id"
+	conditionLabel           = "condition"
+	imageIDLabel             = "image_id"
+	repairBlockedReasonLabel = "blocked_reason"
 )
 
 var (
 	RepairCondition = opmetrics.Label{
 		Name: conditionLabel,
-		Help: "The node status condition type that triggered node repair disruption.",
+		Help: "The node status condition type that node repair acts on, in snake case, e.g. `ready` for `Ready`.",
 	}
 	ImageID = opmetrics.Label{
 		Name: imageIDLabel,
 		Help: "The image ID of the node that was disrupted.",
+	}
+)
+
+var (
+	RepairBlockedBlockingPods = opmetrics.Value{
+		Name: "blocking-pods",
+		Help: "The node has pods that block eviction, such as do-not-disrupt pods or pods whose PodDisruptionBudget allows no disruptions right now, and neither the repair policies it is eligible for so far nor its NodeClaim set a termination grace period.",
+	}
+	RepairBlockedBreaker = opmetrics.Value{
+		Name: "breaker",
+		Help: "More than " + repairUnhealthyThreshold + " of the NodePool's nodes, rounded up, are unhealthy, so repair is paused for the NodePool. Every node in the NodePool counts, including nodes still starting up, and a node counts as unhealthy as soon as one of its conditions matches a repair policy, before its toleration passes.",
+	}
+	RepairBlockedBudget = opmetrics.Value{
+		Name: "budget",
+		Help: "The NodePool's disruption budget allows no more Unhealthy disruptions right now: a budget that applies to Unhealthy is set to zero or used up by disruptions in progress, or one of its budgets is misconfigured. Only initialized nodes are held back by the budget, since repairing one that hasn't initialized uses no budget.",
+	}
+	RepairBlockedNoReplacement = opmetrics.Value{
+		Name: "no-replacement",
+		Help: "Repair can't stage a replacement, and can't terminate the node first instead: some pods, on this node or on another node being deleted, can't be scheduled elsewhere, or a static NodePool is at its node limit or its capacity reservations are full.",
+	}
+	RepairBlockedWaitingOnInitialization = opmetrics.Value{
+		Name: "waiting-on-initialization",
+		Help: "Some of the node's pods would move to a node that hasn't finished initializing, and repair won't rely on that node until it has initialized. This is usually brief; a long wait means that node is stuck starting.",
+	}
+	RepairBlockedReplacing = opmetrics.Value{
+		Name: "replacing",
+		Help: "A disruption, usually repair's, has taken the node. It waits for the node's replacement, if it needs one, to initialize, and then deletes the node. If that fails or takes too long, it gives up, and repair checks the node again.",
+	}
+	RepairBlockedDeleting = opmetrics.Value{
+		Name: "deleting",
+		Help: "The node is being deleted, by repair or for another reason, and its drain, volume detachment or instance termination hasn't finished. This includes a node being replaced because its reboot failed.",
+	}
+	RepairBlockedUnknown = opmetrics.Value{
+		Name: "unknown",
+		Help: "Repair's latest pass gave no reason. It didn't check the node, for example because it acted on another node first, the pass failed, or repair can't run while cluster state isn't synced, as while a new node is launching. Or it skipped the node for a reason it doesn't report, such as a node nominated for pending pods.",
+	}
+	RepairBlockedReason = opmetrics.Label{
+		Name: repairBlockedReasonLabel,
+		Help: "Why node repair hasn't finished with a past-due node, and empty while the node isn't past due. It is replacing while a disruption has taken the node, and deleting while the node is being deleted for any reason. Otherwise it is why repair's latest pass held the node back, or unknown if that pass gave no reason. On the duration histogram, it is the reason the node had for the most time.",
+		// The past-due histogram breaks ties in this order and only picks values listed here, so list every reason a
+		// past-due node can have.
+		Values: []opmetrics.Value{
+			RepairBlockedBlockingPods,
+			RepairBlockedBreaker,
+			RepairBlockedBudget,
+			RepairBlockedNoReplacement,
+			RepairBlockedWaitingOnInitialization,
+			RepairBlockedReplacing,
+			RepairBlockedDeleting,
+			RepairBlockedUnknown,
+		},
 	}
 )
