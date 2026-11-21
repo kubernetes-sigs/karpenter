@@ -402,6 +402,81 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 
+	DescribeTable("a dynamic reserved + on-demand NodePool whose reservation is full",
+		func(mutate func(), decision disruption.Decision) {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))
+			mutate()
+			reservationID := "r-" + mostExpensiveInstance.Name
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+				Price: mostExpensiveOffering.Price / 1_000_000.0, Available: true,
+				Compatible: true, ReservationCapacity: 0, // full but healthy
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone:         mostExpensiveOffering.Zone(),
+					cloudprovider.ReservationIDLabel: reservationID,
+				}),
+			})
+			ExpectSingletonReconciled(ctx, pricingController)
+			nodePool := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved, v1.CapacityTypeOnDemand}},
+				},
+			}}}})
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:              nodePool.Name,
+				corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Zone(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}}, Status: v1.NodeClaimStatus{
+				ProviderID:  test.RandomProviderID(),
+				Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100")},
+			}})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+			}}}})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+			markUnhealthy(node)
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+
+			cmds := queue.GetCommands()
+			if decision == "" {
+				Expect(cmds).To(HaveLen(0))
+				Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+				return
+			}
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(decision))
+			Expect(cmds[0].Replacements).To(HaveLen(lo.Ternary(decision == disruption.ReplaceDecision, 1, 0)))
+		},
+		Entry("blocks when on-demand is transiently unavailable", func() {
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available = false
+			}
+		}, disruption.Decision("")),
+		Entry("terminates first when on-demand is not Compatible", func() {
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available, o.Compatible = false, false
+			}
+		}, disruption.TerminateFirstDecision),
+		Entry("terminates first when the instance type has no on-demand offering", func() {
+			mostExpensiveInstance.Offerings = nil
+		}, disruption.TerminateFirstDecision),
+		Entry("replaces-first when on-demand is available", func() {}, disruption.ReplaceDecision),
+	)
+
 	It("should carry a blocking pod in the terminate-first plan for a reserved NodePool whose reservation is full", func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))
 		reservationID := "r-" + mostExpensiveInstance.Name
@@ -630,6 +705,38 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+		})
+
+		It("should terminate-first when the template's on-demand offerings are not Compatible", func() {
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available = false
+				o.Compatible = false
+			}
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(0))
+		})
+
+		// e.g. a zone the type isn't offered in, or the NodeClass has no subnet in.
+		It("should terminate-first when the template's on-demand offerings are unavailable only outside the instance type's zones", func() {
+			zone := mostExpensiveOffering.Zone()
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone))
+			mostExpensiveInstance.Offerings = []*cloudprovider.Offering{{
+				Compatible:   true,
+				Price:        mostExpensiveOffering.Price,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: zone + "-elsewhere"}),
+			}}
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
 		// One NodePool's lookup failure must not stop repair for the rest of the cluster.
