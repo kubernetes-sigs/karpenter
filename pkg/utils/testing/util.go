@@ -18,8 +18,12 @@ package testing
 
 import (
 	"context"
+	"strings"
+	"sync"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/go-logr/zapr"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -32,4 +36,21 @@ func TestContextWithLogger(t zaptest.TestingT) context.Context {
 		zap.Development(),
 	)
 	return log.IntoContext(context.Background(), zapr.NewLogger(zaptest.NewLogger(t, opts)))
+}
+
+// CaptureLogs returns a context that keeps its default-level log lines in memory, and a function that returns the lines
+// so far that contain substr. Each line is funcr's text for one log call. Code under test may log from many goroutines.
+func CaptureLogs(ctx context.Context, substr string) (context.Context, func() []string) {
+	var mu sync.Mutex
+	var lines []string
+	logger := funcr.New(func(_, args string) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, args)
+	}, funcr.Options{})
+	return log.IntoContext(ctx, logger), func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return lo.Filter(lines, func(line string, _ int) bool { return strings.Contains(line, substr) })
+	}
 }

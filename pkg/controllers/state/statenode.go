@@ -247,6 +247,15 @@ func (in *StateNode) GetRepairResult(now time.Time) health.RepairResult {
 	return health.Resolve(in.repairPolicyMatches, now, rebootFinishedAt)
 }
 
+// repairBreakerNodePool returns the NodePool whose repair breaker counts the Node, or "" if none does. It reads the
+// Node's label, since the breaker counts Nodes, not NodeClaims.
+func (in *StateNode) repairBreakerNodePool() string {
+	if in.Node == nil {
+		return ""
+	}
+	return in.Node.Labels[v1.NodePoolLabelKey]
+}
+
 func (in *StateNode) Name() string {
 	if in.Node == nil {
 		return in.NodeClaim.Name
