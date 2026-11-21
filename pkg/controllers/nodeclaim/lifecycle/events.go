@@ -18,6 +18,8 @@ package lifecycle
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
@@ -58,6 +60,35 @@ func NodeClassNotReadyEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 		Reason:         events.NodeClassNotReady,
 		Message:        truncateMessage(fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, err.Error())),
 		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
+}
+
+func RebootDepartingPodsTerminatingEvent(nodeClaim *v1.NodeClaim, msg string) events.Event {
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.RebootDepartingPodsTerminating,
+		Message:        truncateMessage(fmt.Sprintf("Waiting to re-initialize after reboot: %s", msg)),
+		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
+}
+
+// RebootDepartingPodTerminatingEvent is published on a pod holding its node back from re-initializing after a reboot,
+// where the pod's owner, who can clear what's holding it, will look.
+func RebootDepartingPodTerminatingEvent(pod *corev1.Pod, node *corev1.Node, now time.Time) events.Event {
+	var why string
+	switch {
+	case len(pod.Finalizers) > 0:
+		why = fmt.Sprintf(", pending finalizers %s", strings.Join(pod.Finalizers, ", "))
+	case pod.DeletionTimestamp != nil && now.After(pod.DeletionTimestamp.Time):
+		why = ", past its termination grace period"
+	}
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.RebootDepartingPodsTerminating,
+		Message:        truncateMessage(fmt.Sprintf("Pod deleted before node %s rebooted is still terminating%s, blocking the node from re-initializing", node.Name, why)),
+		DedupeValues:   []string{string(pod.UID)},
 	}
 }
 

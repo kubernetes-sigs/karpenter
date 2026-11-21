@@ -52,7 +52,9 @@ func (p *Provisioner) gatherResourceSlices(ctx context.Context, stateNodes []*st
 		if n.Node == nil {
 			continue
 		}
-		if n.Initialized() {
+		// A returning node is modeled from templates: every pod not tolerating the reboot fence was deleted before the
+		// reboot, and kubelet wipes its slices on startup.
+		if n.Initialized() && !n.RebootReturning() {
 			includedNodeNames.Insert(n.Name())
 		}
 	}

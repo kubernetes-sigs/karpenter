@@ -139,7 +139,7 @@ func (d *draExistingNode) InstanceTypes() []dynamicresources.InstanceTypeID {
 
 func (d *draExistingNode) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	// Initialized nodes have their devices published in-cluster; uninitialized nodes are represented by templates.
-	if d.en.Initialized() || d.instanceType == nil {
+	if (d.en.Initialized() && !d.en.RebootReturning()) || d.instanceType == nil {
 		return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{}
 	}
 	return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{

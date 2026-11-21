@@ -2612,6 +2612,51 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
+		It("should consolidate onto a healthy node without capacity for pending pods that go back to a rebooting node", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+			extraNodeClaims, extraNodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: nodeClaims[0].Labels},
+				Status:     v1.NodeClaimStatus{Allocatable: nodeClaims[0].Status.Allocatable},
+			})
+			extraNodeClaims[0].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			nodeClaims, nodes = append(nodeClaims, extraNodeClaims...), append(nodes, extraNodes...)
+			rebooting, healthy := 0, 1
+			departing := replicaSetPod()
+			departing.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("30")}
+			// The departing pod's replacement, which provisioning places back on the rebooting node.
+			returning := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("30")},
+			}})
+			moving := replicaSetPod()
+			moving.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}
+			pinned := replicaSetPod()
+			pinned.Annotations = lo.Assign(pinned.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			// Leaves the healthy node room for the moving pod but not the returning one.
+			pinned.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")}
+			ExpectApplied(ctx, env.Client, departing, returning, moving, pinned, nodePool)
+			for i := range nodes {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			ExpectManualBinding(ctx, env.Client, departing, nodes[rebooting])
+			ExpectManualBinding(ctx, env.Client, pinned, nodes[healthy])
+			ExpectManualBinding(ctx, env.Client, moving, nodes[2])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectRebooting(ctx, env.Client, env.Clock, v1.RebootReasonRequested, nodeClaims[rebooting], nodes[rebooting])
+			ExpectDeletionTimestampSet(ctx, env.Client, departing)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[rebooting]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[rebooting]))
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+			Expect(cmds[0].Replacements).To(BeEmpty())
+			Expect(lo.Map(cmds[0].Candidates, func(c *disruption.Candidate, _ int) string { return c.Name() })).To(ConsistOf(nodes[2].Name))
+			destinations := lo.FilterMap(cmds[0].Results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) (string, bool) {
+				return n.Name(), lo.ContainsBy(n.Pods, func(p *corev1.Pod) bool { return p.UID == moving.UID })
+			})
+			Expect(destinations).To(ConsistOf(nodes[healthy].Name))
+		})
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()

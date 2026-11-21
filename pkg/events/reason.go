@@ -52,9 +52,10 @@ const (
 	FailedConsistencyCheck = "FailedConsistencyCheck"
 
 	// nodeclaim/lifecycle
-	InsufficientCapacityError = "InsufficientCapacityError"
-	UnregisteredTaintMissing  = "UnregisteredTaintMissing"
-	NodeClassNotReady         = "NodeClassNotReady"
+	InsufficientCapacityError      = "InsufficientCapacityError"
+	UnregisteredTaintMissing       = "UnregisteredTaintMissing"
+	RebootDepartingPodsTerminating = "RebootDepartingPodsTerminating"
+	NodeClassNotReady              = "NodeClassNotReady"
 
 	// state/informer/vpa
 	PredictionTargetUnsupported = "PredictionTargetUnsupported"

@@ -65,8 +65,11 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	candidateNames := sets.New[string](lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
 	deletingNodes := nodes.Deleting()
+	// A returning node isn't a destination: its capacity only exists once it returns, and planning onto it would hide
+	// the alternatives (e.g. a replacement) behind a plan that can't proceed. Provisioning deliberately differs: it counts
+	// that capacity as real so it doesn't launch nodes for the pods that will go back to it (see returningPendingPods).
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
-		return !candidateNames.Has(n.Name())
+		return !candidateNames.Has(n.Name()) && !n.RebootReturning()
 	})
 
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
@@ -82,6 +85,11 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
+	returning, err := returningPendingPods(ctx, cluster, provisioner, candidateNames, pods)
+	if err != nil {
+		return scheduling.Results{}, err
+	}
+	pods = lo.Reject(pods, func(p *corev1.Pod, _ int) bool { return returning.Has(p.UID) })
 
 	// candidatePods are the pods on consolidation candidate nodes that we will reschedule. Their UIDs feed
 	// deletingPodUIDs below so the DRA allocator frees the devices they hold and re-allocates their claims onto the
@@ -163,6 +171,48 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		}
 	}
 	return results, nil
+}
+
+// returningPendingPods returns the pending pods provisioning places on returning nodes. Disruption doesn't plan onto
+// returning nodes, so without this those pods, which are waiting for the node to come back, would need new capacity in
+// every simulation while a node reboots.
+func returningPendingPods(ctx context.Context, cluster *state.Cluster, provisioner *provisioning.Provisioner, candidateNames sets.Set[string], pods []*corev1.Pod) (sets.Set[types.UID], error) {
+	// Only pay for this while a node is returning. The scheduler writes its placements into the state nodes it's given,
+	// so this needs its own copy, apart from the simulation's.
+	if len(pods) == 0 || !returningNode(cluster) {
+		return nil, nil
+	}
+	nodes := cluster.DeepCopyNodes()
+	ctx = log.IntoContext(ctx, operatorlogging.NopLogger)
+	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool { return !candidateNames.Has(n.Name()) })
+	opts := []scheduling.Options{scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy)}
+	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
+		opts = append(opts, scheduling.IgnorePreferences)
+	}
+	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, nil, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating scheduler, %w", err)
+	}
+	results, err := scheduler.Solve(ctx, pods)
+	if err != nil {
+		return nil, fmt.Errorf("scheduling pending pods, %w", err)
+	}
+	returning := sets.New[types.UID]()
+	for _, n := range results.ExistingNodes {
+		if n.RebootReturning() {
+			returning.Insert(lo.Map(n.Pods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
+		}
+	}
+	return returning, nil
+}
+
+func returningNode(cluster *state.Cluster) bool {
+	for n := range cluster.Nodes() {
+		if n.RebootReturning() {
+			return true
+		}
+	}
+	return false
 }
 
 // SimulateSchedulingWithReservedFallback runs the candidate-gone scheduling simulation for a single voluntary-disruption

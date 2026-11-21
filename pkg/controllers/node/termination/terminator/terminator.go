@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -93,19 +94,14 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 type DrainOption func(*drainOptions)
 
 type drainOptions struct {
-	leaveResidualPods bool
-	skipDaemonSets    bool
+	fence *corev1.Taint
 }
 
-// LeaveResidualPods only evicts, and leaves pods still on the node once the deadline passes. Without it, pods whose
-// grace period would extend past the deadline are deleted, bypassing PDBs and do-not-disrupt.
-func LeaveResidualPods() DrainOption {
-	return func(o *drainOptions) { o.leaveResidualPods = true }
-}
-
-// SkipDaemonSets leaves DaemonSet pods on the node.
-func SkipDaemonSets() DrainOption {
-	return func(o *drainOptions) { o.skipDaemonSets = true }
+// Fence drains around the given taint instead of karpenter.sh/disrupted. A drain leaves the pods that tolerate its
+// fence, since their replacements could bind straight back to the node, and drains every other pod, DaemonSets
+// included.
+func Fence(taint corev1.Taint) DrainOption {
+	return func(o *drainOptions) { o.fence = &taint }
 }
 
 // Drain evicts pods from the node and returns true when all pods are evicted
@@ -115,14 +111,19 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	for _, opt := range opts {
 		opt(o)
 	}
-	timeout := o.leaveResidualPods && nodeGracePeriodExpirationTime != nil
 	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node.Name)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
 	waiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) && (!o.skipDaemonSets || !podutil.IsOwnedByDaemonSet(p))
+		if o.fence != nil {
+			return !podutil.IsTerminal(p) && !podutil.IsStuckTerminating(p, t.clock) && !podutil.IsOwnedByNode(p) &&
+				scheduling.Taints([]corev1.Taint{*o.fence}).ToleratesPod(p) != nil
+		}
+		return podutil.IsWaitingEviction(p, t.clock)
 	})
+	drainErr := NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
+	drainErr.Undeleted = lo.CountBy(waiting, func(p *corev1.Pod) bool { return !podutil.IsTerminating(p) })
 
 	// Split waiting pods into two disjoint sets:
 	//   - deleteEligible: past the delete-by-deadline threshold. Enqueue across ALL tiers
@@ -137,30 +138,26 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	// naturally.
 	var deleteEligible, gracefulCandidates []*corev1.Pod
 	for _, p := range waiting {
-		if !o.leaveResidualPods && needsDeleteByDeadline(p, nodeGracePeriodExpirationTime, t.clock) {
+		if needsDeleteByDeadline(p, nodeGracePeriodExpirationTime, t.clock) {
 			deleteEligible = append(deleteEligible, p)
 		} else {
 			gracefulCandidates = append(gracefulCandidates, p)
 		}
 	}
 	if len(deleteEligible) > 0 {
-		t.evictionQueue.Add(nodeGracePeriodExpirationTime, deleteEligible...)
+		t.evictionQueue.add(queueItem{deadline: nodeGracePeriodExpirationTime, fenced: o.fence != nil}, deleteEligible...)
 	}
 	podGroups := t.groupPodsByPriority(gracefulCandidates)
 	for _, group := range podGroups {
 		if len(group) > 0 {
-			if timeout {
-				t.evictionQueue.AddWithTimeout(*nodeGracePeriodExpirationTime, group...)
-			} else {
-				t.evictionQueue.Add(nodeGracePeriodExpirationTime, group...)
-			}
-			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
+			t.evictionQueue.add(queueItem{deadline: nodeGracePeriodExpirationTime, fenced: o.fence != nil}, group...)
+			return drainErr
 		}
 	}
 	// No graceful candidates remain, but we may still be waiting on the
 	// delete-eligible batch to finish being removed.
 	if len(deleteEligible) > 0 {
-		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
+		return drainErr
 	}
 	return nil
 }

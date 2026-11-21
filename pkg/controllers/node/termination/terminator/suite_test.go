@@ -119,6 +119,40 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectMetricCounterValue(terminator.PodsEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
+		It("should leave an enqueued pod that tolerates the disrupted taint", func() {
+			pod.Spec.Tolerations = []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpExists}}
+			ExpectApplied(ctx, env.Client, pod, node)
+			queue.Add(nil, pod)
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			Expect(recorder.Calls(events.Evicted)).To(Equal(0))
+			Expect(queue.Has(pod)).To(BeTrue())
+		})
+		It("should evict a pod that tolerates the disrupted taint when a fenced drain enqueued it", func() {
+			pod.Spec.Tolerations = []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpExists}}
+			ExpectApplied(ctx, env.Client, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			Expect(terminator.NewTerminator(env.Clock, env.Client, queue, recorder).Drain(ctx, node, nil, terminator.Fence(v1.RebootingNoScheduleTaint))).To(HaveOccurred())
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
+		})
+		It("should leave a pod that tolerates the disrupted taint when an unfenced drain also enqueued it", func() {
+			pod.Spec.Tolerations = []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpExists}}
+			ExpectApplied(ctx, env.Client, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			queue.Add(nil, pod)
+			Expect(terminator.NewTerminator(env.Clock, env.Client, queue, recorder).Drain(ctx, node, nil, terminator.Fence(v1.RebootingNoScheduleTaint))).To(HaveOccurred())
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			Expect(recorder.Calls(events.Evicted)).To(Equal(0))
+		})
+		It("should keep a do-not-disrupt pod a fenced drain enqueued without evicting it", func() {
+			pod.Annotations = map[string]string{v1.DoNotDisruptAnnotationKey: "true"}
+			ExpectApplied(ctx, env.Client, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			Expect(terminator.NewTerminator(env.Clock, env.Client, queue, recorder).Drain(ctx, node, nil, terminator.Fence(v1.RebootingNoScheduleTaint))).To(HaveOccurred())
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			Expect(recorder.Calls(events.Evicted)).To(Equal(0))
+			Expect(queue.Has(pod)).To(BeTrue())
+		})
 		It("should succeed with no event when there are PDBs that allow an eviction", func() {
 			pdb = test.PodDisruptionBudget(test.PDBOptions{
 				Labels:         testLabels,
@@ -271,50 +305,6 @@ var _ = Describe("Eviction/Queue", func() {
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
-		})
-		It("should never force-delete a pod queued with a timeout", func() {
-			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			queue.AddWithTimeout(env.Clock.Now().Add(time.Minute), pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(ExpectExists(ctx, env.Client, pod).DeletionTimestamp.IsZero()).To(BeTrue())
-			Expect(queue.Has(pod)).To(BeTrue())
-		})
-		It("should drop a pod queued with a timeout once the timeout passes, leaving it in place", func() {
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			queue.AddWithTimeout(env.Clock.Now().Add(time.Minute), pod)
-			env.Clock.Step(2 * time.Minute)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(queue.Has(pod)).To(BeFalse())
-			Expect(ExpectExists(ctx, env.Client, pod).DeletionTimestamp.IsZero()).To(BeTrue())
-			Expect(recorder.Calls(events.Disrupted)).To(Equal(0))
-		})
-		It("should replace a timeout with a force-delete deadline", func() {
-			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			queue.AddWithTimeout(env.Clock.Now().Add(-time.Minute), pod)
-			nodeTerminationTime := env.Clock.Now().Add(time.Minute)
-			queue.Add(&nodeTerminationTime, pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(ExpectExists(ctx, env.Client, pod).DeletionTimestamp.IsZero()).To(BeFalse())
-			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
-		})
-		It("should not downgrade a force-delete deadline to a timeout", func() {
-			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			nodeTerminationTime := env.Clock.Now().Add(time.Minute)
-			queue.Add(&nodeTerminationTime, pod)
-			queue.AddWithTimeout(env.Clock.Now().Add(time.Hour), pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(ExpectExists(ctx, env.Client, pod).DeletionTimestamp.IsZero()).To(BeFalse())
 		})
 		It("should clean up the queue entry when the pod is already gone", func() {
 			nodeTerminationTime := env.Clock.Now().Add(time.Minute * 1)
