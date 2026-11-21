@@ -56,7 +56,7 @@ var _ = Describe("Launched Registry", func() {
 
 		// Past the 5m launch timeout
 		for range 10 {
-			ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim)
+			Expect(apierrors.IsTooManyRequests(ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim))).To(BeTrue())
 			env.Clock.Step(time.Minute)
 		}
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
@@ -83,7 +83,7 @@ var _ = Describe("Launched Registry", func() {
 		nodeClaim.Status.ProviderID = "" // not launched yet
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		throttle.Store(true)
-		ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim)
+		Expect(apierrors.IsTooManyRequests(ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim))).To(BeTrue())
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		launchResult, ok := registry.Get(nodeClaim.UID)
 		Expect(ok).To(BeTrue())
