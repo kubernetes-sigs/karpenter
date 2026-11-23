@@ -36,9 +36,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
-// These specs pin down offeringsToReserve's handling of a reserved offering whose ReservationCapacity is 0 once
+// These specs pin down the scheduler's handling of a reserved offering whose ReservationCapacity is 0 once
 // reservation capacity and offering availability are decoupled at the provider (a full-but-healthy reservation is
-// Available=true, ReservationCapacity=0). The invariant under test: a full reservation is treated as non-reservable
+// Available=true, ReservationCapacity=0).
+// The instance type filter skips a full reservation, and offeringsToReserve doesn't reserve one.
+// The invariant under test: a full reservation is treated as non-reservable
 // (skipped), exactly as an unavailable offering would be — which (a) preserves strict/provisioning fall-back behavior,
 // (b) keeps normal reserved scheduling working when capacity remains, (c) still respects Available=false regardless of
 // capacity, and (d) in fallback mode leaves the reserved-only NodeClaim intact (which is what disruption terminate-first
@@ -107,10 +109,10 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		pod := smallPod()
 		results := solveFallback(pod)
 
-		// Fallback mode used to build a reserved-only NodeClaim holding no reservation (a phantom that would ICE at
-		// launch). Now a full reservation with no fallback fails with a plain error, so the pod falls through — and with
-		// no other NodePool it simply pends. This mirrors the pre-decouple behavior when a full reservation was
-		// Available=false and was never offered here. It is NOT a ReservedOfferingError (that would poison fallthrough).
+		// Fallback mode used to build a reserved-only NodeClaim holding no reservation (a phantom that would ICE at launch).
+		// Now the instance type filter rejects an instance type whose only compatible offering is a full reservation, so the pod falls through with an InstanceTypeFilterError, and with no other NodePool it simply pends.
+		// This mirrors the pre-decouple behavior when a full reservation was Available=false and was never offered here.
+		// It is NOT a ReservedOfferingError (that would poison fallthrough).
 		Expect(results.NewNodeClaims).To(HaveLen(0))
 		Expect(results.PodErrors).To(HaveKey(pod))
 		Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
@@ -188,8 +190,8 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		Expect(err).ToNot(HaveOccurred())
 		results, err := s.Solve(injection.WithControllerName(ctx, "provisioner"), []*corev1.Pod{pod})
 		Expect(err).ToNot(HaveOccurred())
-		// No on-demand mislaunch: no NodeClaim is created. The pod fails with a plain error, not a ReservedOfferingError,
-		// since there's no capacity to wait for this loop.
+		// No on-demand mislaunch: no NodeClaim is created.
+		// The instance type filter rejects the instance type, so the pod fails with an InstanceTypeFilterError, not a ReservedOfferingError, since there's no capacity to wait for this loop.
 		Expect(results.NewNodeClaims).To(HaveLen(0))
 		Expect(results.PodErrors).To(HaveKey(pod))
 		Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
@@ -242,8 +244,8 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 			pod := smallPod()
 			results := solveWith([]*corev1.Pod{pod}) // default fallback mode
 
-			// In fallback mode the full reservation doesn't satisfy the pod (plain error), so it falls through to the
-			// lower-weight on-demand NodePool — the same fallthrough that happened pre-decouple via Available=false.
+			// In fallback mode the instance type filter rejects the reserved NodePool's instance type, whose only compatible offering is the full reservation, so the pod falls through to the lower-weight on-demand NodePool.
+			// That is the same fallthrough that happened pre-decouple via Available=false.
 			Expect(results.PodErrors).ToNot(HaveKey(pod))
 			Expect(results.NewNodeClaims).To(HaveLen(1))
 			Expect(results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
