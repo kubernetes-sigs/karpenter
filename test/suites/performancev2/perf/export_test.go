@@ -16,4 +16,10 @@ limitations under the License.
 
 package perf
 
+import corev1 "k8s.io/api/core/v1"
+
 func Resized(p *Provider, s *Scenario, sizes map[Vector]int) bool { return p.resized(s, sizes) }
+
+func Utilization(nodes []corev1.Node, pods []corev1.Pod) (cpu, memory float64) {
+	return utilization(nodes, pods)
+}
