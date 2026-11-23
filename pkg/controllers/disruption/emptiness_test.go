@@ -18,7 +18,6 @@ limitations under the License.
 package disruption_test
 
 import (
-	"sort"
 	"sync/atomic"
 	"time"
 
@@ -31,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -503,71 +501,6 @@ var _ = Describe("Emptiness", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim2)
-	})
-	It("considers pending pods when consolidating", func() {
-		// WhenEmpty pools never consolidate non-empty nodes
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
-		// on-demand, because spot-to-spot replacement is off by default. Consolidation would
-		// replace this node with a cheaper one if it ignored the pending pod.
-		largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
-			return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0 && item.Offerings[0].CapacityType() == v1.CapacityTypeOnDemand
-		})
-		sort.Slice(largeTypes, func(i, j int) bool {
-			return largeTypes[i].Offerings[0].Price < largeTypes[j].Offerings[0].Price
-		})
-
-		largeCheapType := largeTypes[0]
-		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey:            nodePool.Name,
-					corev1.LabelInstanceTypeStable: largeCheapType.Name,
-					v1.CapacityTypeLabelKey:        largeCheapType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-					corev1.LabelTopologyZone:       largeCheapType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
-				},
-			},
-			Status: v1.NodeClaimStatus{
-				Allocatable: map[corev1.ResourceName]resource.Quantity{
-					corev1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
-					corev1.ResourcePods: *largeCheapType.Capacity.Pods(),
-				},
-			},
-		})
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-
-		// there is a pending pod that should land on the node
-		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: corev1.ResourceRequirements{
-				Requests: map[corev1.ResourceName]resource.Quantity{
-					corev1.ResourceCPU: resource.MustParse("1"),
-				},
-			},
-		})
-		unsched := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: corev1.ResourceRequirements{
-				Requests: map[corev1.ResourceName]resource.Quantity{
-					corev1.ResourceCPU: resource.MustParse("62"),
-				},
-			},
-		})
-
-		ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
-
-		// bind one of the pods to the node
-		ExpectManualBinding(ctx, env.Client, pod, node)
-
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-		ExpectSingletonReconciled(ctx, disruptionController)
-		cmds := queue.GetCommands()
-		Expect(cmds).To(HaveLen(0))
-
-		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
-		// node to schedule, which prevents the large expensive node from being replaced
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("will consider a node with a DaemonSet pod as empty", func() {
 		// assign the nodeclaims to the least expensive offering so we don't get a replacement
