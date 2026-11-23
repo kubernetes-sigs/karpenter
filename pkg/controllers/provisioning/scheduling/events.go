@@ -61,6 +61,17 @@ func NoCompatibleInstanceTypes(np *v1.NodePool, minValuesIncompatibleError bool)
 	}
 }
 
+func NoCapacity(np *v1.NodePool, resourceName corev1.ResourceName) events.Event {
+	return events.Event{
+		InvolvedObject: np,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.NoCapacity,
+		Message:        fmt.Sprintf("NodePool has no capacity due to zero %s limit", resourceName),
+		DedupeValues:   []string{string(np.UID)},
+		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
 func PodFailedToScheduleEvent(pod *corev1.Pod, err error) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
