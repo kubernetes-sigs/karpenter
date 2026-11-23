@@ -243,6 +243,12 @@ func (r *Run) nodes() []corev1.Node {
 	return out
 }
 
+func (r *Run) nodeClaims() []v1.NodeClaim {
+	ncs := &v1.NodeClaimList{}
+	Expect(r.Provider.Client.List(r.ctx, ncs, client.HasLabels{v1.NodePoolLabelKey})).To(Succeed())
+	return lo.Filter(ncs.Items, func(nc v1.NodeClaim, _ int) bool { return r.nodePools.Has(nc.Labels[v1.NodePoolLabelKey]) })
+}
+
 func (r *Run) healthyPods() int {
 	n := 0
 	for _, p := range r.scenarioPods() {

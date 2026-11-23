@@ -42,6 +42,9 @@ type Result struct {
 	PodsDisrupted  uint64 `json:"pods_disrupted"`
 	Rounds         int    `json:"rounds"`
 
+	ConsolidationTimedOut bool     `json:"consolidation_timed_out,omitempty"`
+	Timeline              Timeline `json:"timeline,omitzero"`
+
 	ReservedCPUUtil    float64 `json:"reserved_cpu_utilization"`
 	ReservedMemoryUtil float64 `json:"reserved_memory_utilization"`
 

@@ -83,7 +83,8 @@ func (p *Phase) AwaitConsolidation(fromPods, toPods int, timeout time.Duration) 
 	start, last, rounds, inRound, prev := time.Now(), time.Now(), 0, false, len(p.r.nodes())
 	f := p.src.latest()
 	decisions, passesAtLast := disruptionDecisions(f), singleNodePasses(f)
-	for time.Since(start) < timeout && (time.Since(last) < consolidationQuiet || singleNodePasses(f) <= passesAtLast) {
+	settled := func() bool { return time.Since(last) >= consolidationQuiet && singleNodePasses(f) > passesAtLast }
+	for !settled() && time.Since(start) < timeout {
 		n := len(p.r.nodes())
 		f = p.src.latest()
 		if d := disruptionDecisions(f); p.r.disrupting() > 0 || n != prev || d != decisions {
@@ -97,7 +98,11 @@ func (p *Phase) AwaitConsolidation(fromPods, toPods int, timeout time.Duration) 
 		prev = n
 		time.Sleep(settlePoll)
 	}
-	return p.end(&Result{Kind: "consolidation", Pods: toPods, PodsNetChange: toPods - fromPods, Rounds: rounds}, last)
+	rep := &Result{Kind: "consolidation", Pods: toPods, PodsNetChange: toPods - fromPods, Rounds: rounds, ConsolidationTimedOut: !settled()}
+	if rep.ConsolidationTimedOut {
+		GinkgoWriter.Printf("perf %s: consolidation didn't settle within %s\n", p.id, timeout)
+	}
+	return p.end(rep, last)
 }
 
 func (p *Phase) end(rep *Result, lastActivity time.Time) *Result {
@@ -114,6 +119,8 @@ func (p *Phase) end(rep *Result, lastActivity time.Time) *Result {
 	rep.Resources, rep.LatencyStats, rep.Counters, rep.Gauges, rep.Commit = res, hists, counters, gauges, p.src.commit
 	rep.Nodes, rep.NodesNetChange = len(nodes), len(nodes)-p.initialNodes
 	rep.ReservedCPUUtil, rep.ReservedMemoryUtil = p.r.reserved()
+	rep.Timeline = timeline(p.start, p.r.scenarioPods(), nodes, p.r.nodeClaims())
+	keepMixPrices(rep.Gauges, rep.Timeline.NodeMix)
 	for k, v := range counters {
 		if strings.HasPrefix(k, "karpenter_pods_drained_total") {
 			rep.PodsDisrupted += v
