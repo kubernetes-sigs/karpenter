@@ -6,17 +6,33 @@ on:
 permissions:
   contents: read
 jobs:
-  perf-periodic:
+  scenarios:
     if: github.event_name != 'schedule' || github.repository == 'kubernetes-sigs/karpenter'
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache-dependency-path: "**/go.sum"
+    # Every scenario kwok-ci enables, from the same levels the suite runs, so a new scenario needs no workflow change.
+    # perf-smoke runs a fixed per-PR subset; perfv1's migrated scenarios run only here, as perfv1 ran after merge.
+    - id: list
+      run: echo "list=$(go run ./test/suites/performancev2/cmd/inventory -list kwok-ci)" >> "$GITHUB_OUTPUT"
+  perf-periodic:
+    needs: scenarios
     strategy:
       fail-fast: false
       matrix:
-        scenario: ["pods", "nodepools", "topology"]
+        scenario: ${{ fromJSON(needs.scenarios.outputs.list) }}
         run: [1, 2, 3]
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performancev2
-      focus: ${{ matrix.scenario }}
+      # Anchored, so "pods" doesn't also run a scenario whose name starts with it.
+      focus: "Performance ${{ matrix.scenario }} "
       test_name: perf-periodic ${{ matrix.scenario }} ${{ matrix.run }}
       perf_env: KARPENTER_PERF_PROVIDER=kwok-ci
       retention_days: 90

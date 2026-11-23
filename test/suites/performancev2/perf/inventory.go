@@ -36,7 +36,8 @@ func (s *Scenario) phase(name string) (PhaseSpec, bool) {
 }
 
 // Validate checks that every level a provider sets names a declared scenario phase, that quantile bounds don't
-// decrease, and that a phase doesn't make two measures of the same thing both Stable.
+// decrease, that a phase doesn't make two measures of the same thing both Stable, and that the provider meets every
+// enabled scenario's Requires.
 func Validate(p *Provider, scenarios []Scenario) error {
 	var errs []string
 	for id, gates := range p.Levels {
@@ -44,6 +45,13 @@ func Validate(p *Provider, scenarios []Scenario) error {
 			errs = append(errs, fmt.Sprintf("provider %s sets levels for %q, which no scenario declares", p.Name, id))
 		}
 		errs = append(errs, validateGates(p.Name, id, gates)...)
+	}
+	for i := range scenarios {
+		if s := &scenarios[i]; s.Requires != nil && p.enabled(s) {
+			if err := s.Requires(p); err != nil {
+				errs = append(errs, fmt.Sprintf("provider %s enables scenario %s, which it can't run: %v", p.Name, s.Name, err))
+			}
+		}
 	}
 	sort.Strings(errs)
 	if len(errs) > 0 {
@@ -149,6 +157,11 @@ func CheckEvidence(p *Provider) error {
 			case len(e.catches(g.Metric, g.Bound)) == 0:
 				errs = append(errs, fmt.Sprintf("%s %s is Stable but no planted regression breaches %g", id, g.Metric.Name, g.Bound))
 			}
+			for name, v := range e.Controls {
+				if ok && breaches(g.Metric, v, g.Bound) {
+					errs = append(errs, fmt.Sprintf("%s %s is Stable at %g, which negative control %s breaches (%g)", id, g.Metric.Name, g.Bound, name, v))
+				}
+			}
 		}
 	}
 	sort.Strings(errs)
@@ -184,8 +197,14 @@ func writeLevels(b *strings.Builder, p *Provider, scenarios []Scenario) {
 	if p.Summary != "" {
 		fmt.Fprintf(b, "%s\n\n", p.Summary)
 	}
-	if c := p.Calibration; c != nil && c.Source != "" {
-		fmt.Fprintf(b, "Calibration: %s, baseline %s, generated %s.\n\n", c.Source, c.Baseline, c.Generated.Format("2006-01-02"))
+	if prov := p.Calibration.Provenance(); len(prov) > 0 {
+		b.WriteString("Calibration:\n")
+		names := lo.Keys(prov)
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(b, "- %s: %s\n", name, prov[name])
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("| phase | kind | metric | level | bound | n | median | CV | MDE50 | MDE80 | FPR | catches |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for i := range scenarios {

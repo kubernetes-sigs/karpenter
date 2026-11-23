@@ -17,7 +17,7 @@ limitations under the License.
 // calibrate reduces a directory of performancev2 reports into the provider's calibration file: baseline
 // statistics per phase and metric, a suggested bound, and the value each planted regression reached.
 //
-//	go run ./test/suites/performancev2/cmd/calibrate -dir runs/ -source "EKS, tier-xl control plane" > test/suites/performancev2/calibration/kwok.json
+//	go run ./test/suites/performancev2/cmd/calibrate -dir runs/ -source "EKS, tier-xl control plane" -out test/suites/performancev2/calibration/kwok
 package main
 
 import (

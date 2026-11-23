@@ -24,12 +24,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 )
 
-var All = []perf.Scenario{Pods, NodePools, Topology}
+var All = []perf.Scenario{
+	Pods,
+	NodePools,
+	Topology,
+}
 
 var Pods = perf.Scenario{
 	Name:    "pods",
@@ -48,11 +51,12 @@ var Pods = perf.Scenario{
 		r.AwaitNodePoolsReady(5 * time.Minute)
 		scaleOut := r.StartPhase("scaleOut")
 		r.Create(small, large)
-		scaleOut.AwaitScaleOut(2*half, 15*time.Minute)
+		scaleOut.AwaitScaleOut(r.Replicas(), 15*time.Minute)
 
 		consolidation := r.StartPhase("consolidation")
+		from := r.Replicas()
 		r.Scale(half*7/10, small, large)
-		consolidation.AwaitConsolidation(2*half, 2*(half*7/10), 20*time.Minute)
+		consolidation.AwaitConsolidation(from, r.Replicas(), 20*time.Minute)
 	},
 }
 
@@ -87,7 +91,7 @@ var NodePools = perf.Scenario{
 
 		scheduling := r.StartPhase("scheduling")
 		r.Create(app)
-		scheduling.AwaitScaleOut(pods, time.Hour)
+		scheduling.AwaitScaleOut(r.Replicas(), time.Hour)
 
 		r.Restart("startup", 20*time.Minute)
 	},
@@ -102,9 +106,7 @@ var Topology = perf.Scenario{
 	},
 	Run: func(r *perf.Run) {
 		n := r.Size(perf.VectorPods)
-		// Pin to the run's NodePool so topology spread only counts the run's nodes as domains; otherwise a real
-		// cluster's own nodes (in zones no KWOK instance type offers) become domains the pods can never reach.
-		own := test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: r.NodePool.Name})
+		own := ownPool(r)
 		anti := r.Deployment("anti", n/10, "900m", "3100Mi", own, test.WithPodAntiAffinityHostname())
 		zone := r.Deployment("zone", n*45/100, "900m", "3100Mi", own, zoneSpread())
 		host := r.Deployment("host", n-n/10-n*45/100, "900m", "3100Mi", own, test.WithHostnameSpread())
@@ -113,7 +115,7 @@ var Topology = perf.Scenario{
 		r.AwaitNodePoolsReady(5 * time.Minute)
 		scaleOut := r.StartPhase("scaleOut")
 		r.Create(anti, zone, host)
-		scaleOut.AwaitScaleOut(n, 20*time.Minute)
+		scaleOut.AwaitScaleOut(r.Replicas(), 20*time.Minute)
 	},
 }
 

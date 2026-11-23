@@ -17,10 +17,13 @@ limitations under the License.
 package perf_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -127,6 +130,20 @@ var _ = Describe("Inventory", func() {
 		_, err := perf.Inventory([]perf.Scenario{scenario}, provider(perf.Levels{"pods/scaleOut": {perf.HeapMB.Stable(95)}}, ev))
 		Expect(err).To(MatchError(ContainSubstring("no planted regression breaches")))
 	})
+	It("rejects a provider that enables a scenario it can't run", func() {
+		needs := scenario
+		needs.Requires = func(p *perf.Provider) error {
+			if len(p.Catalog.Families) < 2 {
+				return fmt.Errorf("needs two Catalog.Families")
+			}
+			return nil
+		}
+		p := provider(perf.Levels{"pods/scaleOut": {}}, ev)
+		Expect(perf.Validate(p, []perf.Scenario{needs})).To(MatchError(ContainSubstring("enables scenario pods, which it can't run: needs two Catalog.Families")))
+		p.Catalog.Families = []string{"c", "m"}
+		Expect(perf.Validate(p, []perf.Scenario{needs})).To(Succeed())
+		Expect(perf.Validate(provider(perf.Levels{}, ev), []perf.Scenario{needs})).To(Succeed(), "a scenario the provider doesn't enable isn't checked")
+	})
 	It("lists provider metrics with their alarm text", func() {
 		m := perf.Metric{Name: "api_calls", Kind: perf.KindResource, Unit: "calls", Upper: true, Measures: "API calls.", OnBreach: "Check caches."}
 		p := provider(perf.Levels{"pods/scaleOut": {m.Experimental(100)}}, nil)
@@ -162,6 +179,11 @@ var _ = Describe("Result accessors", func() {
 		Expect(r.Histogram("x", nil).P99).To(Equal(3.0))
 		Expect(r.Histogram("x", map[string]string{"a": "1"}).P99).To(Equal(2.0))
 	})
+	It("lists every matching histogram series", func() {
+		Expect(r.Histograms("x", nil)).To(HaveLen(2))
+		Expect(r.Histograms("x", map[string]string{"a": "2"})).To(ConsistOf(HaveField("Count", BeEquivalentTo(9))))
+		Expect(r.Histograms("y", nil)).To(BeEmpty())
+	})
 })
 
 var _ = Describe("env.NodePool", func() {
@@ -176,5 +198,113 @@ var _ = Describe("env.NodePool", func() {
 	It("references an unstructured NodeClass", func() {
 		ref := env.NodePool(env.KWOKNodeClass()).Spec.Template.Spec.NodeClassRef
 		Expect(ref.Kind).To(Equal("KWOKNodeClass"))
+	})
+})
+
+var _ = Describe("Calibration rule", func() {
+	It("bounds above the larger of 1.2x the slowest sample and median + 2.33 sd, counting controls as samples", func() {
+		e := perf.MetricEvidence{N: 5, Median: 100, Min: 95, Max: 110, CV: 0.02}
+		Expect(perf.SuggestBound(perf.HeapMB, e)).To(Equal(132.0))
+		e.Controls = map[string]float64{"rv2013": 150}
+		Expect(perf.SuggestBound(perf.HeapMB, e)).To(Equal(180.0))
+		Expect(perf.SuggestBound(perf.HeapMB, perf.MetricEvidence{N: 5, Median: 100, Min: 90, Max: 110, CV: 0.5})).To(Equal(217.0))
+	})
+	It("bounds utilization below the smaller of the lowest sample / 1.15 and median - 2.33 sd", func() {
+		Expect(perf.SuggestBound(perf.CPUUtil, perf.MetricEvidence{N: 5, Median: 0.8, Min: 0.79, Max: 0.81, CV: 0.01})).To(Equal(0.687))
+	})
+	It("keeps pod latency in whole seconds, at least 1.5x the slowest sample, and counts in whole units", func() {
+		Expect(perf.SuggestBound(perf.PodReady.P95, perf.MetricEvidence{N: 5, Median: 5, Min: 5, Max: 5})).To(Equal(8.0))
+		Expect(perf.SuggestBound(perf.PodReady.Max, perf.MetricEvidence{N: 5, Median: 5, Min: 5, Max: 6})).To(Equal(8.0))
+		Expect(perf.SuggestBound(perf.Nodes, perf.MetricEvidence{N: 5, Median: 100, Min: 100, Max: 101})).To(Equal(122.0))
+	})
+	It("suggests Stable only with evidence and a catch by 10%, never on Experimental-only metrics or settle wall time", func() {
+		ev := func(variants map[string]float64) perf.MetricEvidence {
+			return perf.MetricEvidence{N: 5, Median: 10, Min: 10, Max: 10, CV: 0.01, Variants: variants, Controls: map[string]float64{"rv2013": 10}}
+		}
+		c := &perf.Calibration{
+			Kinds: map[string]string{"s/scaleOut": "scale-out", "s/consolidation": "consolidation"},
+			Phases: map[string]map[string]perf.MetricEvidence{
+				"s/scaleOut": {"pod_ready_seconds_p95": ev(map[string]float64{"big": 100}), "pod_ready_seconds_p99": ev(map[string]float64{"thin": 15.5}),
+					"pod_ready_seconds_max": ev(map[string]float64{"big": 100}), "heap_mb": ev(map[string]float64{"big": 100})},
+				"s/consolidation": {"total_time_seconds": ev(map[string]float64{"big": 100})},
+			},
+		}
+		tiers := map[string]string{}
+		for id, ss := range perf.SuggestLevels(c, "s") {
+			for _, s := range ss {
+				tiers[id+" "+s.Gate.Metric.Name] = string(s.Gate.Tier) + " " + s.Why
+			}
+		}
+		Expect(tiers).To(Equal(map[string]string{
+			"s/scaleOut pod_ready_seconds_p95":   "stable ",
+			"s/scaleOut pod_ready_seconds_p99":   "experimental no planted regression breaches it by 10%",
+			"s/scaleOut pod_ready_seconds_max":   "experimental pod_ready_seconds_max is Experimental only",
+			"s/scaleOut heap_mb":                 "experimental heap_mb is Experimental only",
+			"s/consolidation total_time_seconds": "experimental wall time of a consolidation phase",
+		}))
+		Expect(perf.FormatLevels(perf.SuggestLevels(c, "s"))).To(ContainSubstring(`"s/consolidation": {` + "\n\t\tperf.TotalTimeSeconds.Experimental(12),\n\t},"))
+	})
+	It("never counts a negative control as a catch, and fails a Stable bound a control breaches", func() {
+		e := perf.MetricEvidence{N: 5, Median: 60, Min: 58, Max: 62, CV: 0.02, Variants: map[string]float64{"reg": 90}, Controls: map[string]float64{"rv2013": 80}}
+		p := provider(perf.Levels{"pods/scaleOut": {perf.HeapMB.Stable(75)}}, map[string]map[string]perf.MetricEvidence{"pods/scaleOut": {"heap_mb": e}})
+		Expect(perf.CheckEvidence(p)).To(MatchError(ContainSubstring("negative control rv2013 breaches (80)")))
+		e.Variants = nil
+		p = provider(perf.Levels{"pods/scaleOut": {perf.HeapMB.Stable(85)}}, map[string]map[string]perf.MetricEvidence{"pods/scaleOut": {"heap_mb": e}})
+		Expect(perf.CheckEvidence(p)).To(MatchError(ContainSubstring("no planted regression breaches")))
+	})
+})
+
+var _ = Describe("Calibration files", func() {
+	It("splits by scenario and merges back with per-scenario provenance", func() {
+		c := &perf.Calibration{Provider: "kwok", Source: "eks", Baseline: "abc",
+			Phases: map[string]map[string]perf.MetricEvidence{"a/x": {"heap_mb": {N: 5}}, "b/y": {"heap_mb": {N: 3}}},
+			Kinds:  map[string]string{"a/x": "scale-out"}}
+		fsys := fstest.MapFS{}
+		for name, sc := range c.ByScenario() {
+			b, err := json.Marshal(sc)
+			Expect(err).ToNot(HaveOccurred())
+			fsys["cal/"+name+".json"] = &fstest.MapFile{Data: b}
+		}
+		Expect(fsys).To(HaveLen(2))
+		merged := perf.MustLoadCalibrations(fsys, "cal/*.json")
+		Expect(merged.Phases).To(HaveKey("a/x"))
+		Expect(merged.Phases).To(HaveKey("b/y"))
+		Expect(merged.Kinds).To(Equal(map[string]string{"a/x": "scale-out"}))
+		Expect(merged.Provenance()).To(HaveKeyWithValue("a", ContainSubstring("eks, baseline abc")))
+	})
+	It("loads a provider's single file alongside per-scenario files, and rejects a phase in both", func() {
+		file := func(c perf.Calibration) *fstest.MapFile {
+			b, err := json.Marshal(c)
+			Expect(err).ToNot(HaveOccurred())
+			return &fstest.MapFile{Data: b}
+		}
+		fsys := fstest.MapFS{
+			"cal/kwok.json":       file(perf.Calibration{Source: "old", Phases: map[string]map[string]perf.MetricEvidence{"pods/scaleOut": {"heap_mb": {N: 5}}}}),
+			"cal/kwok/drift.json": file(perf.Calibration{Source: "new", Phases: map[string]map[string]perf.MetricEvidence{"drift/drift": {"heap_mb": {N: 5}}}}),
+		}
+		c := perf.MustLoadCalibrations(fsys, "cal/kwok.json", "cal/kwok/*.json")
+		Expect(c.Phases).To(HaveLen(2))
+		Expect(c.Provenance()).To(HaveKeyWithValue("pods", HavePrefix("old,")))
+		Expect(c.Provenance()).To(HaveKeyWithValue("drift", HavePrefix("new,")))
+		fsys["cal/kwok/pods.json"] = file(perf.Calibration{Source: "new", Phases: map[string]map[string]perf.MetricEvidence{"pods/scaleOut": {"heap_mb": {N: 5}}}})
+		Expect(func() { perf.MustLoadCalibrations(fsys, "cal/kwok.json", "cal/kwok/*.json") }).To(PanicWith(ContainSubstring("pods/scaleOut is in both")))
+	})
+	It("keeps controls apart from planted regressions", func() {
+		dir := GinkgoT().TempDir()
+		write := func(run string, heap float64) {
+			Expect(os.MkdirAll(filepath.Join(dir, run), 0o700)).To(Succeed())
+			b, _ := json.Marshal(perf.Result{Provider: "test", ID: "pods/scaleOut", Kind: "scale-out", Resources: perf.ResourceStats{P95HeapMB: heap}})
+			Expect(os.WriteFile(filepath.Join(dir, run, "r_performance_report.json"), b, 0o600)).To(Succeed())
+		}
+		write("base-1", 60)
+		write("base-2", 62)
+		write("reg-rv2013", 61)
+		write("m959", 90)
+		c, err := perf.Calibrate(dir, &perf.Provider{Name: "test"}, "here", perf.DefaultControls...)
+		Expect(err).ToNot(HaveOccurred())
+		e := c.Phases["pods/scaleOut"]["heap_mb"]
+		Expect(e.Variants).To(Equal(map[string]float64{"m959": 90}))
+		Expect(e.Controls).To(Equal(map[string]float64{"rv2013": 61}))
+		Expect(c.Kinds).To(HaveKeyWithValue("pods/scaleOut", "scale-out"))
 	})
 })

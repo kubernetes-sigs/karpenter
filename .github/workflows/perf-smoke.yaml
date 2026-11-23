@@ -17,7 +17,8 @@ jobs:
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performancev2
-      focus: ${{ matrix.scenario }}
+      # Anchored, so "pods" doesn't also run a scenario whose name starts with it.
+      focus: "Performance ${{ matrix.scenario }} "
       test_name: perf-smoke ${{ matrix.scenario }}
       perf_env: KARPENTER_PERF_PROVIDER=kwok-ci
       regression: ${{ inputs.regression }}
