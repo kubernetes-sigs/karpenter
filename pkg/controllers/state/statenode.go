@@ -271,11 +271,14 @@ func (in *StateNode) ProviderID() string {
 }
 
 // Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
-func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+//
+// NOTE: a caller passing client.UnsafeDisableDeepCopy MUST treat the returned Pods as read-only. See
+// nodeutils.GetPodsForNode for exactly which writes are and are not isolated from the informer cache.
+func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client, opts ...client.ListOption) ([]*corev1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetPods(ctx, kubeClient, in.Node.Name)
+	return nodeutils.GetPodsForNode(ctx, kubeClient, in.Node.Name, opts...)
 }
 
 // ValidateNodeDisruptable returns an error if the StateNode cannot be disrupted
@@ -321,8 +324,12 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 // ValidatePodDisruptable returns an error if the StateNode contains a pod that cannot be disrupted
 // This checks associated PDBs and do-not-disrupt annotations for each pod on the node.
 // ValidatePodDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
-func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits, clk clock.Clock, recorder events.Recorder) ([]*corev1.Pod, error) {
-	pods, err := in.Pods(ctx, kubeClient)
+//
+// Every check this runs - podutils.IsDisruptable and pdb.Limits.CanEvictPods - only reads the Pods, so a caller that
+// wants to skip the informer cache's deep copy may pass client.UnsafeDisableDeepCopy. It then owns the read-only
+// contract for the returned Pods described on nodeutils.GetPodsForNode, including for anything it stores or forwards.
+func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits, clk clock.Clock, recorder events.Recorder, opts ...client.ListOption) ([]*corev1.Pod, error) {
+	pods, err := in.Pods(ctx, kubeClient, opts...)
 	if err != nil {
 		return nil, err
 	}

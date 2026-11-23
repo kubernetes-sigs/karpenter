@@ -191,7 +191,14 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
-	pods, err := node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder)
+	// Read the node's pods without the informer cache's per-pod deep copy. Candidates are constructed for every node
+	// in the cluster on every disruption pass, so this copy is paid cluster-pods times per pass, and most of those
+	// pods are DaemonSet-owned and get discarded by the IsReschedulable filter below. Everything this function does
+	// with `pods` only reads them: ValidatePodsDisruptable (do-not-disrupt annotations, PDBs), IsReschedulable, and
+	// the two disruption-cost sums. The pods that outlive this function are deep-copied immediately below, because
+	// they reach the scheduler through SimulateScheduling and the scheduler relaxes pod preferences in place.
+	// DO NOT mutate `pods` here, and DO NOT store any element of it on the Candidate without copying it first.
+	pods, err := node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder, client.UnsafeDisableDeepCopy)
 	hasPodBlockers := false
 	if err != nil {
 		// Repair resolves its policy deadline after candidate construction, so retain whether pod blockers were ignored
@@ -209,7 +216,14 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, serrors.Wrap(fmt.Errorf("validating pod disruption, %w", err), "Node", klog.KObj(node.Node))
 		}
 	}
-	reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
+	// Deep-copy on the way onto the Candidate: reschedulablePods are handed to the scheduler by SimulateScheduling,
+	// and both the default-topology-spread injection and per-pod preference relaxation mutate what they are given.
+	reschedulable := lo.FilterMap(pods, func(p *corev1.Pod, _ int) (*corev1.Pod, bool) {
+		if !pod.IsReschedulable(p) {
+			return nil, false
+		}
+		return p.DeepCopy(), true
+	})
 	price, _ := cloudprovider.PriceNodeClaim(ctx, node.NodeClaim, instanceType)
 	return &Candidate{
 		StateNode:         node,
