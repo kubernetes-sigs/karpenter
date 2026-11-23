@@ -17,6 +17,7 @@ limitations under the License.
 package perf
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ type Phase struct {
 	start        time.Time
 	initialNodes []string
 	skip         bool
+	timedOut     string
 }
 
 func (r *Run) StartPhase(name string) *Phase {
@@ -62,7 +64,7 @@ func (p *Phase) AwaitScaleOut(pods int, timeout time.Duration) *Result {
 	if p.skip {
 		return nil
 	}
-	p.r.awaitHealthyPods(pods, p.r.timeout(timeout))
+	p.timeOut(p.r.awaitHealthyPods(pods, p.r.timeout(timeout)))
 	rep := &Result{Kind: "scale-out", Pods: pods, PodsNetChange: pods, Rounds: 1}
 	if first, last, ok := p.r.podSpan(p.start); ok {
 		rep.Total = last.Sub(first)
@@ -80,7 +82,7 @@ func (p *Phase) AwaitConsolidation(fromPods, toPods int, timeout time.Duration) 
 		return nil
 	}
 	timeout = p.r.timeout(timeout)
-	p.r.awaitHealthyPods(toPods, timeout)
+	p.timeOut(p.r.awaitHealthyPods(toPods, timeout))
 	start, last, rounds, inRound, prev := time.Now(), time.Now(), 0, false, len(p.r.nodes())
 	f := p.src.latest()
 	decisions, passesAtLast := disruptionDecisions(f), singleNodePasses(f)
@@ -100,8 +102,8 @@ func (p *Phase) AwaitConsolidation(fromPods, toPods int, timeout time.Duration) 
 		time.Sleep(settlePoll)
 	}
 	rep := &Result{Kind: "consolidation", Pods: toPods, PodsNetChange: toPods - fromPods, Rounds: rounds, ConsolidationTimedOut: !settled()}
-	if rep.ConsolidationTimedOut {
-		GinkgoWriter.Printf("perf %s: consolidation didn't settle within %s\n", p.id, timeout)
+	if rep.ConsolidationTimedOut && p.timedOut == "" {
+		p.timedOut = fmt.Sprintf("consolidation didn't settle within %s (%d rounds, last change %s before the timeout)", timeout, rounds, time.Since(last).Round(time.Second))
 	}
 	return p.end(rep, last)
 }
@@ -161,9 +163,21 @@ func (p *Phase) end(rep *Result, lastActivity time.Time) *Result {
 			rep.PodsDisrupted += v
 		}
 	}
+	rep.TimedOut = p.timedOut
 	rep = p.r.finish(p.id, p.gates, rep)
 	writeProfiles(rep, heap, cpu)
+	if p.timedOut != "" {
+		Fail(p.r.timeoutAlarm(p.id, p.timedOut))
+	}
 	return rep
+}
+
+// timeOut records the first wait that ran out of time. The phase still ends normally, so its report and profiles are
+// written as evidence, and then the spec fails.
+func (p *Phase) timeOut(err error) {
+	if err != nil && p.timedOut == "" {
+		p.timedOut = err.Error()
+	}
 }
 
 // Restart deletes the controller pods and measures how long the new leader takes to report

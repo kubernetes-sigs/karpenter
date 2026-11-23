@@ -74,18 +74,22 @@ All three model a run as normal around the baseline median with the baseline CV,
   - `Validate` rejects bounds that decrease across quantiles.
   - It also rejects a phase that gates both `total_time_seconds` and `pod_ready_seconds_max`, since they measure nearly the same thing.
 
-| Scenario | Vectors (default) | Phases | What it stresses |
-|---|---|---|---|
-| `pods` | pods=1000 | `scaleOut`, `consolidation` | provisioning throughput and disruption cost |
-| `nodepools` | nodepools=1000, pods=100 | `scheduling`, `startup` | per-NodePool cost: N-1 NodePools carry a tenant taint the pods don't tolerate |
-| `topology` | pods=1000 | `scaleOut` | hard constraints: hostname anti-affinity, zonal and hostname topology spread |
+Scenarios are grouped by the customer question they answer (`Scenario.Question`). A variant (`Scenario.Group`) is a full scenario sorted under its group; it can change anything.
+
+| Group | Customer question | Scenarios |
+|---|---|---|
+| pods | How fast do N pending pods become Ready, and how many nodes are left once demand drops? | `pods` |
+| nodepools | What does each NodePool I add cost in scheduling latency, controller memory and startup time? | `nodepools` (one usable of N) |
+| topology | How fast do pods with hard spread and anti-affinity constraints become Ready? | `topology` |
 
 ## Writing a scenario
 
 ```go
+// Question: How fast do pods with hard spread and anti-affinity constraints become Ready?
 var Topology = perf.Scenario{
-	Name:    "topology",
-	Summary: "N pods with hostname anti-affinity and zonal/hostname topology spread.",
+	Name:     "topology",
+	Question: "How fast do pods with hard spread and anti-affinity constraints become Ready?",
+	Summary:  "N pods with hostname anti-affinity and zonal/hostname topology spread.",
 	Vectors: map[perf.Vector]int{perf.VectorPods: 1000},
 	Phases:  []perf.PhaseSpec{{Name: "scaleOut", Summary: "Topology groups and domain counting."}},
 	Run: func(r *perf.Run) {
@@ -101,21 +105,22 @@ var Topology = perf.Scenario{
 
 How it works:
 - `Run` labels and cleans up everything it creates. A spec fails up front if an earlier one left labeled objects behind.
-- `StartPhase` fails on an undeclared phase, and on a phase the provider hasn't set levels for. An empty levels entry means measure only.
+- Every provider runs every scenario, measured only where it sets no levels. A provider opts out with `Provider.Skip` and a reason, and a scenario whose `Requires` it doesn't meet is skipped with that reason. `StartPhase` fails on an undeclared phase.
+- A wait that times out writes the phase report up to the timeout, then fails the spec.
 - The phase scrapes the leader's `/metrics` every 2 s through the API server proxy, and fails if the controller restarts mid-phase.
 
 What a scenario can use:
 - **Workload:** `r.Deployment` (names are lowercased, `Provider.Shapes` keys keep the scenario's own case), `r.Create` and `r.CreateParallel` for many objects, `r.Scale`, and `r.Patch` for any other change, such as drifting a NodePool template.
 - **Waiting:** `r.Replicas()` is the pod count every deployment the run created adds up to, so pass it to the Await methods rather than summing by hand. `AwaitScaleOut` and `AwaitConsolidation` end a phase. `AwaitDrift` ends one once every node from its start has been replaced. `r.AwaitHealthyPods` waits inside a phase, for workloads that change several times.
 - **Checking outcomes:** `r.Nodes()`, `r.Pods()`, and on the returned `Result`, `Histograms`, `Histogram`, `Counter` and `Gauge`. An Await method returns nil for a skipped phase, so check that before asserting on the result.
-- **Provider specifics:** read the provider's instance type dimensions from `r.Provider.Catalog`, never the provider's own label keys or zones, so the scenario runs unchanged in other provider plugins. A scenario that can't run without a Catalog dimension says so in `Requires`, and `Validate` (so `cmd/inventory`) fails a provider that enables it anyway.
+- **Provider specifics:** read the provider's instance type dimensions from `r.Provider.Catalog`, never the provider's own label keys or zones, so the scenario runs unchanged in other provider plugins. A scenario that can't run without a Catalog dimension says so in `Requires`, and providers without it skip the scenario with that reason (listed by `cmd/inventory`).
 - **Placement:** `ownPool` in `perf/scenarios/helpers.go` pins pods to the run's NodePool, so topology constraints don't count a real cluster's own nodes as domains.
 
 Adding a scenario to core:
-1. `perf/scenarios/<scenario>.go`, plus one entry in `scenarios.All`.
+1. `perf/scenarios/<group>.go` for a new customer question, or `<group>_<variant>.go` for a variant, with the `Question` as the file's first comment. Add it to `scenarios.All` after its group.
 2. `levels_<scenario>.go` with its `kwok` and `kwok-ci` levels, plus one entry in `levels.go`'s `migrated` list. Start with empty entries (measure only).
 3. Run baselines and planted regressions, then `cmd/calibrate -out calibration/kwok` writes `calibration/kwok/<scenario>.json` (the first one also needs `calibration/kwok` added to the provider's `//go:embed`), and `cmd/calibrate -levels` prints the levels to paste.
-4. A row in the scenario table above.
+4. Its name in the group table above.
 
 `go test ./test/suites/performancev2/perf/... ./test/suites/performancev2/cmd/...` and `go run ./test/suites/performancev2/cmd/inventory` check it: every scenario is enabled for both core providers, every level validates, and every Stable gate has evidence. perf-periodic picks the scenario up from `cmd/inventory -list kwok-ci`, with no workflow change.
 
@@ -215,6 +220,7 @@ A KWOK-based provider, such as the AWS provider's `./kwok`, writes a `suite_test
 | `Sinks` | callbacks that get every phase's `Result`, for example to push to a metrics backend |
 | `ReproEnv` | the provider's own env vars, such as `CLUSTER_NAME`, to include in repro lines |
 | `Levels`, `Calibration` | gates and the evidence behind them |
+| `Skip` | scenarios the provider doesn't run, each with the reason |
 
 A provider metric reads what `Capture` kept:
 
