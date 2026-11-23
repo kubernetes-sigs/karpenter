@@ -24,6 +24,9 @@ type scenarioLevels struct{ KWOK, KWOKCI perf.Levels }
 var migrated = []scenarioLevels{
 	replacementLevels,
 	podsWideLevels,
+	podsBalancedLevels,
+	podsBalancedChurnLevels,
+	podsBalancedHeterogeneousLevels,
 }
 
 func withMigrated(base perf.Levels, pick func(scenarioLevels) perf.Levels) perf.Levels {

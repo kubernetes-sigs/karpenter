@@ -1,0 +1,322 @@
+{
+  "provider": "kwok",
+  "source": "EKS us-west-2, tier-xl provisioned control plane, controller 8 CPU / 24Gi on m7i.4xlarge, 5 baselines over 4 clusters",
+  "baseline_commit": "8ea58d7",
+  "generated": "2026-11-19T18:43:30Z",
+  "phases": {
+    "podsBalancedHeterogeneous/consolidation": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 0.045,
+        "min": 0.042,
+        "max": 0.048,
+        "cv": 0.05,
+        "suggested_bound": 0.089,
+        "variants": {
+          "m1822": 0.077,
+          "m1966": 0.08,
+          "m959": 0.071,
+          "mconc1": 0.03,
+          "rv1973": 0.076
+        },
+        "controls": {
+          "rv2013": 0.074
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.953,
+        "min": 0.953,
+        "max": 0.953,
+        "cv": 0,
+        "suggested_bound": 0.829,
+        "variants": {
+          "m1822": 0.953,
+          "m1966": 0.953,
+          "m959": 0.953,
+          "mconc1": 0.953,
+          "rv1973": 0.953
+        },
+        "controls": {
+          "rv2013": 0.953
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 56.988,
+        "min": 50.938,
+        "max": 59.578,
+        "cv": 0.052,
+        "suggested_bound": 93.6,
+        "variants": {
+          "m1822": 74.489,
+          "m1966": 77.557,
+          "m959": 76.398,
+          "mconc1": 27.127,
+          "rv1973": 78.147
+        },
+        "controls": {
+          "rv2013": 78.016
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.448,
+        "min": 0.448,
+        "max": 0.448,
+        "cv": 0,
+        "suggested_bound": 0.39,
+        "variants": {
+          "m1822": 0.448,
+          "m1966": 0.448,
+          "m959": 0.448,
+          "mconc1": 0.448,
+          "rv1973": 0.448
+        },
+        "controls": {
+          "rv2013": 0.448
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 16,
+        "min": 16,
+        "max": 16,
+        "cv": 0,
+        "suggested_bound": 20,
+        "variants": {
+          "m1822": 16,
+          "m1966": 16,
+          "m959": 16,
+          "mconc1": 16,
+          "rv1973": 16
+        },
+        "controls": {
+          "rv2013": 16
+        }
+      },
+      "pods_disrupted": {
+        "n": 5,
+        "median": 71,
+        "min": 64,
+        "max": 78,
+        "cv": 0.075,
+        "suggested_bound": 101,
+        "variants": {
+          "m1822": 74,
+          "m1966": 60,
+          "m959": 84,
+          "mconc1": 9,
+          "rv1973": 79
+        },
+        "controls": {
+          "rv2013": 84
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 348.259,
+        "min": 248.44,
+        "max": 398.592,
+        "cv": 0.203,
+        "suggested_bound": 513,
+        "variants": {
+          "m1822": 348.173,
+          "m1966": 253.332,
+          "m959": 388.337,
+          "mconc1": 323.305,
+          "rv1973": 247.996
+        },
+        "controls": {
+          "rv2013": 248.198
+        }
+      }
+    },
+    "podsBalancedHeterogeneous/scaleOut": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 0.392,
+        "min": 0.378,
+        "max": 0.405,
+        "cv": 0.022,
+        "suggested_bound": 0.486,
+        "variants": {
+          "m1822": 0.406,
+          "m1966": 0.41,
+          "m959": 0.368,
+          "mconc1": 0.104,
+          "rv1973": 0.419
+        },
+        "controls": {
+          "rv2013": 0.387
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.941,
+        "min": 0.941,
+        "max": 0.941,
+        "cv": 0,
+        "suggested_bound": 0.818,
+        "variants": {
+          "m1822": 0.941,
+          "m1966": 0.941,
+          "m959": 0.941,
+          "mconc1": 0.941,
+          "rv1973": 0.941
+        },
+        "controls": {
+          "rv2013": 0.941
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 55.842,
+        "min": 45.933,
+        "max": 59.172,
+        "cv": 0.089,
+        "suggested_bound": 107,
+        "variants": {
+          "m1822": 66.483,
+          "m1966": 73.868,
+          "m959": 73.46,
+          "mconc1": 28.795,
+          "rv1973": 87.064
+        },
+        "controls": {
+          "rv2013": 89.237
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.441,
+        "min": 0.441,
+        "max": 0.441,
+        "cv": 0,
+        "suggested_bound": 0.383,
+        "variants": {
+          "m1822": 0.441,
+          "m1966": 0.441,
+          "m959": 0.441,
+          "mconc1": 0.441,
+          "rv1973": 0.441
+        },
+        "controls": {
+          "rv2013": 0.441
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 27,
+        "min": 27,
+        "max": 27,
+        "cv": 0,
+        "suggested_bound": 33,
+        "variants": {
+          "m1822": 27,
+          "m1966": 27,
+          "m959": 27,
+          "mconc1": 27,
+          "rv1973": 27
+        },
+        "controls": {
+          "rv2013": 27
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 5,
+        "median": 5,
+        "min": 5,
+        "max": 6,
+        "cv": 0.091,
+        "suggested_bound": 8,
+        "variants": {
+          "m1822": 6,
+          "m1966": 6,
+          "m959": 4,
+          "mconc1": 58,
+          "rv1973": 6
+        },
+        "controls": {
+          "rv2013": 4
+        }
+      },
+      "pod_ready_seconds_p50": {
+        "n": 5,
+        "median": 4,
+        "min": 4,
+        "max": 5,
+        "cv": 0.095,
+        "suggested_bound": 8,
+        "variants": {
+          "m1822": 4,
+          "m1966": 5,
+          "m959": 4,
+          "mconc1": 43,
+          "rv1973": 4
+        },
+        "controls": {
+          "rv2013": 4
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 5,
+        "median": 5,
+        "min": 4,
+        "max": 5,
+        "cv": 0.106,
+        "suggested_bound": 8,
+        "variants": {
+          "m1822": 5,
+          "m1966": 5,
+          "m959": 4,
+          "mconc1": 56,
+          "rv1973": 4
+        },
+        "controls": {
+          "rv2013": 4
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 5,
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "cv": 0,
+        "suggested_bound": 8,
+        "variants": {
+          "m1822": 5,
+          "m1966": 5,
+          "m959": 4,
+          "mconc1": 57,
+          "rv1973": 4
+        },
+        "controls": {
+          "rv2013": 4
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 6,
+        "min": 5,
+        "max": 6,
+        "cv": 0.087,
+        "suggested_bound": 7.216,
+        "variants": {
+          "m1822": 6,
+          "m1966": 6,
+          "m959": 5,
+          "mconc1": 58,
+          "rv1973": 6
+        },
+        "controls": {
+          "rv2013": 5
+        }
+      }
+    }
+  },
+  "kinds": {
+    "podsBalancedHeterogeneous/consolidation": "consolidation",
+    "podsBalancedHeterogeneous/scaleOut": "scale-out"
+  }
+}
