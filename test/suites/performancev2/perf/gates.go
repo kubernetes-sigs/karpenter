@@ -126,6 +126,26 @@ var (
 		OnBreach: "A second wave launched for pods still pending: see late_pods.",
 		Value:    func(r *Result) float64 { return float64(r.Timeline.PostRegNodeClaims) }}
 
+	PlanKeptFraction = Metric{Name: "plan_kept_fraction", Kind: KindOutcome, Unit: "fraction",
+		Measures: "Share of the phase's NodeClaims whose bound pods' requests matched their spec requests once initialized.",
+		OnBreach: "Pods didn't land where Karpenter planned them: see plan_over_nodeclaims and plan_under_nodeclaims.",
+		Value: func(r *Result) float64 {
+			p := r.Timeline.PlanKept
+			return lo.Ternary(p.Kept+p.Over+p.Under > 0, float64(p.Kept)/float64(p.Kept+p.Over+p.Under), 0)
+		}}
+	PlanOverNodeClaims = Metric{Name: "plan_over_nodeclaims", Kind: KindOutcome, Unit: "nodeclaims", Upper: true,
+		Measures: "NodeClaims bound more cpu or memory requests than they were planned for.",
+		OnBreach: "Pods took slots planned for others, which then need more NodeClaims.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.Over) }}
+	PlanUnderNodeClaims = Metric{Name: "plan_under_nodeclaims", Kind: KindOutcome, Unit: "nodeclaims", Upper: true,
+		Measures: "NodeClaims bound fewer requests than they were planned for.",
+		OnBreach: "Planned pods went elsewhere and left capacity idle.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.Under) }}
+	PlanUnknownNodeClaims = Metric{Name: "plan_unknown_nodeclaims", Kind: KindOutcome, Unit: "nodeclaims", Upper: true,
+		Measures: "NodeClaims deleted before their pods settled, or not initialized by the phase's end.",
+		OnBreach: "More NodeClaims replaced or stuck before they could be judged.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.Unknown) }}
+
 	// PodReady is the per-pod view of latency: each quantile is its own metric, so a provider can gate p95
 	// and only warn on p99 and max, which are noisier but are what the slowest customer sees.
 	PodReady = podReadyMetrics()
@@ -135,7 +155,8 @@ var (
 	// control (revert #2013) moved it +42%, as much as real regressions did, so it would flake. It needs
 	// repeated runs or base-vs-head on the same cluster before it can gate.
 	Metrics = []Metric{TotalTimeSeconds, PodReady.P50, PodReady.P95, PodReady.P99, PodReady.Max, StartupSeconds, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores,
-		NodeClaimsProvisioned, SingleNodeReplaces, ConsolidationTimedOut, NodeClaimRounds, LatePods, OffRound1Pods, PreRegDupNodeClaims, PostRegNodeClaims}
+		NodeClaimsProvisioned, SingleNodeReplaces, ConsolidationTimedOut, NodeClaimRounds, LatePods, OffRound1Pods, PreRegDupNodeClaims, PostRegNodeClaims,
+		PlanKeptFraction, PlanOverNodeClaims, PlanUnderNodeClaims, PlanUnknownNodeClaims}
 )
 
 type QuantileMetrics struct {

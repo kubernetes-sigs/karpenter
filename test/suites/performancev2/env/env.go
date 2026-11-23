@@ -44,14 +44,14 @@ var (
 )
 
 type Clients struct {
-	Client     client.Client
+	Client     client.WithWatch
 	KubeClient kubernetes.Interface
 }
 
 func New() Clients {
 	config := controllerruntime.GetConfigOrDie()
 	config.QPS, config.Burst = 1e6, 1e6
-	c, err := client.New(config, client.Options{Scheme: scheme.Scheme})
+	c, err := client.NewWithWatch(config, client.Options{Scheme: scheme.Scheme})
 	if err != nil {
 		panic(err)
 	}

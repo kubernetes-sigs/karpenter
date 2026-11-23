@@ -22,9 +22,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 const (
@@ -43,6 +46,8 @@ type Phase struct {
 	start        time.Time
 	initialNodes []string
 	skip         bool
+
+	plans *planWatch
 }
 
 func (r *Run) StartPhase(name string) *Phase {
@@ -51,8 +56,8 @@ func (r *Run) StartPhase(name string) *Phase {
 	if skip {
 		return &Phase{r: r, id: id, skip: true}
 	}
-	src := startSource(r.ctx, r.Provider)
-	return &Phase{r: r, id: id, gates: gates, src: src, prof: startProfiler(r.ctx, r.Provider, src.pod), start: time.Now(), initialNodes: nodeNames(r.nodes())}
+	src, start := startSource(r.ctx, r.Provider), time.Now()
+	return &Phase{r: r, id: id, gates: gates, src: src, prof: startProfiler(r.ctx, r.Provider, src.pod), start: start, initialNodes: nodeNames(r.nodes()), plans: r.watchPlans(start)}
 }
 
 // AwaitScaleOut waits for the pods to be healthy. Its total time runs from the first pod's creation to the last
@@ -148,13 +153,16 @@ func (p *Phase) end(rep *Result, lastActivity time.Time) *Result {
 	res, hists, counters, gauges, err := p.src.stop(p.r.ctx)
 	Expect(err).ToNot(HaveOccurred())
 	heap, cpu := p.prof.stop(p.r.ctx)
+	deleted, bound := p.plans.stop()
 	Expect(res.Samples).To(BeNumerically(">", 1), "collected too few metrics samples to gate on")
 	rep.PodReady = p.r.podReadyQuantiles(p.start)
 	nodes := p.r.nodes()
 	rep.Resources, rep.LatencyStats, rep.Counters, rep.Gauges, rep.Commit = res, hists, counters, gauges, p.src.commit
 	rep.Nodes, rep.NodesNetChange = len(nodes), len(nodes)-len(p.initialNodes)
 	rep.ReservedCPUUtil, rep.ReservedMemoryUtil = p.r.reserved()
-	rep.Timeline = timeline(p.start, p.r.scenarioPods(), nodes, p.r.nodeClaims())
+	ncs := lo.UniqBy(append(p.r.nodeClaims(), deleted...), func(nc v1.NodeClaim) string { return nc.Name })
+	rep.Timeline = timeline(p.start, p.r.scenarioPods(), nodes, ncs)
+	rep.Timeline.PlanKept = planKept(p.start, ncs, bound)
 	keepMixPrices(rep.Gauges, rep.Timeline.NodeMix)
 	for k, v := range counters {
 		if strings.HasPrefix(k, "karpenter_pods_drained_total") {
