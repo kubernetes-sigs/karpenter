@@ -18,9 +18,11 @@ package disruption
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/samber/lo"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -33,11 +35,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // StaticDrift is a subreconciler that deletes drifted static candidates.
 type StaticDrift struct {
+	kubeClient    client.Client
 	cluster       *state.Cluster
 	provisioner   *provisioning.Provisioner
 	cloudprovider cloudprovider.CloudProvider
@@ -45,14 +49,27 @@ type StaticDrift struct {
 	backoff       *nodepoolbackoff.State
 }
 
-func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, recorder events.Recorder, backoff *nodepoolbackoff.State) *StaticDrift {
+func NewStaticDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, recorder events.Recorder, backoff *nodepoolbackoff.State) *StaticDrift {
 	return &StaticDrift{
+		kubeClient:    kubeClient,
 		cluster:       cluster,
 		provisioner:   provisioner,
 		cloudprovider: cloudprovider,
 		recorder:      recorder,
 		backoff:       backoff,
 	}
+}
+
+// Precheck reports whether any static NodePool exists. ShouldDisrupt only admits candidates owned by one, so on a
+// cluster with no static NodePool every candidate built for this Method is discarded. Listing NodePools reads the
+// informer cache; candidate construction resolves the instance types of every NodePool through the CloudProvider and
+// evaluates every node in cluster state, so skipping it here is worth the list.
+func (d *StaticDrift) Precheck(ctx context.Context) (bool, error) {
+	nodePools, err := nodepoolutils.ListManaged(ctx, d.kubeClient, d.cloudprovider)
+	if err != nil {
+		return false, fmt.Errorf("listing nodepools, %w", err)
+	}
+	return lo.SomeBy(nodePools, nodepoolutils.IsStatic), nil
 }
 
 // ShouldDisrupt is a predicate used to filter candidates

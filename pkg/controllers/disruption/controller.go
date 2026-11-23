@@ -112,7 +112,7 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
-		NewStaticDrift(cluster, provisioner, cp, recorder, queue.backoff),
+		NewStaticDrift(kubeClient, cluster, provisioner, cp, recorder, queue.backoff),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 		NewDrift(kubeClient, cluster, provisioner, recorder, clk, queue.backoff),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
@@ -201,6 +201,16 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
+	// A Method that can cheaply rule itself out does so before candidate construction, which is cluster-wide work.
+	if prechecker, ok := disruption.(Prechecker); ok {
+		canDisrupt, err := prechecker.Precheck(ctx)
+		if err != nil {
+			return false, fmt.Errorf("prechecking disruption, %w", err)
+		}
+		if !canDisrupt {
+			return false, nil
+		}
+	}
 	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)

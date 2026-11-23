@@ -76,6 +76,74 @@ var _ = Describe("StaticDrift", func() {
 		})
 	})
 
+	Context("Precheck", func() {
+		var staticDrift *disruption.StaticDrift
+
+		BeforeEach(func() {
+			staticDrift = disruption.NewStaticDrift(env.Client, cluster, prov, cloudProvider, recorder, nodePoolBackoff)
+		})
+
+		It("should not allow candidate construction when no NodePool exists", func() {
+			Expect(staticDrift.Precheck(ctx)).To(BeFalse())
+		})
+
+		It("should not allow candidate construction when every NodePool is dynamic", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.NodePool())
+			Expect(staticDrift.Precheck(ctx)).To(BeFalse())
+		})
+
+		It("should allow candidate construction when a static NodePool exists", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
+		})
+
+		It("should allow candidate construction when a static NodePool exists alongside dynamic NodePools", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), nodePool, test.NodePool())
+			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
+		})
+
+		It("should allow candidate construction when a static NodePool is scaled to zero replicas", func() {
+			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
+		})
+
+		It("should still drift a dynamic NodePool's drifted NodeClaim when no static NodePool exists", func() {
+			dynamicNodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						Budgets: []v1.Budget{{Nodes: "100%"}},
+					},
+				},
+			})
+			dynamicNodeClaim, dynamicNode := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            dynamicNodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			dynamicNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, dynamicNodePool, dynamicNodeClaim, dynamicNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{dynamicNode}, []*v1.NodeClaim{dynamicNodeClaim})
+
+			// Drift runs after StaticDrift. Skipping StaticDrift must not stop it from disrupting this NodeClaim.
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, dynamicNodeClaim)
+			ExpectNotFound(ctx, env.Client, dynamicNodeClaim)
+		})
+	})
+
 	Context("Backoff", func() {
 		BeforeEach(func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
