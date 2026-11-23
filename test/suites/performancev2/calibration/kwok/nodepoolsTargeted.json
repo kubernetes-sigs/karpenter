@@ -1,0 +1,304 @@
+{
+  "provider": "kwok",
+  "source": "EKS us-west-2, tier-xl provisioned control plane, controller 8 CPU / 24Gi on m7i.4xlarge, 5 baselines over 4 clusters",
+  "baseline_commit": "8ea58d7",
+  "generated": "2026-11-19T18:43:30Z",
+  "phases": {
+    "nodepoolsTargeted/consolidation": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 1.054,
+        "min": 0.698,
+        "max": 1.114,
+        "cv": 0.155,
+        "suggested_bound": 1.435,
+        "variants": {
+          "m1822": 1.157,
+          "m1966": 1.065,
+          "m959": 1.097,
+          "mconc1": 0.991,
+          "rv1973": 0.697
+        },
+        "controls": {
+          "rv2013": 1.066
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.222,
+        "min": 0.222,
+        "max": 0.222,
+        "cv": 0,
+        "suggested_bound": 0.193,
+        "variants": {
+          "m1822": 0.222,
+          "m1966": 0.222,
+          "m959": 0.222,
+          "mconc1": 0.222,
+          "rv1973": 0.222
+        },
+        "controls": {
+          "rv2013": 0.222
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 139.921,
+        "min": 110.436,
+        "max": 148.63,
+        "cv": 0.11,
+        "suggested_bound": 178,
+        "variants": {
+          "m1822": 103.538,
+          "m1966": 112.994,
+          "m959": 104.418,
+          "mconc1": 86.078,
+          "rv1973": 112.772
+        },
+        "controls": {
+          "rv2013": 102.915
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.063,
+        "min": 0.063,
+        "max": 0.063,
+        "cv": 0,
+        "suggested_bound": 0.055,
+        "variants": {
+          "m1822": 0.063,
+          "m1966": 0.063,
+          "m959": 0.063,
+          "mconc1": 0.063,
+          "rv1973": 0.063
+        },
+        "controls": {
+          "rv2013": 0.063
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 75,
+        "min": 75,
+        "max": 75,
+        "cv": 0,
+        "suggested_bound": 90,
+        "variants": {
+          "m1822": 75,
+          "m1966": 75,
+          "m959": 75,
+          "mconc1": 75,
+          "rv1973": 75
+        },
+        "controls": {
+          "rv2013": 75
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 244.824,
+        "min": 234.488,
+        "max": 294.789,
+        "cv": 0.083,
+        "suggested_bound": 354,
+        "variants": {
+          "m1822": 233.888,
+          "m1966": 299.156,
+          "m959": 233.796,
+          "mconc1": 274.516,
+          "rv1973": 249.03
+        },
+        "controls": {
+          "rv2013": 248.652
+        }
+      }
+    },
+    "nodepoolsTargeted/scaleOut": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 1.234,
+        "min": 1.048,
+        "max": 1.29,
+        "cv": 0.074,
+        "suggested_bound": 1.548,
+        "variants": {
+          "m1822": 1.13,
+          "m1966": 1.439,
+          "m959": 1.062,
+          "mconc1": 1.054,
+          "rv1973": 1.308
+        },
+        "controls": {
+          "rv2013": 1.25
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.222,
+        "min": 0.222,
+        "max": 0.222,
+        "cv": 0,
+        "suggested_bound": 0.193,
+        "variants": {
+          "m1822": 0.222,
+          "m1966": 0.222,
+          "m959": 0.222,
+          "mconc1": 0.222,
+          "rv1973": 0.222
+        },
+        "controls": {
+          "rv2013": 0.222
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 138.925,
+        "min": 123.593,
+        "max": 158.523,
+        "cv": 0.105,
+        "suggested_bound": 190,
+        "variants": {
+          "m1822": 92.348,
+          "m1966": 105.614,
+          "m959": 92.598,
+          "mconc1": 97.945,
+          "rv1973": 90.008
+        },
+        "controls": {
+          "rv2013": 124.339
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.063,
+        "min": 0.063,
+        "max": 0.063,
+        "cv": 0,
+        "suggested_bound": 0.055,
+        "variants": {
+          "m1822": 0.063,
+          "m1966": 0.063,
+          "m959": 0.063,
+          "mconc1": 0.063,
+          "rv1973": 0.063
+        },
+        "controls": {
+          "rv2013": 0.063
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 150,
+        "min": 150,
+        "max": 150,
+        "cv": 0,
+        "suggested_bound": 180,
+        "variants": {
+          "m1822": 150,
+          "m1966": 150,
+          "m959": 150,
+          "mconc1": 150,
+          "rv1973": 150
+        },
+        "controls": {
+          "rv2013": 150
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 5,
+        "median": 9,
+        "min": 9,
+        "max": 10,
+        "cv": 0.043,
+        "suggested_bound": 12,
+        "variants": {
+          "m1822": 9,
+          "m1966": 9,
+          "m959": 9,
+          "mconc1": 312,
+          "rv1973": 9
+        },
+        "controls": {
+          "rv2013": 9
+        }
+      },
+      "pod_ready_seconds_p50": {
+        "n": 5,
+        "median": 7,
+        "min": 7,
+        "max": 8,
+        "cv": 0.066,
+        "suggested_bound": 12,
+        "variants": {
+          "m1822": 7,
+          "m1966": 7,
+          "m959": 7,
+          "mconc1": 235,
+          "rv1973": 8
+        },
+        "controls": {
+          "rv2013": 8
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 5,
+        "median": 9,
+        "min": 9,
+        "max": 9,
+        "cv": 0,
+        "suggested_bound": 14,
+        "variants": {
+          "m1822": 8,
+          "m1966": 9,
+          "m959": 8,
+          "mconc1": 305,
+          "rv1973": 9
+        },
+        "controls": {
+          "rv2013": 9
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 5,
+        "median": 9,
+        "min": 9,
+        "max": 9,
+        "cv": 0,
+        "suggested_bound": 14,
+        "variants": {
+          "m1822": 9,
+          "m1966": 9,
+          "m959": 9,
+          "mconc1": 311,
+          "rv1973": 9
+        },
+        "controls": {
+          "rv2013": 9
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 9,
+        "min": 9,
+        "max": 10,
+        "cv": 0.043,
+        "suggested_bound": 12,
+        "variants": {
+          "m1822": 9,
+          "m1966": 9,
+          "m959": 10,
+          "mconc1": 313,
+          "rv1973": 9
+        },
+        "controls": {
+          "rv2013": 9
+        }
+      }
+    }
+  },
+  "kinds": {
+    "nodepoolsTargeted/consolidation": "consolidation",
+    "nodepoolsTargeted/scaleOut": "scale-out"
+  }
+}

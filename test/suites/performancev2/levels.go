@@ -27,6 +27,8 @@ var migrated = []scenarioLevels{
 	podsBalancedLevels,
 	podsBalancedChurnLevels,
 	podsBalancedHeterogeneousLevels,
+	nodepoolsDiverseLevels,
+	nodepoolsTargetedLevels,
 }
 
 func withMigrated(base perf.Levels, pick func(scenarioLevels) perf.Levels) perf.Levels {

@@ -79,7 +79,7 @@ Scenarios are grouped by the customer question they answer (`Scenario.Question`)
 | Group | Customer question | Scenarios |
 |---|---|---|
 | pods | How fast do N pending pods become Ready, and how many nodes are left once demand drops? | `pods`, `podsWide` (30 shapes), `podsBalanced`, `podsBalancedChurn`, `podsBalancedHeterogeneous` (Balanced policy, score assertion) |
-| nodepools | What does each NodePool I add cost in scheduling latency, controller memory and startup time? | `nodepools` (one usable of N) |
+| nodepools | What does each NodePool I add cost in scheduling latency, controller memory and startup time? | `nodepools` (one usable of N), `nodepoolsDiverse` (all different), `nodepoolsTargeted` (each pool gets a pod) |
 | topology | How fast do pods with hard spread and anti-affinity constraints become Ready? | `topology` |
 | replacement | How long does rolling N nodes take, and how much capacity do I lose meanwhile? | `replacement` (drift every node), `replacementDoNotDisrupt` (protected pods survive consolidation and drift) |
 
