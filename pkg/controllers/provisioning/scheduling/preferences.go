@@ -37,15 +37,16 @@ type Preferences struct {
 
 func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
 	relaxations := []func(*v1.Pod) *string{
-		p.removeRequiredNodeAffinityTerm,
+		p.removePreferredNodeAffinityTerm,
 		p.removePreferredPodAffinityTerm,
 		p.removePreferredPodAntiAffinityTerm,
-		p.removePreferredNodeAffinityTerm,
 		p.removeTopologySpreadScheduleAnyway}
 
 	if p.ToleratePreferNoSchedule {
 		relaxations = append(relaxations, p.toleratePreferNoScheduleTaints)
 	}
+
+	relaxations = append(relaxations, p.removeRequiredNodeAffinityTerm)
 
 	for _, relaxFunc := range relaxations {
 		if reason := relaxFunc(pod); reason != nil {
