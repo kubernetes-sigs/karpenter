@@ -30,6 +30,7 @@ Tracking issue: [aws/karpenter-provider-aws#8735](https://github.com/aws/karpent
 - **A core opt-in API.** Each provider defines its own opt-in on its NodeClass, because every safety check is provider-specific.
 - **Drift a provider cannot resolve in place.** It keeps replacing.
 - **Rolling back to the previous image.** Core does not track image history.
+- **Rebooting without a drain.** In-place remediation drains like every reboot, honoring PDBs and `terminationGracePeriod`. Pods with node-local PersistentVolumes come back to the same node through the volume's node affinity. Keeping pods bound to the node across the reboot, for caches outside a PersistentVolume, would skip PDBs and changes the reboot primitive for repair too, so it is left to a separate proposal.
 
 ## Proposal
 
@@ -89,15 +90,17 @@ sequenceDiagram
 ### Interaction with Existing Features
 
 - **Disruption budgets.** In-place nodes count against the `Drifted` budget until they are `Initialized` again, as every rebooted node does since [#3497](https://github.com/kubernetes-sigs/karpenter/pull/3497). A `Drifted` budget of `0` stops in-place remediation and replacements alike.
+  A rebooted node that never re-initializes keeps its `Drifted` budget slot until it initializes or is removed.
 - **Static NodePools.** Static drift goes through `StaticDrift`, not `Drift`, and takes the same `Reboot` path. A reboot keeps the node count, so the `replicas` and `limits.nodes` checks that gate a pre-spun replacement do not apply. The `Drifted` budget still does.
 - **Blocking pods.** Drift admits nodes with PDB or `do-not-disrupt` blockers only when the NodeClaim has a `terminationGracePeriod`.
 - **Pod downtime.** In-place remediation keeps the instance at the cost of a longer pod outage.
   Replacement pre-spins a node, so evicted pods schedule and start right away.
   A reboot first drains the node or waits out its `terminationGracePeriod`, then reboots, and only after it is `Ready` again can pods schedule on it.
+  Scheduling models a rebooting node's capacity as returning, so pending pods that fit on it wait for it, up to the 20 minute observation window, instead of triggering a new node.
   User-facing docs must lead with this tradeoff.
 - **Repair.** `ValidateNodeDisruptable` already blocks all other disruption while a node is rebooting. Repair reboots stay plain reboots. Resolving drift during a repair reboot would spend the `Unhealthy` budget on drift, even when the `Drifted` budget is `0`. An `Unhealthy` node that is also drifted is repaired first and resolved in place on a later drift pass, under the `Drifted` budget.
 - **Failure.** The reboot controller already deletes the NodeClaim when a reboot after disruption fails, with the drain bounded by the committed grace period. No replacement is pre-spun: pods go through normal provisioning, and a static NodePool refills to its replicas. No new failure state is added.
-- **Consolidation.** Unchanged. A node that finishes in-place remediation is no longer drifted and is evaluated normally.
+- **Consolidation.** A node being remediated in place is treated like any rebooting node. `ValidateNodeDisruptable` keeps it from being a consolidation candidate. A node that finishes in-place remediation is no longer drifted and is evaluated normally.
 
 ### Observability
 
