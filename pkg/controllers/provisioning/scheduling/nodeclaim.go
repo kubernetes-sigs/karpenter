@@ -679,19 +679,19 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 	for _, group := range instanceType.AllocatableOfferingsList() {
 		resourceFit := resources.Fits(requests, group.Allocatable)
 		for _, of := range group.Offerings {
-			if skipOffering != nil && skipOffering(of) {
-				if resourceFit && !skippedFit && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-					skippedFit = true
-				}
+			if !requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				continue
 			}
-			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-				hasOffering = true
-				if resourceFit {
-					return true, true, skippedFit
-				}
-				break
+			// Only compatible offerings are checked, so skipOffering usually runs once per instance type.
+			if skipOffering != nil && skipOffering(of) {
+				skippedFit = skippedFit || resourceFit
+				continue
 			}
+			hasOffering = true
+			if resourceFit {
+				return true, true, skippedFit
+			}
+			break
 		}
 	}
 	return false, hasOffering, skippedFit
