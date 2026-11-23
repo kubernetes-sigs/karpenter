@@ -22,8 +22,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -32,18 +34,22 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// countingCloudProvider counts GetInstanceTypes calls, which BuildNodePoolMap makes once per NodePool.
+// countingCloudProvider counts GetInstanceTypes calls for the NodePools in counted, which BuildNodePoolMap makes once
+// per NodePool. Counting only named NodePools keeps the count independent of NodePools other specs leave behind.
 type countingCloudProvider struct {
 	cloudprovider.CloudProvider
+	counted sets.Set[string]
 
 	mu                    sync.Mutex
 	getInstanceTypesCalls int
 }
 
 func (c *countingCloudProvider) GetInstanceTypes(ctx context.Context, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
-	c.mu.Lock()
-	c.getInstanceTypesCalls++
-	c.mu.Unlock()
+	if np != nil && c.counted.Has(np.Name) {
+		c.mu.Lock()
+		c.getInstanceTypesCalls++
+		c.mu.Unlock()
+	}
 	return c.CloudProvider.GetInstanceTypes(ctx, np)
 }
 
@@ -97,7 +103,7 @@ var _ = Describe("Candidate Set", func() {
 		}
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		countingCP = &countingCloudProvider{CloudProvider: cloudProvider}
+		countingCP = &countingCloudProvider{CloudProvider: cloudProvider, counted: sets.New(lo.Map(nodePools, func(np *v1.NodePool, _ int) string { return np.Name })...)}
 		controller = disruption.NewController(ctx, env.Clock, env.Client, prov, countingCP, recorder, cluster, queue, clusterCost)
 	})
 
