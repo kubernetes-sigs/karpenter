@@ -446,6 +446,12 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
+	// Pods on deleting nodes were listed before the topology was built, so one may have been replaced since.
+	pods, err = p.dropReplacedDeletingPods(ctx, pods, deletingPodUIDs)
+	if err != nil {
+		return scheduler.Results{}, err
+	}
+
 	// Timeout the Solve() method after 1m to ensure that we move faster through provisioning
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -490,6 +496,30 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		filterVirtualPodMapping(results.ExistingNodeToPodMapping()))
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
+}
+
+// dropReplacedDeletingPods removes pods on deleting nodes whose name has since been taken by a newer pod, such as a
+// StatefulSet pod that was recreated and bound while the scheduler was being built. The replacement already counts in
+// the topology, and scheduling the old pod would conflict with its own replacement and open an unneeded NodeClaim.
+// A pod that is gone with no replacement is kept, so it still gets capacity.
+func (p *Provisioner) dropReplacedDeletingPods(ctx context.Context, pods []*corev1.Pod, deletingPodUIDs sets.Set[types.UID]) ([]*corev1.Pod, error) {
+	if len(deletingPodUIDs) == 0 {
+		return pods, nil
+	}
+	kept := make([]*corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		if deletingPodUIDs.Has(pod.UID) {
+			current := &corev1.Pod{}
+			if err := p.kubeClient.Get(ctx, client.ObjectKeyFromObject(pod), current); client.IgnoreNotFound(err) != nil {
+				return nil, fmt.Errorf("getting pod, %w", err)
+			} else if err == nil && current.UID != pod.UID {
+				log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).V(1).Info("skipping pod on deleting node, it was replaced")
+				continue
+			}
+		}
+		kept = append(kept, pod)
+	}
+	return kept, nil
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {

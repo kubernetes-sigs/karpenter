@@ -4508,6 +4508,124 @@ var _ = Context("Scheduling", func() {
 				Expect(n.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 		})
+		// replacementOrdinal is the ordinal of the pod that is created and bound to the node that stays while Schedule
+		// runs, or -1 when no pod is created. Ordinal 0 is the pod that was terminating on the deleting node.
+		DescribeTable("should not request capacity for a deleting-node pod that was replaced while scheduling",
+			func(preferred bool, replacementOrdinal int, expectedNodeClaims int) {
+				labels := map[string]string{"app": "sts"}
+				term := corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+					TopologyKey:   corev1.LabelHostname,
+				}
+				podOptions := test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")},
+					},
+				}
+				if preferred {
+					podOptions.PodAntiPreferences = []corev1.WeightedPodAffinityTerm{{Weight: 100, PodAffinityTerm: term}}
+				} else {
+					podOptions.PodAntiRequirements = []corev1.PodAffinityTerm{term}
+				}
+				nodePool := test.NodePool()
+				ss := test.StatefulSet(test.StatefulSetOptions{Replicas: int32(lo.Max([]int{replacementOrdinal, 0}) + 1), PodOptions: podOptions})
+				ExpectApplied(ctx, env.Client, nodePool, ss)
+
+				stsPod := func(ordinal int) *corev1.Pod {
+					opts := podOptions
+					opts.ObjectMeta = metav1.ObjectMeta{
+						Name:      fmt.Sprintf("%s-%d", ss.Name, ordinal),
+						Namespace: ss.Namespace,
+						Labels:    labels,
+						OwnerReferences: []metav1.OwnerReference{{
+							APIVersion:         "apps/v1",
+							Kind:               "StatefulSet",
+							Name:               ss.Name,
+							UID:                ss.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						}},
+					}
+					return test.Pod(opts)
+				}
+				newNode := func() (*v1.NodeClaim, *corev1.Node) {
+					capacity := corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("8Gi"),
+						corev1.ResourcePods:   resource.MustParse("110"),
+					}
+					nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								v1.NodePoolLabelKey:            nodePool.Name,
+								corev1.LabelInstanceTypeStable: "small-instance-type",
+								v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+								corev1.LabelTopologyZone:       "test-zone-1a",
+							},
+						},
+						Status: v1.NodeClaimStatus{Capacity: capacity, Allocatable: capacity},
+					})
+					node.Labels[corev1.LabelHostname] = node.Name
+					return nodeClaim, node
+				}
+
+				// An empty node that stays, and a node that is being deleted
+				nodeClaim, node := newNode()
+				deletingNodeClaim, deletingNode := newNode()
+				ExpectApplied(ctx, env.Client, nodeClaim, node, deletingNodeClaim, deletingNode)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+					[]*corev1.Node{node, deletingNode}, []*v1.NodeClaim{nodeClaim, deletingNodeClaim})
+				cluster.MarkForDeletion(deletingNode.Spec.ProviderID)
+
+				// Ordinal 0 is terminating on the deleting node when Schedule lists the pods to reschedule
+				old := stsPod(0)
+				ExpectApplied(ctx, env.Client, old)
+				ExpectManualBinding(ctx, env.Client, old, deletingNode)
+				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(old))
+				ExpectEvicted(ctx, env.Client, old)
+				old = ExpectExists(ctx, env.Client, old)
+				Expect(old.DeletionTimestamp.IsZero()).To(BeFalse())
+
+				// While Schedule runs, ordinal 0 finishes terminating. The StatefulSet controller creates replacementOrdinal
+				// and kube-scheduler binds it to the node that stays.
+				var replacement *corev1.Pod
+				hooked := &hookedCloudProvider{CloudProvider: cloudProvider}
+				hooked.hook = func() {
+					Expect(env.Client.Delete(ctx, old, client.GracePeriodSeconds(0))).To(Succeed())
+					ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(old))
+					if replacementOrdinal >= 0 {
+						replacement = stsPod(replacementOrdinal)
+						ExpectApplied(ctx, env.Client, replacement)
+						ExpectManualBinding(ctx, env.Client, replacement, node)
+						ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(replacement))
+						Expect(replacement.UID).ToNot(Equal(old.UID))
+					}
+				}
+				racing := provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), hooked, cluster, env.Clock,
+					deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client), predictionStore)
+
+				results, err := racing.Schedule(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(hooked.hook).To(BeNil(), "the hook did not run during Schedule")
+				Expect(results.PodErrors).To(BeEmpty())
+
+				claimed := lo.FlatMap(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) []string {
+					return lo.Map(nc.Pods, func(p *corev1.Pod, _ int) string { return fmt.Sprintf("%s (uid %s)", p.Name, p.UID) })
+				})
+				Expect(results.NewNodeClaims).To(HaveLen(expectedNodeClaims),
+					"pods on new NodeClaims: %v; terminating pod uid %s; pod bound to %s during Schedule: %v", claimed, old.UID, node.Name,
+					lo.Ternary(replacement == nil, "none", fmt.Sprintf("%s (uid %s)", lo.FromPtr(replacement).Name, lo.FromPtr(replacement).UID)))
+				if replacementOrdinal < 0 {
+					// Ordinal 0 has no replacement yet, so it is placed on the node that stays
+					Expect(results.ExistingNodeToPodMapping()[nodeClaim.Name]).To(ConsistOf(HaveField("UID", old.UID)))
+				}
+			},
+			Entry("preferred hostname anti-affinity, ordinal 0 is recreated and bound", true, 0, 0),
+			Entry("required hostname anti-affinity, ordinal 0 is recreated and bound", false, 0, 0),
+			Entry("control: ordinal 0 is not recreated", true, -1, 0),
+			Entry("control: another ordinal is bound to the node that stays", false, 1, 1),
+		)
 		DescribeTable("should not reschedule pods from a deleting node when pods are blocked due to fully blocking PDBs",
 			func(pdbs ...*policyv1.PodDisruptionBudget) {
 				ExpectApplied(ctx, env.Client, nodePool)
@@ -5931,6 +6049,21 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 		}
 	}
 	return Expect(maxCount - minCount)
+}
+
+// hookedCloudProvider runs hook on the first GetInstanceTypes call. Provisioner.Schedule makes that call after it has
+// listed the pods on deleting nodes and before it builds the topology.
+type hookedCloudProvider struct {
+	*fake.CloudProvider
+	hook func()
+}
+
+func (h *hookedCloudProvider) GetInstanceTypes(ctx context.Context, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	if hook := h.hook; hook != nil {
+		h.hook = nil
+		hook()
+	}
+	return h.CloudProvider.GetInstanceTypes(ctx, np)
 }
 
 func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
