@@ -37,7 +37,7 @@ import (
 type Provider struct {
 	Name       string
 	Summary    string
-	Client     client.Client
+	Client     client.WithWatch
 	KubeClient kubernetes.Interface
 	Controller Controller
 	// NodeClass and NodePool build each run's starting objects. They get the scenario, so a provider can vary

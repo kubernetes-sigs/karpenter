@@ -34,7 +34,7 @@ const roundGap = 5 * time.Second
 // OfferingPrice, if a provider captures it, is kept only for instance types in the node mix.
 const OfferingPrice = "karpenter_cloudprovider_instance_type_offering_price_estimate"
 
-// Timeline is read at the end of the phase, so NodeClaims deleted during it are missing.
+// Timeline is read at the end of the phase, plus the NodeClaims the phase saw deleted.
 type Timeline struct {
 	NodeClaimRounds     int         `json:"nodeclaim_rounds"`
 	LatePods            int         `json:"late_pods"`
@@ -42,6 +42,8 @@ type Timeline struct {
 	PreRegDupNodeClaims int         `json:"prereg_dup_nodeclaims"`
 	PostRegNodeClaims   int         `json:"postreg_nodeclaims"`
 	NodeMix             []NodeCount `json:"node_mix,omitempty"`
+
+	PlanKept
 }
 
 type NodeCount struct {
