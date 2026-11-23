@@ -36,6 +36,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
+// fullReservationSkipped is the hint the instance type filter error carries when it skipped a full reservation.
+const fullReservationSkipped = "skipped because their only compatible reserved offering is full"
+
 // These specs pin down the scheduler's handling of a reserved offering whose ReservationCapacity is 0 once
 // reservation capacity and offering availability are decoupled at the provider (a full-but-healthy reservation is
 // Available=true, ReservationCapacity=0).
@@ -116,6 +119,8 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		Expect(results.NewNodeClaims).To(HaveLen(0))
 		Expect(results.PodErrors).To(HaveKey(pod))
 		Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
+		// The error still says that a full reservation was skipped.
+		Expect(results.PodErrors[pod].Error()).To(ContainSubstring("1 instance type(s) " + fullReservationSkipped))
 	})
 
 	It("fallback: a reservation that still has capacity is reserved normally (regression guard)", func() {
@@ -143,6 +148,8 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		// The only offering for a reserved-only pool is unavailable, so the pod cannot be placed on a new NodeClaim.
 		Expect(results.NewNodeClaims).To(HaveLen(0))
 		Expect(results.PodErrors).To(HaveKey(pod))
+		// The reservation isn't full, so the error mustn't blame a full reservation.
+		Expect(results.PodErrors[pod].Error()).ToNot(ContainSubstring(fullReservationSkipped))
 	})
 
 	It("strict (provisioning): a full-but-available reservation does not block scheduling and holds no reservation", func() {
@@ -195,6 +202,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		Expect(results.NewNodeClaims).To(HaveLen(0))
 		Expect(results.PodErrors).To(HaveKey(pod))
 		Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
+		Expect(results.PodErrors[pod].Error()).To(ContainSubstring("1 instance type(s) " + fullReservationSkipped))
 	})
 
 	It("strict (provisioning): a reservation with capacity is preferred over on-demand (regression guard)", func() {
@@ -317,6 +325,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 			Expect(results.NewNodeClaims).To(BeEmpty())
 			Expect(results.PodErrors).To(HaveKey(pod))
 			Expect(results.PodErrors[pod].Error()).To(ContainSubstring("minValues requirement is not met"))
+			Expect(results.PodErrors[pod].Error()).To(ContainSubstring("1 instance type(s) " + fullReservationSkipped))
 		})
 
 		It("doesn't count toward minValues in fallback mode", func() {

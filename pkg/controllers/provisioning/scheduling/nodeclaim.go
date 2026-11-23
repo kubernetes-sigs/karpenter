@@ -485,6 +485,8 @@ type InstanceTypeFilterError struct {
 	// fitsAndOffering indicates if a single instance type had enough resources and was a required offering
 	fitsAndOffering          bool
 	minValuesIncompatibleErr error
+	// fullReservationOnly counts the instance types that were filtered out only because their compatible offerings with enough resources are full reservations.
+	fullReservationOnly int
 
 	// We capture requirements so that we can know what the requirements were when evaluating instance type compatibility
 	requirements scheduling.Requirements
@@ -523,6 +525,15 @@ func (e InstanceTypeFilterError) resourcesString() string {
 }
 
 func (e InstanceTypeFilterError) Error() string {
+	msg := e.message()
+	// The generic message doesn't say that a full reservation was the only thing left, so name it.
+	if e.fullReservationOnly > 0 {
+		msg += fmt.Sprintf(" (%d instance type(s) skipped because their only compatible reserved offering is full)", e.fullReservationOnly)
+	}
+	return msg
+}
+
+func (e InstanceTypeFilterError) message() string {
 	// minValues is specified in the requirements and is not met
 	if e.minValuesIncompatibleErr != nil {
 		return fmt.Sprintf("%s, requirements=%s, resources=%s", e.minValuesIncompatibleErr.Error(), e.requirements, e.resourcesString())
@@ -615,7 +626,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
 			// about why scheduling failed
 			itCompat := compatible(it, requirements)
-			itFits, itHasOffering := fits(it, totalRequestsForInstanceType, requirements, skipOffering)
+			itFits, itHasOffering, itSkippedFit := fits(it, totalRequestsForInstanceType, requirements, skipOffering)
 
 			// track if any single instance type met a single criteria
 			err.requirementsMet = err.requirementsMet || itCompat
@@ -631,6 +642,9 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			// any errors.
 			if itCompat && itFits && itHasOffering {
 				remaining = append(remaining, it)
+			} else if itCompat && itSkippedFit {
+				// Without the skip, this instance type would have been kept.
+				err.fullReservationOnly++
 			}
 		}
 	}
@@ -660,23 +674,27 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 // fits reports whether the instance type has a compatible offering with enough allocatable for the requests.
 // Offerings for which skipOffering returns true are not offerings for the pod.
 // A nil skipOffering skips none.
-func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements, skipOffering func(*cloudprovider.Offering) bool) (itFits bool, hasOffering bool) {
+// skippedFit reports whether a skipped offering was compatible and had enough allocatable, which is only worked out for the error message.
+func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements, skipOffering func(*cloudprovider.Offering) bool) (itFits bool, hasOffering bool, skippedFit bool) {
 	for _, group := range instanceType.AllocatableOfferingsList() {
 		resourceFit := resources.Fits(requests, group.Allocatable)
 		for _, of := range group.Offerings {
 			if skipOffering != nil && skipOffering(of) {
+				if resourceFit && !skippedFit && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+					skippedFit = true
+				}
 				continue
 			}
 			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				hasOffering = true
 				if resourceFit {
-					return true, true
+					return true, true, skippedFit
 				}
 				break
 			}
 		}
 	}
-	return false, hasOffering
+	return false, hasOffering, skippedFit
 }
 
 // filterInstanceTypesByVolumeAttachmentLimits returns the instance types which can support the given volumes. Instance types
