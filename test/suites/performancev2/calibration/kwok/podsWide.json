@@ -1,0 +1,376 @@
+{
+  "provider": "kwok",
+  "source": "EKS us-west-2, tier-xl provisioned control plane, controller 8 CPU / 24Gi on m7i.4xlarge, 5 baselines over 4 clusters",
+  "baseline_commit": "8ea58d7",
+  "generated": "2026-11-19T18:43:30Z",
+  "phases": {
+    "podsWide/consolidation": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 0.275,
+        "min": 0.269,
+        "max": 0.311,
+        "cv": 0.06,
+        "suggested_bound": 0.373,
+        "variants": {
+          "m1822": 0.273,
+          "m1966": 0.316,
+          "m959": 0.261,
+          "mconc1": 0.212,
+          "rv1973": 0.312
+        },
+        "controls": {
+          "rv2013": 0.252
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.897,
+        "min": 0.887,
+        "max": 0.91,
+        "cv": 0.008,
+        "suggested_bound": 0.771,
+        "variants": {
+          "m1822": 0.902,
+          "m1966": 0.879,
+          "m959": 0.889,
+          "mconc1": 0.916,
+          "rv1973": 0.897
+        },
+        "controls": {
+          "rv2013": 0.899
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 119.155,
+        "min": 92.348,
+        "max": 141.854,
+        "cv": 0.149,
+        "suggested_bound": 170,
+        "variants": {
+          "m1822": 105.88,
+          "m1966": 102.185,
+          "m959": 102.042,
+          "mconc1": 72.286,
+          "rv1973": 103.972
+        },
+        "controls": {
+          "rv2013": 100.525
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.909,
+        "min": 0.894,
+        "max": 0.926,
+        "cv": 0.014,
+        "suggested_bound": 0.777,
+        "variants": {
+          "m1822": 0.885,
+          "m1966": 0.928,
+          "m959": 0.908,
+          "mconc1": 0.906,
+          "rv1973": 0.907
+        },
+        "controls": {
+          "rv2013": 0.912
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 102,
+        "min": 100,
+        "max": 107,
+        "cv": 0.025,
+        "suggested_bound": 129,
+        "variants": {
+          "m1822": 100,
+          "m1966": 102,
+          "m959": 104,
+          "mconc1": 98,
+          "rv1973": 104
+        },
+        "controls": {
+          "rv2013": 100
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 5,
+        "median": 2,
+        "min": 1,
+        "max": 2,
+        "cv": 0.306,
+        "suggested_bound": 4,
+        "variants": {
+          "m1822": 2,
+          "m1966": 2,
+          "m959": 2,
+          "mconc1": 0,
+          "rv1973": 2
+        },
+        "controls": {
+          "rv2013": 1
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 5,
+        "median": 1,
+        "min": 0,
+        "max": 1,
+        "cv": 0.5,
+        "suggested_bound": 3,
+        "variants": {
+          "m1822": 1,
+          "m1966": 0,
+          "m959": 1,
+          "mconc1": 0,
+          "rv1973": 0
+        },
+        "controls": {
+          "rv2013": 1
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 5,
+        "median": 1,
+        "min": 0,
+        "max": 2,
+        "cv": 0.632,
+        "suggested_bound": 3,
+        "variants": {
+          "m1822": 1,
+          "m1966": 1,
+          "m959": 1,
+          "mconc1": 0,
+          "rv1973": 1
+        },
+        "controls": {
+          "rv2013": 1
+        }
+      },
+      "pods_disrupted": {
+        "n": 5,
+        "median": 196,
+        "min": 179,
+        "max": 210,
+        "cv": 0.061,
+        "suggested_bound": 252,
+        "variants": {
+          "m1822": 140,
+          "m1966": 250,
+          "m959": 220,
+          "mconc1": 129,
+          "rv1973": 191
+        },
+        "controls": {
+          "rv2013": 188
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 758.56,
+        "min": 652.704,
+        "max": 923.359,
+        "cv": 0.127,
+        "suggested_bound": 1108,
+        "variants": {
+          "m1822": 581.564,
+          "m1966": 884.388,
+          "m959": 869.791,
+          "mconc1": 651.757,
+          "rv1973": 702.653
+        },
+        "controls": {
+          "rv2013": 869.332
+        }
+      }
+    },
+    "podsWide/scaleOut": {
+      "cpu_cores": {
+        "n": 5,
+        "median": 0.768,
+        "min": 0.71,
+        "max": 0.816,
+        "cv": 0.046,
+        "suggested_bound": 0.992,
+        "variants": {
+          "m1822": 0.95,
+          "m1966": 0.848,
+          "m959": 0.771,
+          "mconc1": 0.124,
+          "rv1973": 0.869
+        },
+        "controls": {
+          "rv2013": 0.827
+        }
+      },
+      "cpu_util": {
+        "n": 5,
+        "median": 0.831,
+        "min": 0.796,
+        "max": 0.844,
+        "cv": 0.021,
+        "suggested_bound": 0.692,
+        "variants": {
+          "m1822": 0.811,
+          "m1966": 0.808,
+          "m959": 0.805,
+          "mconc1": 0.855,
+          "rv1973": 0.814
+        },
+        "controls": {
+          "rv2013": 0.838
+        }
+      },
+      "heap_mb": {
+        "n": 5,
+        "median": 143.825,
+        "min": 102.187,
+        "max": 158.715,
+        "cv": 0.145,
+        "suggested_bound": 192,
+        "variants": {
+          "m1822": 134.363,
+          "m1966": 119.81,
+          "m959": 123.29,
+          "mconc1": 70.937,
+          "rv1973": 134.078
+        },
+        "controls": {
+          "rv2013": 114.596
+        }
+      },
+      "memory_util": {
+        "n": 5,
+        "median": 0.823,
+        "min": 0.785,
+        "max": 0.843,
+        "cv": 0.026,
+        "suggested_bound": 0.683,
+        "variants": {
+          "m1822": 0.801,
+          "m1966": 0.797,
+          "m959": 0.796,
+          "mconc1": 0.847,
+          "rv1973": 0.807
+        },
+        "controls": {
+          "rv2013": 0.828
+        }
+      },
+      "nodes": {
+        "n": 5,
+        "median": 162,
+        "min": 155,
+        "max": 165,
+        "cv": 0.022,
+        "suggested_bound": 198,
+        "variants": {
+          "m1822": 159,
+          "m1966": 156,
+          "m959": 163,
+          "mconc1": 164,
+          "rv1973": 159
+        },
+        "controls": {
+          "rv2013": 154
+        }
+      },
+      "pod_ready_seconds_max": {
+        "n": 5,
+        "median": 15,
+        "min": 14,
+        "max": 17,
+        "cv": 0.077,
+        "suggested_bound": 21,
+        "variants": {
+          "m1822": 16,
+          "m1966": 16,
+          "m959": 16,
+          "mconc1": 397,
+          "rv1973": 15
+        },
+        "controls": {
+          "rv2013": 14
+        }
+      },
+      "pod_ready_seconds_p50": {
+        "n": 5,
+        "median": 9,
+        "min": 9,
+        "max": 9,
+        "cv": 0,
+        "suggested_bound": 14,
+        "variants": {
+          "m1822": 10,
+          "m1966": 10,
+          "m959": 9,
+          "mconc1": 217,
+          "rv1973": 9
+        },
+        "controls": {
+          "rv2013": 9
+        }
+      },
+      "pod_ready_seconds_p95": {
+        "n": 5,
+        "median": 15,
+        "min": 12,
+        "max": 15,
+        "cv": 0.083,
+        "suggested_bound": 23,
+        "variants": {
+          "m1822": 16,
+          "m1966": 16,
+          "m959": 14,
+          "mconc1": 290,
+          "rv1973": 14
+        },
+        "controls": {
+          "rv2013": 14
+        }
+      },
+      "pod_ready_seconds_p99": {
+        "n": 5,
+        "median": 15,
+        "min": 14,
+        "max": 17,
+        "cv": 0.064,
+        "suggested_bound": 26,
+        "variants": {
+          "m1822": 16,
+          "m1966": 16,
+          "m959": 15,
+          "mconc1": 304,
+          "rv1973": 15
+        },
+        "controls": {
+          "rv2013": 14
+        }
+      },
+      "total_time_seconds": {
+        "n": 5,
+        "median": 17,
+        "min": 16,
+        "max": 18,
+        "cv": 0.044,
+        "suggested_bound": 21.6,
+        "variants": {
+          "m1822": 17,
+          "m1966": 18,
+          "m959": 17,
+          "mconc1": 402,
+          "rv1973": 16
+        },
+        "controls": {
+          "rv2013": 15
+        }
+      }
+    }
+  },
+  "kinds": {
+    "podsWide/consolidation": "consolidation",
+    "podsWide/scaleOut": "scale-out"
+  }
+}

@@ -26,7 +26,7 @@ import (
 
 // All lists every scenario, grouped: each customer question first, then its variants (Scenario.Group).
 var All = []perf.Scenario{
-	Pods,
+	Pods, PodsWide,
 	NodePools,
 	Topology,
 	Replacement,
