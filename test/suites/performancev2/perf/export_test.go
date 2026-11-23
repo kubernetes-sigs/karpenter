@@ -43,3 +43,7 @@ func (r ReplacementTracker) Stop(now time.Time) *Result {
 }
 
 func Resized(p *Provider, s *Scenario, sizes map[Vector]int) bool { return p.resized(s, sizes) }
+
+func Utilization(nodes []corev1.Node, pods []corev1.Pod) (cpu, memory float64) {
+	return utilization(nodes, pods)
+}
