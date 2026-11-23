@@ -28,7 +28,7 @@ import (
 var All = []perf.Scenario{
 	Pods, PodsWide, PodsBalanced, PodsBalancedChurn, PodsBalancedHeterogeneous,
 	NodePools, NodePoolsDiverse, NodePoolsTargeted,
-	Topology,
+	Topology, TopologyHostname,
 	Replacement,
 	ReplacementDoNotDisrupt,
 }

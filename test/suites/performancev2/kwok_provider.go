@@ -69,6 +69,7 @@ func KWOK(c env.Clients) *perf.Provider {
 		},
 		// Bounds follow the calibration and the rule in perf/suggest.go. Heap baselines moved 24-33% between the
 		// October and November EKS runs with the same core, so heap stays Experimental.
+		Sizes: map[string]map[perf.Vector]int{"topologyHostname": {perf.VectorPods: 2000}},
 		Catalog: perf.Catalog{
 			Zones:        [][]string{{"test-zone-a"}, {"test-zone-b"}, {"test-zone-c"}, {"test-zone-d"}, {"test-zone-a", "test-zone-b"}},
 			Arches:       []string{v1.ArchitectureAmd64, v1.ArchitectureArm64},
