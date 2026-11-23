@@ -22,8 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samber/lo"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -273,7 +271,7 @@ func benchPod(nodeName string, index int, ownedByDaemonSet, managedFields bool) 
 				{Name: "hostsys", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys"}}},
 				{Name: "varlog", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/log"}}},
 				{Name: "kube-api-access", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{
-					{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Path: "token", ExpirationSeconds: lo.ToPtr[int64](3607)}},
+					{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Path: "token", ExpirationSeconds: new(int64(3607))}},
 					{ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"}, Items: []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}}}},
 					{DownwardAPI: &corev1.DownwardAPIProjection{Items: []corev1.DownwardAPIVolumeFile{{Path: "namespace", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}}}},
 				}}}},
@@ -294,7 +292,7 @@ func benchPod(nodeName string, index int, ownedByDaemonSet, managedFields bool) 
 				Image:       "123456789012.dkr.ecr.us-east-1.amazonaws.com/workload-init:1.2.3",
 				ImageID:     "123456789012.dkr.ecr.us-east-1.amazonaws.com/workload-init@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
 				ContainerID: "containerd://fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
-				Started:     lo.ToPtr(false),
+				Started:     new(false),
 				State:       corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Completed"}},
 			}},
 			ContainerStatuses: []corev1.ContainerStatus{
@@ -309,7 +307,7 @@ func benchPod(nodeName string, index int, ownedByDaemonSet, managedFields bool) 
 			Kind:       "DaemonSet",
 			Name:       fmt.Sprintf("workload-%d", index),
 			UID:        types.UID(fmt.Sprintf("1a2b3c4d-5e6f-7081-92a3-%012d", index)),
-			Controller: lo.ToPtr(true),
+			Controller: new(true),
 		}}
 	}
 	if managedFields {
@@ -343,7 +341,7 @@ func benchContainerStatus(name, image string) corev1.ContainerStatus {
 		ImageID:      "123456789012.dkr.ecr.us-east-1.amazonaws.com/" + image + "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		ContainerID:  "containerd://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		Ready:        true,
-		Started:      lo.ToPtr(true),
+		Started:      new(true),
 		RestartCount: 1,
 		State:        corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: benchTime}},
 		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
