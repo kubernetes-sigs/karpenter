@@ -25,6 +25,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // Kind groups metrics by the question they answer: how long a state change took (duration), where it
@@ -82,6 +85,44 @@ var (
 		OnBreach: "More churn for the same change: extra or flapping disruption decisions, or a worse consolidation order.",
 		Value:    func(r *Result) float64 { return float64(r.PodsDisrupted) }}
 
+	NodeClaimsProvisioned = Metric{Name: "nodeclaims_provisioned", Kind: KindOutcome, Unit: "nodeclaims", Upper: true,
+		Measures: "NodeClaims created for pending pods during the phase (karpenter_nodeclaims_created_total{reason=provisioned} delta).",
+		OnBreach: "More launches for the same pods: duplicates from a re-pack, or replacements that don't fit the evicted pods.",
+		Value: func(r *Result) float64 {
+			return float64(r.Counter("karpenter_nodeclaims_created_total", map[string]string{metrics.ReasonLabel: metrics.ProvisionedReason}))
+		}}
+	SingleNodeReplaces = Metric{Name: "single_node_replaces", Kind: KindOutcome, Unit: "decisions", Upper: true,
+		Measures: "Single-node consolidation replace decisions during the phase.",
+		OnBreach: "More one-at-a-time replaces: a weaker multi-node pass, or replacements consolidated again.",
+		Value: func(r *Result) float64 {
+			return float64(r.Counter(decisionsTotal, map[string]string{disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType.Name, "decision": string(disruption.ReplaceDecision)}))
+		}}
+	ConsolidationTimedOut = Metric{Name: "consolidation_timed_out", Kind: KindOutcome, Unit: "bool", Upper: true,
+		Measures: "1 if consolidation hadn't settled by the phase's timeout.",
+		OnBreach: "Consolidation didn't converge: flapping, repeated replaces, or a slow pass.",
+		Value:    func(r *Result) float64 { return lo.Ternary(r.ConsolidationTimedOut, 1.0, 0.0) }}
+
+	NodeClaimRounds = Metric{Name: "nodeclaim_rounds", Kind: KindOutcome, Unit: "rounds", Upper: true,
+		Measures: "Bursts of NodeClaim creation during the phase, split by gaps over 5s.",
+		OnBreach: "More provisioning passes for the same pods.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.NodeClaimRounds) }}
+	LatePods = Metric{Name: "late_pods", Kind: KindOutcome, Unit: "pods", Upper: true,
+		Measures: "Pods bound to a NodeClaim created after the phase's first NodeClaim registered.",
+		OnBreach: "More pods missed the capacity planned for them; they set pod_ready p95/p99.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.LatePods) }}
+	OffRound1Pods = Metric{Name: "off_round1_pods", Kind: KindOutcome, Unit: "pods", Upper: true,
+		Measures: "Pods bound anywhere but a first-round NodeClaim.",
+		OnBreach: "The first round held fewer of the pods: worse packing, or pods taking slots planned for others.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.OffRound1Pods) }}
+	PreRegDupNodeClaims = Metric{Name: "prereg_dup_nodeclaims", Kind: KindOutcome, Unit: "nodeclaims", Upper: true,
+		Measures: "NodeClaims created after the first round but before any registered.",
+		OnBreach: "Re-packing in-flight NodeClaims launched duplicates for pods that already had capacity.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.PreRegDupNodeClaims) }}
+	PostRegNodeClaims = Metric{Name: "postreg_nodeclaims", Kind: KindOutcome, Unit: "nodeclaims", Upper: true,
+		Measures: "NodeClaims created after the phase's first NodeClaim registered.",
+		OnBreach: "A second wave launched for pods still pending: see late_pods.",
+		Value:    func(r *Result) float64 { return float64(r.Timeline.PostRegNodeClaims) }}
+
 	// PodReady is the per-pod view of latency: each quantile is its own metric, so a provider can gate p95
 	// and only warn on p99 and max, which are noisier but are what the slowest customer sees.
 	PodReady = podReadyMetrics()
@@ -90,7 +131,8 @@ var (
 	// phase (it's still in the report as latency_stats). Cut for now because in 13 single runs a negative
 	// control (revert #2013) moved it +42%, as much as real regressions did, so it would flake. It needs
 	// repeated runs or base-vs-head on the same cluster before it can gate.
-	Metrics = []Metric{TotalTimeSeconds, PodReady.P50, PodReady.P95, PodReady.P99, PodReady.Max, StartupSeconds, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores}
+	Metrics = []Metric{TotalTimeSeconds, PodReady.P50, PodReady.P95, PodReady.P99, PodReady.Max, StartupSeconds, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores,
+		NodeClaimsProvisioned, SingleNodeReplaces, ConsolidationTimedOut, NodeClaimRounds, LatePods, OffRound1Pods, PreRegDupNodeClaims, PostRegNodeClaims}
 )
 
 type QuantileMetrics struct {
