@@ -396,7 +396,8 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		})
 
 		// Within each allocatable group, fits stops at the first compatible offering it does not skip.
-		// So the full reservation is listed first here, and the launchable offering after it must still count.
+		// So the full reservation is listed first here.
+		// The launchable offering after it must still count.
 		It("still counts an instance type whose full reservation is listed before its launchable offering", func() {
 			it := newReservedType(reservedOffering("r-full", true, 0))
 			it.Offerings = append(cloudprovider.Offerings{it.Offerings[len(it.Offerings)-1]}, it.Offerings[:len(it.Offerings)-1]...)
