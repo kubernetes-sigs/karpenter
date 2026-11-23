@@ -234,6 +234,7 @@ spec:
                       - effect
                       - key
                     type: object
+                  maxItems: 100
                   type: array
                   x-kubernetes-list-type: atomic
                 taints:
@@ -270,6 +271,7 @@ spec:
                       - effect
                       - key
                     type: object
+                  maxItems: 100
                   type: array
                   x-kubernetes-list-type: atomic
                 terminationGracePeriod:

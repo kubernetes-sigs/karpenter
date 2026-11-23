@@ -26,16 +26,18 @@ import (
 // NodeClaimSpec describes the desired state of the NodeClaim
 type NodeClaimSpec struct {
 	// taints will be applied to the NodeClaim's node.
+	// +kubebuilder:validation:MaxItems=100
 	// +optional
 	// +listType=atomic
-	Taints []v1.Taint `json:"taints,omitempty"`
+	Taints []v1.Taint `json:"taints,omitempty"` //nolint:kubeapilinter // empty is valid and equivalent to unset; MinItems would reject existing objects
 	// startupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
 	// within a short period of time, typically by a DaemonSet that tolerates the taint. These are commonly used by
 	// daemonsets to allow initialization and enforce startup ordering.  StartupTaints are ignored for provisioning
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
+	// +kubebuilder:validation:MaxItems=100
 	// +optional
 	// +listType=atomic
-	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
+	StartupTaints []v1.Taint `json:"startupTaints,omitempty"` //nolint:kubeapilinter // empty is valid and equivalent to unset; MinItems would reject existing objects
 	// Requirements are layered with GetLabels and applied to every node.
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"

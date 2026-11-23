@@ -130,6 +130,7 @@ spec:
                       - operator
                     type: object
                   maxItems: 100
+                  minItems: 0
                   type: array
                   x-kubernetes-list-type: atomic
                   x-kubernetes-validations:
