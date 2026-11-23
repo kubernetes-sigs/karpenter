@@ -29,6 +29,8 @@ var All = []perf.Scenario{
 	Pods,
 	NodePools,
 	Topology,
+	Replacement,
+	ReplacementDoNotDisrupt,
 }
 
 func zoneSpread() test.DeploymentOptionModifier {
