@@ -103,7 +103,7 @@ var _ = Describe("StaticDrift", func() {
 		})
 
 		It("should allow candidate construction when a static NodePool is scaled to zero replicas", func() {
-			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
+			nodePool.Spec.Replicas = new(int64(0))
 			ExpectApplied(ctx, env.Client, nodePool)
 			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
 		})
