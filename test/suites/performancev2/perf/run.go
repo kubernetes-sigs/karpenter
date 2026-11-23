@@ -391,31 +391,42 @@ func hasTaint(n *corev1.Node, key string) bool {
 }
 
 func (r *Run) reserved() (cpu, memory float64) {
-	var allocCPU, allocMem, reqCPU, reqMem int64
-	nodes := sets.New[string]()
-	for _, n := range r.nodes() {
-		allocCPU += n.Status.Allocatable.Cpu().MilliValue()
-		allocMem += n.Status.Allocatable.Memory().Value()
-		nodes.Insert(n.Name)
-	}
 	pods := &corev1.PodList{}
 	Expect(r.Provider.Client.List(r.ctx, pods)).To(Succeed())
-	for _, p := range pods.Items {
-		// DaemonSet requests are per-node overhead that depends on the cluster's add-ons, not on how Karpenter packed
-		// the workload, so they'd make utilization a property of the environment.
-		if !nodes.Has(p.Spec.NodeName) || p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed || isDaemonSetPod(&p) {
+	return utilization(r.nodes(), pods.Items)
+}
+
+// utilization is the workload's requests over the capacity left for it: allocatable minus DaemonSet requests.
+// DaemonSets are per-node overhead set by the cluster's add-ons, so they're out of both sides, and utilization
+// measures how Karpenter packed the workload rather than the environment.
+func utilization(nodes []corev1.Node, pods []corev1.Pod) (cpu, memory float64) {
+	var capCPU, capMem, reqCPU, reqMem int64
+	names := sets.New[string]()
+	for _, n := range nodes {
+		capCPU += n.Status.Allocatable.Cpu().MilliValue()
+		capMem += n.Status.Allocatable.Memory().Value()
+		names.Insert(n.Name)
+	}
+	for _, p := range pods {
+		if !names.Has(p.Spec.NodeName) || p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue
 		}
+		var podCPU, podMem int64
 		for _, c := range p.Spec.Containers {
-			reqCPU += c.Resources.Requests.Cpu().MilliValue()
-			reqMem += c.Resources.Requests.Memory().Value()
+			podCPU += c.Resources.Requests.Cpu().MilliValue()
+			podMem += c.Resources.Requests.Memory().Value()
 		}
+		if isDaemonSetPod(&p) {
+			capCPU, capMem = capCPU-podCPU, capMem-podMem
+			continue
+		}
+		reqCPU, reqMem = reqCPU+podCPU, reqMem+podMem
 	}
-	if allocCPU > 0 {
-		cpu = float64(reqCPU) / float64(allocCPU)
+	if capCPU > 0 {
+		cpu = float64(reqCPU) / float64(capCPU)
 	}
-	if allocMem > 0 {
-		memory = float64(reqMem) / float64(allocMem)
+	if capMem > 0 {
+		memory = float64(reqMem) / float64(capMem)
 	}
 	return cpu, memory
 }
