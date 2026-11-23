@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,7 +41,7 @@ type Phase struct {
 	src          *source
 	prof         *profiler
 	start        time.Time
-	initialNodes int
+	initialNodes []string
 	skip         bool
 }
 
@@ -51,7 +52,7 @@ func (r *Run) StartPhase(name string) *Phase {
 		return &Phase{r: r, id: id, skip: true}
 	}
 	src := startSource(r.ctx, r.Provider)
-	return &Phase{r: r, id: id, gates: gates, src: src, prof: startProfiler(r.ctx, r.Provider, src.pod), start: time.Now(), initialNodes: len(r.nodes())}
+	return &Phase{r: r, id: id, gates: gates, src: src, prof: startProfiler(r.ctx, r.Provider, src.pod), start: time.Now(), initialNodes: nodeNames(r.nodes())}
 }
 
 // AwaitScaleOut waits for the pods to be healthy. Its total time runs from the first pod's creation to the last
@@ -105,6 +106,40 @@ func (p *Phase) AwaitConsolidation(fromPods, toPods int, timeout time.Duration) 
 	return p.end(rep, last)
 }
 
+// AwaitDrift ends the phase once every node from its start is replaced, nothing is disrupting, and the scenario has
+// the given healthy pods.
+func (p *Phase) AwaitDrift(pods int, timeout time.Duration) *Result {
+	GinkgoHelper()
+	if p.skip {
+		return nil
+	}
+	timeout = p.r.timeout(timeout)
+	rounds, inRound := 0, false
+	Eventually(func(g Gomega) {
+		nodes := p.r.nodes()
+		disrupting := p.r.disrupting()
+		switch {
+		case disrupting > 0 && !inRound:
+			rounds, inRound = rounds+1, true
+		case disrupting == 0:
+			inRound = false
+		}
+		remaining := sets.New(nodeNames(nodes)...).Intersection(sets.New(p.initialNodes...))
+		g.Expect(remaining.UnsortedList()).To(BeEmpty(), "nodes from before drift")
+		g.Expect(disrupting).To(BeZero(), "nodes being disrupted")
+		g.Expect(p.r.healthyPods()).To(Equal(pods), "healthy %s pods", p.r.Scenario.Name)
+	}).WithTimeout(timeout).WithPolling(settlePoll).Should(Succeed())
+	return p.end(&Result{Kind: "drift", Pods: pods, Rounds: rounds}, time.Now())
+}
+
+func nodeNames(nodes []corev1.Node) []string {
+	out := make([]string, 0, len(nodes))
+	for i := range nodes {
+		out = append(out, nodes[i].Name)
+	}
+	return out
+}
+
 func (p *Phase) end(rep *Result, lastActivity time.Time) *Result {
 	GinkgoHelper()
 	if rep.Total == 0 {
@@ -117,7 +152,7 @@ func (p *Phase) end(rep *Result, lastActivity time.Time) *Result {
 	rep.PodReady = p.r.podReadyQuantiles(p.start)
 	nodes := p.r.nodes()
 	rep.Resources, rep.LatencyStats, rep.Counters, rep.Gauges, rep.Commit = res, hists, counters, gauges, p.src.commit
-	rep.Nodes, rep.NodesNetChange = len(nodes), len(nodes)-p.initialNodes
+	rep.Nodes, rep.NodesNetChange = len(nodes), len(nodes)-len(p.initialNodes)
 	rep.ReservedCPUUtil, rep.ReservedMemoryUtil = p.r.reserved()
 	rep.Timeline = timeline(p.start, p.r.scenarioPods(), nodes, p.r.nodeClaims())
 	keepMixPrices(rep.Gauges, rep.Timeline.NodeMix)

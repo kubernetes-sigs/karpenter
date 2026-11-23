@@ -17,7 +17,7 @@ limitations under the License.
 package performancev2
 
 import (
-	_ "embed"
+	"embed"
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,8 +31,10 @@ import (
 	"sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 )
 
+// Add calibration/kwok to the directive with the first calibration/kwok/<scenario>.json.
+//
 //go:embed calibration/kwok.json
-var kwokCalibration []byte
+var kwokCalibration embed.FS
 
 // Provider returns the plugin named by KARPENTER_PERF_PROVIDER: kwok (the default) or kwok-ci.
 func Provider(c env.Clients) *perf.Provider {
@@ -67,13 +69,18 @@ func KWOK(c env.Clients) *perf.Provider {
 			np.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 			return np
 		},
-		// Bounds follow calibration/kwok.json (cmd/calibrate): the larger of 1.2x the baseline max and median +
-		// 2.33 sd (the smaller of max/1.15 and median - 2.33 sd for utilization). Stable only where cmd/inventory's
-		// evidence check passes. Heap baselines moved 24-33% between the October and November EKS runs, and October's
-		// core reproduces the November numbers, so the environment moved, not core. Heap stays Experimental until it
-		// holds across environments.
-		Calibration: perf.MustLoadCalibration(kwokCalibration),
-		Levels: perf.Levels{
+		// Bounds follow the calibration and the rule in perf/suggest.go. Heap baselines moved 24-33% between the
+		// October and November EKS runs with the same core, so heap stays Experimental.
+		Catalog: perf.Catalog{
+			Zones:        [][]string{{"test-zone-a"}, {"test-zone-b"}, {"test-zone-c"}, {"test-zone-d"}, {"test-zone-a", "test-zone-b"}},
+			Arches:       []string{v1.ArchitectureAmd64, v1.ArchitectureArm64},
+			SizeKey:      v1alpha1.InstanceSizeLabelKey,
+			SizeCeilings: []string{"8", "16", "32"},
+			FamilyKey:    v1alpha1.InstanceFamilyLabelKey,
+			Families:     []string{"c", "m"},
+		},
+		Calibration: perf.MustLoadCalibrations(kwokCalibration, "calibration/kwok.json", "calibration/kwok/*.json"),
+		Levels: withMigrated(perf.Levels{
 			"pods/scaleOut": {
 				perf.PodReady.P95.Stable(18), perf.PodReady.P99.Stable(18), perf.PodReady.Max.Experimental(21),
 				perf.CPUUtil.Experimental(0.741), perf.MemoryUtil.Experimental(0.689), perf.Nodes.Experimental(200),
@@ -93,6 +100,6 @@ func KWOK(c env.Clients) *perf.Provider {
 				perf.PodReady.P95.Experimental(35), perf.PodReady.P99.Experimental(36), perf.PodReady.Max.Experimental(41),
 				perf.Nodes.Experimental(874), perf.HeapMB.Experimental(316), perf.CPUCores.Experimental(1.265),
 			},
-		},
+		}, func(l scenarioLevels) perf.Levels { return l.KWOK }),
 	}
 }

@@ -68,6 +68,17 @@ type Quantiles struct {
 	Max   float64 `json:"max"`
 }
 
+// Histograms returns every non-empty series of a histogram family whose labels include the given ones.
+func (r *Result) Histograms(name string, labels map[string]string) []HistogramStats {
+	var out []HistogramStats
+	for _, h := range r.LatencyStats {
+		if h.MetricName == name && hasLabels(h.Labels, labels) && h.Count > 0 {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // Histogram, Counter and Gauge read what the phase captured, for provider Metrics, over the series of a family
 // whose labels include the given ones: Histogram returns the busiest series, Counter the sum, Gauge the first.
 func (r *Result) Histogram(name string, labels map[string]string) HistogramStats {

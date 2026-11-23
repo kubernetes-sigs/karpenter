@@ -74,6 +74,17 @@ func run(ctx context.Context, p *Provider, all []Scenario, s *Scenario, cell map
 	}
 }
 
+// EnabledScenarios names the scenarios the provider runs, in order.
+func EnabledScenarios(p *Provider, scenarios []Scenario) []string {
+	var out []string
+	for i := range scenarios {
+		if p.enabled(&scenarios[i]) {
+			out = append(out, scenarios[i].Name)
+		}
+	}
+	return out
+}
+
 func (p *Provider) enabled(s *Scenario) bool {
 	for id := range p.Levels {
 		if strings.HasPrefix(id, s.Name+"/") {
