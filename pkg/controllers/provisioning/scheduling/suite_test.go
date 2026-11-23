@@ -4528,7 +4528,6 @@ var _ = Context("Scheduling", func() {
 				} else {
 					podOptions.PodAntiRequirements = []corev1.PodAffinityTerm{term}
 				}
-				nodePool := test.NodePool()
 				ss := test.StatefulSet(test.StatefulSetOptions{Replicas: int32(lo.Max([]int{replacementOrdinal, 0}) + 1), PodOptions: podOptions})
 				ExpectApplied(ctx, env.Client, nodePool, ss)
 
@@ -4543,8 +4542,8 @@ var _ = Context("Scheduling", func() {
 							Kind:               "StatefulSet",
 							Name:               ss.Name,
 							UID:                ss.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						}},
 					}
 					return test.Pod(opts)
