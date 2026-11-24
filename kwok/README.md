@@ -77,6 +77,30 @@ set the `--instance-types-file-path` flag or `INSTANCE_TYPES_FILE_PATH` environm
 There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json) that you can
 regenerate with `make gen_instance_types`.
 
+## Controller retry configuration
+
+Pass `controllers.WithRetryConfig(controllers.RetryConfiguration{...})` to
+`controllers.NewControllers` to set retries per controller. Each entry uses
+`pkg/utils/controller.RetryConfig`. No operator flags are needed.
+
+KWOK's [`main.go`](main.go) sets all four fields for `NodeClaimLifecycle` and
+`NodeTermination`. Zero-valued fields keep the controller's defaults, including
+concurrency-derived QPS and burst. Direct controller constructors also accept optional
+`WithRetryConfig(...)` options; omit them to keep the defaults.
+
+- `InitialDelay`: per-resource delay after the first failed reconciliation.
+- `MaxDelay`: maximum per-resource exponential backoff.
+- `QPS`: controller-wide token-bucket retry scheduling rate.
+- `Burst`: token-bucket capacity.
+
+Invalid settings fail registration. After defaults apply, delays and burst must be positive,
+QPS must be positive and finite, and `InitialDelay` must not exceed `MaxDelay`.
+
+Settings cover all failed reconciliations, so lifecycle shares them between creation and
+deletion. The longer of the backoff and bucket delays wins; bucket waits can exceed
+`MaxDelay`. Watch events can trigger earlier reconciliations. These settings do not enforce
+cloud-operation cooldowns or account-wide API limits.
+
 ## Testing
 
 To test the provider, run `make e2etests` in the root of the repository.

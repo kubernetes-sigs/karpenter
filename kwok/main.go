@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"time"
+
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -27,6 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
 func main() {
@@ -55,5 +58,19 @@ func main() {
 			op.InstanceTypeStore,
 			op.PredictionStore,
 			controllers.WithVPAPrediction(),
+			controllers.WithRetryConfig(controllers.RetryConfiguration{
+				NodeClaimLifecycle: utilscontroller.RetryConfig{
+					InitialDelay: 2 * time.Second,
+					MaxDelay:     5 * time.Minute,
+					QPS:          5,
+					Burst:        10,
+				},
+				NodeTermination: utilscontroller.RetryConfig{
+					InitialDelay: 2 * time.Second,
+					MaxDelay:     5 * time.Minute,
+					QPS:          5,
+					Burst:        10,
+				},
+			}),
 		)...).Start(ctx)
 }
