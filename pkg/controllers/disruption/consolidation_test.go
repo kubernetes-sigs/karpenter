@@ -2511,6 +2511,69 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 			ExpectExists(ctx, env.Client, node)
 		})
+		It("considers pending pods when consolidating", func() {
+			// on-demand, to keep this on the plain replace path (spot and on-demand types cost the same here, and this file
+			// turns on spot-to-spot consolidation)
+			largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
+				return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0 && item.Offerings[0].CapacityType() == v1.CapacityTypeOnDemand
+			})
+			sort.Slice(largeTypes, func(i, j int) bool {
+				return largeTypes[i].Offerings[0].Price < largeTypes[j].Offerings[0].Price
+			})
+
+			largeCheapType := largeTypes[0]
+			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: largeCheapType.Name,
+						v1.CapacityTypeLabelKey:        largeCheapType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       largeCheapType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
+						corev1.ResourcePods: *largeCheapType.Capacity.Pods(),
+					},
+				},
+			})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			// there is a pending pod that should land on the node
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+			})
+			unsched := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("62"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
+
+			// bind one of the pods to the node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+
+			// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
+			// node to schedule, which prevents the large expensive node from being replaced
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 	})
 	Context("Delete", func() {
 		var nodeClaims []*v1.NodeClaim
