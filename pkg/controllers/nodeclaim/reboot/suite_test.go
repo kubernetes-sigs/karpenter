@@ -84,6 +84,14 @@ func (c *nodeClaimDeleteErrorClient) Delete(ctx context.Context, obj client.Obje
 	return c.Client.Delete(ctx, obj, opts...)
 }
 
+// nodeClaimTerminationWarnings returns the messages of TerminationGracePeriodExpiring events published on NodeClaims.
+func nodeClaimTerminationWarnings() []string {
+	return lo.FilterMap(recorder.Events(), func(e events.Event, _ int) (string, bool) {
+		_, onNodeClaim := e.InvolvedObject.(*v1.NodeClaim)
+		return e.Message, e.Reason == events.TerminationGracePeriodExpiring && onNodeClaim
+	})
+}
+
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
@@ -630,7 +638,9 @@ var _ = Describe("Reboot Lifecycle", func() {
 
 			expectReplaced(nodeClaim, "recovery_timeout")
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Add(5*time.Minute).Format(time.RFC3339)))
+			deadline := env.Clock.Now().Add(5 * time.Minute).Format(time.RFC3339)
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, deadline))
+			Expect(nodeClaimTerminationWarnings()).To(ConsistOf("All pods will be deleted by " + deadline))
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		})
 
@@ -646,6 +656,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 			expectReplaced(nodeClaim, "recovery_timeout")
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, earlier))
+			Expect(nodeClaimTerminationWarnings()).To(BeEmpty())
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		})
 

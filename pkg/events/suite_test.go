@@ -125,6 +125,16 @@ var _ = Describe("Dedupe", func() {
 		eventRecorder.Publish(evt)
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(2))
 	})
+	It("should warn again when a NodeClaim's termination deadline is tightened within the dedupe timeout", func() {
+		nodeClaim := NodeClaimWithUID()
+		deadline := time.Now().Add(time.Hour)
+		eventRecorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, deadline.Format(time.RFC3339)))
+		eventRecorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, deadline.Format(time.RFC3339)))
+		Expect(internalRecorder.Calls(events.TerminationGracePeriodExpiring)).To(Equal(1))
+
+		eventRecorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, deadline.Add(-30*time.Minute).Format(time.RFC3339)))
+		Expect(internalRecorder.Calls(events.TerminationGracePeriodExpiring)).To(Equal(2))
+	})
 	It("should allow events with different entities to be created", func() {
 		for range 100 {
 			eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID(), ""))
