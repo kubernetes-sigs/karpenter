@@ -20,17 +20,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/patrickmn/go-cache"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/utils/clock"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
 const (
-	rebootHistoryWindow          = 24 * time.Hour
-	rebootHistoryCleanupInterval = time.Hour
-	rebootsBeforeReplacement     = 2
+	rebootHistoryWindow      = 24 * time.Hour
+	rebootsBeforeReplacement = 2
 )
 
 type rebootHistoryEntry struct {
@@ -42,7 +41,7 @@ type rebootHistoryEntry struct {
 type RebootHistory struct {
 	mu     sync.Mutex
 	clock  clock.Clock
-	recent *cache.Cache
+	recent *cache.Expiring
 }
 
 func NewRebootHistory() *RebootHistory {
@@ -52,7 +51,7 @@ func NewRebootHistory() *RebootHistory {
 func newRebootHistory(clk clock.Clock) *RebootHistory {
 	return &RebootHistory{
 		clock:  clk,
-		recent: cache.New(rebootHistoryWindow, rebootHistoryCleanupInterval),
+		recent: cache.NewExpiringWithClock(clk),
 	}
 }
 
@@ -71,7 +70,7 @@ func (h *RebootHistory) RecordCommittedReboot(nodeClaimUID types.UID) {
 	}
 	entry.committedAt[entry.count] = now
 	entry.count++
-	h.recent.SetDefault(key, entry)
+	h.recent.Set(key, entry, rebootHistoryWindow)
 }
 
 // Resolve applies recent reboot history to the candidate's current policy decision, escalating a reboot to replacement
