@@ -86,6 +86,9 @@ type Store struct {
 	kubeClient    client.Client
 	hydrationCh   chan struct{}
 	hydrationOnce sync.Once
+	// hydratedMu orders writes to StoreHydrated, so a waiter's 0 can't land after MarkHydrated's 1
+	hydratedMu sync.Mutex
+	hydrated   bool
 	// byWorkload indexes all contending predictions by the workload they apply to.
 	// Entries are sorted by strength (strongest first).
 	byWorkload map[WorkloadReference][]workloadEntry
@@ -129,12 +132,30 @@ func (s *Store) RegisterTargetKinds(ctx context.Context, informers cache.Informe
 }
 
 func (s *Store) MarkHydrated() {
-	s.hydrationOnce.Do(func() { close(s.hydrationCh) })
+	s.hydrationOnce.Do(func() {
+		s.hydratedMu.Lock()
+		defer s.hydratedMu.Unlock()
+		s.hydrated = true
+		// Set before close, so Hydrated returning true implies the gauge reads 1
+		StoreHydrated.Set(1, nil)
+		close(s.hydrationCh)
+	})
 }
 
 var HydrationTimeout = time.Minute
 
 func (s *Store) Hydrated(ctx context.Context) bool {
+	select {
+	case <-s.hydrationCh:
+		return true
+	default:
+	}
+	// Only a waiter exports 0, so processes that never wait, e.g. standby replicas, export no series
+	s.hydratedMu.Lock()
+	if !s.hydrated {
+		StoreHydrated.Set(0, nil)
+	}
+	s.hydratedMu.Unlock()
 	select {
 	case <-s.hydrationCh:
 		return true
