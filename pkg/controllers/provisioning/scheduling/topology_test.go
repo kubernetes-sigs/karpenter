@@ -1879,6 +1879,7 @@ var _ = Describe("Topology", func() {
 				NodeSelector: nodeSelector,
 				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
 					MaxSkew:            1,
+					MinDomains:         lo.ToPtr(int32(3)),
 					TopologyKey:        topologyKey,
 					WhenUnsatisfiable:  corev1.DoNotSchedule,
 					LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
@@ -1897,10 +1898,9 @@ var _ = Describe("Topology", func() {
 			return pod
 		}
 
-		// Replicas already running on term[0] nodes in zone-1 and zone-2 force the next replica into zone-3. kube-scheduler
-		// counts those replicas because they sit on nodes matching one of the pod's required node affinity terms. Relaxing
-		// away term[0] must not make Karpenter stop counting them, otherwise it places the fallback replica in a zone that
-		// kube-scheduler will reject.
+		// With minDomains=3, replicas on term[0] nodes in zone-1 and zone-2 make zone-3 the only valid placement.
+		// Relaxing away term[0] must not stop topology from counting those replicas; otherwise Karpenter may select
+		// zone-1 or zone-2, which kube-scheduler will reject.
 		DescribeTable("should keep counting replicas on higher-priority terms after relaxing to a fallback term",
 			func(nodeAffinityPolicy *corev1.NodeInclusionPolicy) {
 				if nodeAffinityPolicy != nil && env.Version.Minor() < 26 {
@@ -1983,8 +1983,9 @@ var _ = Describe("Topology", func() {
 					Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, tc.expectedZone))
 				}
 			},
-			// term[1] isn't offered in zone-3, so the original terms must stay in the filter across two relaxations for the
-			// replica to reach term[2] in zone-3 rather than term[1] in zone-1 or zone-2
+			// term[1] isn't offered in zone-3, so retaining the original affinity terms requires relaxing through
+			// term[1] to term[2]. Without the fix, Karpenter may select term[1] in zone-1 or zone-2, although it may
+			// select term[2] in zone-3 by chance.
 			Entry("walks past a fallback term that isn't offered in the required zone", spreadFallbackCase{
 				topologyKey: corev1.LabelTopologyZone,
 				instanceTypes: []*cloudprovider.InstanceType{
