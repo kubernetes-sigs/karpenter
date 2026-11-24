@@ -20,11 +20,13 @@ import (
 	"golang.org/x/tools/go/analysis"
 
 	"sigs.k8s.io/karpenter/hack/tools/karpenterlint/internal/analyzers/ginkgoonly"
+	"sigs.k8s.io/karpenter/hack/tools/karpenterlint/internal/analyzers/loopabort"
 )
 
 // All returns every karpenterlint analyzer.
 func All() []*analysis.Analyzer {
 	return []*analysis.Analyzer{
 		ginkgoonly.Analyzer,
+		loopabort.Analyzer,
 	}
 }

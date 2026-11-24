@@ -160,7 +160,8 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if candidate.RepairPolicyResult.Action == cloudprovider.RebootNode {
 			committed, err := r.commitReboot(ctx, candidate)
 			if err != nil {
-				return []Command{}, err
+				log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate.NodeClaim)).Error(err, "skipping repair candidate, failed committing reboot")
+				continue
 			}
 			if !committed {
 				continue
@@ -238,7 +239,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return []Command{}, err
+			return []Command{}, err //nolint:karpenterlint // simulation errors are cluster-wide (API reads, scheduler timeout), not per candidate
 		}
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.

@@ -152,7 +152,7 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 	for _, node := range n {
 		p, err := node.Pods(ctx, kubeClient)
 		if err != nil {
-			return nil, err
+			return nil, err //nolint:karpenterlint // a partial pod list would make disruption simulate without some pods
 		}
 		pods = append(pods, p...)
 	}
@@ -164,7 +164,7 @@ func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient c
 	for _, node := range n {
 		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient, clk, recorder)
 		if err != nil {
-			return nil, err
+			return nil, err //nolint:karpenterlint // a partial pod list would make disruption simulate without some pods
 		}
 		pods = append(pods, p...)
 	}
