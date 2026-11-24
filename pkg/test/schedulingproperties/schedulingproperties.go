@@ -197,8 +197,14 @@ func drawScenario(t *caseT, cfg Config, satisfiable bool) scenario {
 	np := lo.TernaryF(cfg.NodePool == nil, func() *v1.NodePool {
 		return test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	}, cfg.NodePool.DeepCopy)
+	// An empty label value is valid, and its key is a single domain that pods can spread across.
+	var emptyLabelKeys []string
 	for i := range t.intRange(0, 2) {
-		np.Spec.Template.Labels = lo.Assign(np.Spec.Template.Labels, map[string]string{fmt.Sprintf("example.com/label-%d", i): "true"})
+		key, value := fmt.Sprintf("example.com/label-%d", i), sampledFrom(t, []string{"true", ""})
+		np.Spec.Template.Labels = lo.Assign(np.Spec.Template.Labels, map[string]string{key: value})
+		if value == "" {
+			emptyLabelKeys = append(emptyLabelKeys, key)
+		}
 	}
 	for i := range t.intRange(0, 2) {
 		np.Spec.Template.Spec.Taints = append(np.Spec.Template.Spec.Taints, corev1.Taint{
@@ -244,9 +250,8 @@ func drawScenario(t *caseT, cfg Config, satisfiable bool) scenario {
 			return !it.Requirements.Has(key) || it.Requirements.Get(key).Operator() == corev1.NodeSelectorOpIn
 		})
 	})...)
-	topologyKeys := append([]string{corev1.LabelHostname}, lo.Without([]string{corev1.LabelTopologyZone}, cfg.KnownDeviations.UnsortedList()...)...)
 	constraints := lo.Map(groups, func(group string, _ int) podConstraints {
-		return drawPodConstraints(t, group, topologyKeys, satisfiable)
+		return drawPodConstraints(t, group, emptyLabelKeys, lo.Without([]string{corev1.LabelTopologyZone}, cfg.KnownDeviations.UnsortedList()...), satisfiable)
 	})
 	s.pods = make([]*corev1.Pod, t.intRange(1, t.limits.Pods))
 	for i := range s.pods {
@@ -298,12 +303,15 @@ type podConstraints struct {
 	spread          []corev1.TopologySpreadConstraint
 }
 
-// drawPodConstraints draws group's pod constraints over topology keys, the first of which is hostname. Satisfiable pods
-// can each have their own node, so their hard spreads and anti-affinity only use hostname, because Karpenter counts
-// zones it could launch into as empty spread domains, and they don't require affinity, because pods requiring it may
-// not fit on one node.
-func drawPodConstraints(t *caseT, group string, keys []string, satisfiable bool) podConstraints {
-	required := lo.Ternary(satisfiable, keys[:1], keys)
+// drawPodConstraints draws group's pod constraints over hostname, the NodePool's empty label keys, and other topology
+// keys. Satisfiable pods can each have their own node, so their hard spreads only use hostname and the empty label
+// keys, whose single domain every node shares, and their anti-affinity only uses hostname, because Karpenter counts
+// zones it could launch into as empty spread domains. They don't require affinity, because pods requiring it may not
+// fit on one node.
+func drawPodConstraints(t *caseT, group string, emptyLabelKeys, otherKeys []string, satisfiable bool) podConstraints {
+	keys := append(append([]string{corev1.LabelHostname}, emptyLabelKeys...), otherKeys...)
+	required := lo.Ternary(satisfiable, keys[:1+len(emptyLabelKeys)], keys)
+	antiAffinityKeys := lo.Ternary(satisfiable, keys[:1], keys)
 	selecting := func(selected string) *metav1.LabelSelector {
 		return &metav1.LabelSelector{MatchLabels: map[string]string{groupLabelKey: selected}}
 	}
@@ -331,7 +339,7 @@ func drawPodConstraints(t *caseT, group string, keys []string, satisfiable bool)
 	}
 	if t.bool() {
 		c.podAntiAffinity = &corev1.PodAntiAffinity{}
-		c.podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{{LabelSelector: selecting(sampledFrom(t, groups)), TopologyKey: sampledFrom(t, required)}}
+		c.podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{{LabelSelector: selecting(sampledFrom(t, groups)), TopologyKey: sampledFrom(t, antiAffinityKeys)}}
 	}
 	if t.bool() {
 		c.podAffinity = lo.CoalesceOrEmpty(c.podAffinity, &corev1.PodAffinity{})
