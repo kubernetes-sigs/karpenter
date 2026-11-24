@@ -17,14 +17,17 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -73,6 +76,115 @@ var _ = Describe("StaticDrift", func() {
 					corev1.ResourcePods: resource.MustParse("12"),
 				},
 			},
+		})
+	})
+
+	Context("Precheck", func() {
+		var staticDrift *disruption.StaticDrift
+
+		BeforeEach(func() {
+			staticDrift = disruption.NewStaticDrift(env.Client, cluster, prov, cloudProvider, recorder, nodePoolBackoff)
+		})
+
+		It("should not allow candidate construction when no NodePool exists", func() {
+			Expect(staticDrift.Precheck(ctx)).To(BeFalse())
+		})
+
+		It("should not allow candidate construction when every NodePool is dynamic", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.NodePool())
+			Expect(staticDrift.Precheck(ctx)).To(BeFalse())
+		})
+
+		It("should allow candidate construction when a static NodePool exists", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
+		})
+
+		It("should allow candidate construction when a static NodePool exists alongside dynamic NodePools", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), nodePool, test.NodePool())
+			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
+		})
+
+		It("should allow candidate construction when a static NodePool is scaled to zero replicas", func() {
+			nodePool.Spec.Replicas = new(int64(0))
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(staticDrift.Precheck(ctx)).To(BeTrue())
+		})
+
+		It("should still drift a dynamic NodePool's drifted NodeClaim when no static NodePool exists", func() {
+			dynamicNodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						Budgets: []v1.Budget{{Nodes: "100%"}},
+					},
+				},
+			})
+			dynamicNodeClaim, dynamicNode := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            dynamicNodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			dynamicNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, dynamicNodePool, dynamicNodeClaim, dynamicNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{dynamicNode}, []*v1.NodeClaim{dynamicNodeClaim})
+
+			// Drift runs after StaticDrift. Skipping StaticDrift must not stop it from disrupting this NodeClaim.
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, dynamicNodeClaim)
+			ExpectNotFound(ctx, env.Client, dynamicNodeClaim)
+		})
+	})
+
+	Context("Precheck in the disruption loop", func() {
+		var countingClient *pdbListCountingClient
+		var staticDriftOnlyController *disruption.Controller
+
+		BeforeEach(func() {
+			countingClient = &pdbListCountingClient{Client: env.Client}
+			staticDriftOnlyController = disruption.NewController(ctx, env.Clock, countingClient, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+				disruption.WithMethods(disruption.NewStaticDrift(countingClient, cluster, prov, cloudProvider, recorder, nodePoolBackoff)))
+
+			// A dynamic NodePool with one node, so candidate construction would have a node to evaluate. It is not
+			// drifted, so whenever candidates are built none survive the filter and the loop stops before scheduling.
+			dynamicNodePool := test.NodePool()
+			dynamicNodeClaim, dynamicNode := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            dynamicNodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{ProviderID: test.RandomProviderID()},
+			})
+			ExpectApplied(ctx, env.Client, dynamicNodePool, dynamicNodeClaim, dynamicNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{dynamicNode}, []*v1.NodeClaim{dynamicNodeClaim})
+		})
+
+		It("should not construct candidates when no static NodePool exists", func() {
+			ExpectSingletonReconciled(ctx, staticDriftOnlyController)
+			Expect(countingClient.calls()).To(BeZero())
+		})
+
+		It("should construct candidates when a static NodePool exists", func() {
+			// The control for the spec above: the same loop, and the only difference is a static NodePool, so a zero
+			// count there comes from the precheck and not from the loop returning before it reaches StaticDrift.
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectSingletonReconciled(ctx, staticDriftOnlyController)
+			Expect(countingClient.calls()).To(Equal(1))
 		})
 	})
 
@@ -964,3 +1076,28 @@ var _ = Describe("StaticDrift", func() {
 		})
 	})
 })
+
+// pdbListCountingClient counts PodDisruptionBudget lists. Candidate construction lists PodDisruptionBudgets exactly
+// once per pass, and that list stays in the per-method path wherever NodePool instance types are resolved, so the
+// count shows whether a Method's candidate construction ran at all.
+type pdbListCountingClient struct {
+	client.Client
+
+	mu       sync.Mutex
+	pdbLists int
+}
+
+func (c *pdbListCountingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*policyv1.PodDisruptionBudgetList); ok {
+		c.mu.Lock()
+		c.pdbLists++
+		c.mu.Unlock()
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
+func (c *pdbListCountingClient) calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pdbLists
+}

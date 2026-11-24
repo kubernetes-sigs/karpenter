@@ -122,7 +122,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder, nodePoolBackoff)))
+				disruption.WithMethods(disruption.NewStaticDrift(env.Client, cluster, prov, cloudProvider, recorder, nodePoolBackoff)))
 		})
 
 		It("issues a delete-only command for a static NodePool at its node limit when TerminateFirstDrift is enabled", func() {
@@ -259,7 +259,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 					[]*corev1.Node{node, healthyNode}, []*v1.NodeClaim{nodeClaim, healthyNodeClaim})
 				erroring := &instanceTypesErrorCloudProvider{CloudProvider: cloudProvider, nodePools: []string{nodePool.Name}}
 				staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-					disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, erroring, recorder, nodePoolBackoff)))
+					disruption.WithMethods(disruption.NewStaticDrift(env.Client, cluster, prov, erroring, recorder, nodePoolBackoff)))
 
 				ExpectSingletonReconciled(ctx, staticDriftController)
 

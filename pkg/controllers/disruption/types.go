@@ -75,6 +75,16 @@ type Method interface {
 	ConsolidationType() string
 }
 
+// Prechecker is implemented by disruption methods that can rule themselves out without building candidates.
+// Candidate construction is cluster-wide work — it resolves the instance types of every NodePool and evaluates every
+// node in cluster state — so a Method that can answer "nothing I could act on exists" from a cheap read should say so
+// before paying for it.
+type Prechecker interface {
+	// Precheck reports whether this Method could produce a command on this loop. It must return false only when no
+	// candidate could pass ShouldDisrupt, since a false return skips candidate construction entirely.
+	Precheck(context.Context) (bool, error)
+}
+
 type CandidateFilter func(context.Context, *Candidate) bool
 
 // Candidate is a state.StateNode that we are considering for disruption along with extra information to be used in
