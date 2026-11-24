@@ -18,9 +18,7 @@ package performancev2
 
 import "sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 
-// topologyHostnameLevels: see levels.go for the rule. Utilization is measured only until recalibrated without DaemonSet
-// requests, and kwok-ci keeps only heap and CPU, the series perfv1 measured the same way. No Stable gates: mconc1 makes scaleOut time out, which fails the
-// spec but leaves no report to count. kwok runs perfv1's XL size (kwok_provider.go Sizes).
+// topologyHostnameLevels: Experimental starting bounds; calibrate before promoting any to Stable.
 var topologyHostnameLevels = scenarioLevels{
 	KWOK: perf.Levels{
 		"topologyHostname/scaleOut": {

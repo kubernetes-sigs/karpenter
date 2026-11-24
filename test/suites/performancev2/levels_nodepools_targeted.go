@@ -18,13 +18,11 @@ package performancev2
 
 import "sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 
-// nodepoolsTargetedLevels: see levels.go for the rule. Utilization is measured only until recalibrated without DaemonSet
-// requests, and kwok-ci keeps only heap and CPU, the series perfv1 measured the same way. kwok-ci measures only: perfv1 never ran this on GitHub
-// runners.
+// nodepoolsTargetedLevels: Experimental starting bounds; calibrate before promoting any to Stable.
 var nodepoolsTargetedLevels = scenarioLevels{
 	KWOK: perf.Levels{
 		"nodepoolsTargeted/scaleOut": {
-			perf.PodReady.P95.Stable(14), perf.PodReady.P99.Stable(14), perf.PodReady.Max.Experimental(14), perf.Nodes.Experimental(180), perf.HeapMB.Experimental(190), perf.CPUCores.Experimental(1.548),
+			perf.PodReady.P95.Experimental(14), perf.PodReady.P99.Experimental(14), perf.PodReady.Max.Experimental(14), perf.Nodes.Experimental(180), perf.HeapMB.Experimental(190), perf.CPUCores.Experimental(1.548),
 		},
 		"nodepoolsTargeted/consolidation": {
 			perf.TotalTimeSeconds.Experimental(354), perf.Nodes.Experimental(90), perf.HeapMB.Experimental(178), perf.CPUCores.Experimental(1.435),

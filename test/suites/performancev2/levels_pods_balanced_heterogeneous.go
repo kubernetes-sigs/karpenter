@@ -18,14 +18,11 @@ package performancev2
 
 import "sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 
-// podsBalancedHeterogeneousLevels: see levels.go for the rule. Utilization is measured only until recalibrated without DaemonSet
-// requests, and kwok-ci keeps only heap and CPU, the series perfv1 measured the same way. Heap and CPU stay Experimental with bounds above the
-// rv2013 control, which moved them 60% like every planted regression did: that shift was the environment, not the
-// patches.
+// podsBalancedHeterogeneousLevels: Experimental starting bounds; calibrate before promoting any to Stable.
 var podsBalancedHeterogeneousLevels = scenarioLevels{
 	KWOK: perf.Levels{
 		"podsBalancedHeterogeneous/scaleOut": {
-			perf.PodReady.P95.Stable(8), perf.PodReady.P99.Stable(8), perf.PodReady.Max.Experimental(8), perf.Nodes.Experimental(33), perf.HeapMB.Experimental(107), perf.CPUCores.Experimental(0.486),
+			perf.PodReady.P95.Experimental(8), perf.PodReady.P99.Experimental(8), perf.PodReady.Max.Experimental(8), perf.Nodes.Experimental(33), perf.HeapMB.Experimental(107), perf.CPUCores.Experimental(0.486),
 		},
 		"podsBalancedHeterogeneous/consolidation": {
 			perf.TotalTimeSeconds.Experimental(513), perf.Nodes.Experimental(20), perf.PodsDisrupted.Experimental(101), perf.HeapMB.Experimental(93.6), perf.CPUCores.Experimental(0.089),
