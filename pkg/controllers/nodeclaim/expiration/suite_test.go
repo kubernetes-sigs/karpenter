@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -192,6 +193,13 @@ var _ = Describe("Expiration", func() {
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
+	It("should requeue when the clock moves past expiration during reconcile", func() {
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		clk := &steppingClock{FakeClock: clocktesting.NewFakeClock(nodeClaim.CreationTimestamp.Add(29 * time.Second)), step: 2 * time.Second}
+		result := ExpectObjectReconciled(ctx, env.Client, expiration.NewController(clk, env.Client, cp), nodeClaim)
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+	})
 	It("should not remove non-expired NodeClaims", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim)
@@ -241,3 +249,18 @@ var _ = Describe("Expiration", func() {
 		})
 	})
 })
+
+type steppingClock struct {
+	*clocktesting.FakeClock
+	step time.Duration
+}
+
+func (c *steppingClock) Now() time.Time {
+	now := c.FakeClock.Now()
+	c.Step(c.step)
+	return now
+}
+
+func (c *steppingClock) Since(t time.Time) time.Duration {
+	return c.Now().Sub(t)
+}
