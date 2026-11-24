@@ -18,8 +18,11 @@ package scheduling
 
 import (
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -62,6 +65,22 @@ func MakeTopologyNodeFilter(p *corev1.Pod, taintPolicy corev1.NodeInclusionPolic
 	}
 
 	return filter
+}
+
+func (t TopologyNodeFilter) Hash() (uint64, error) {
+	return hashstructure.Hash(struct {
+		Requirements   [][]v1.NodeSelectorRequirementWithMinValues
+		TaintPolicy    corev1.NodeInclusionPolicy
+		AffinityPolicy corev1.NodeInclusionPolicy
+		Tolerations    []corev1.Toleration
+	}{
+		Requirements: lo.Map(t.Requirements, func(r scheduling.Requirements, _ int) []v1.NodeSelectorRequirementWithMinValues {
+			return r.NodeSelectorRequirements()
+		}),
+		TaintPolicy:    t.TaintPolicy,
+		AffinityPolicy: t.AffinityPolicy,
+		Tolerations:    t.Tolerations,
+	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 }
 
 // Matches returns true if the TopologyNodeFilter doesn't prohibit node from the participating in the topology
