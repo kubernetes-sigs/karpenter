@@ -32,24 +32,24 @@ import (
 )
 
 var _ = Describe("Repair Policies", func() {
-	supportedActions := sets.New(cloudprovider.RebootNode, cloudprovider.ReplaceNode)
+	supportedActions := sets.New(cloudprovider.Reboot, cloudprovider.Replace)
 	defaultFallback := cloudprovider.RepairPolicy{
 		ConditionType:      "AcceleratorReady",
 		ConditionStatus:    corev1.ConditionFalse,
 		TolerationDuration: 30 * time.Minute,
-		Action:             cloudprovider.ReplaceNode,
+		Action:             cloudprovider.Replace,
 	}
 	validSpecific := cloudprovider.RepairPolicy{
 		ConditionType:      "AcceleratorReady",
 		ConditionStatus:    corev1.ConditionFalse,
 		ReasonRegex:        `^NvidiaXID(48|63|95)Error$`,
 		TolerationDuration: 10 * time.Minute,
-		Action:             cloudprovider.RebootNode,
+		Action:             cloudprovider.Reboot,
 	}
 	negativeDuration := -time.Second
 
 	DescribeTable("validating complete policy sets",
-		func(policies []cloudprovider.RepairPolicy, actions sets.Set[cloudprovider.RepairAction], errorSubstring string) {
+		func(policies []cloudprovider.RepairPolicy, actions sets.Set[cloudprovider.DisruptionAction], errorSubstring string) {
 			_, err := newRepairPolicyMatcher(policies, actions)
 			if errorSubstring == "" {
 				Expect(err).NotTo(HaveOccurred())
@@ -67,19 +67,19 @@ var _ = Describe("Repair Policies", func() {
 				{
 					ConditionType:   "ConditionTrue",
 					ConditionStatus: corev1.ConditionTrue,
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 				{
 					ConditionType:   "ConditionFalse",
 					ConditionStatus: corev1.ConditionFalse,
 					ReasonRegex:     ".*",
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 				{
 					ConditionType:   "ConditionUnknown",
 					ConditionStatus: corev1.ConditionUnknown,
 					ReasonRegex:     ".*",
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 			},
 			supportedActions,
@@ -88,7 +88,7 @@ var _ = Describe("Repair Policies", func() {
 		Entry("rejects an empty condition type",
 			[]cloudprovider.RepairPolicy{{
 				ConditionStatus: corev1.ConditionFalse,
-				Action:          cloudprovider.ReplaceNode,
+				Action:          cloudprovider.Replace,
 			}},
 			supportedActions,
 			"empty condition type",
@@ -96,7 +96,7 @@ var _ = Describe("Repair Policies", func() {
 		Entry("rejects an invalid condition status",
 			[]cloudprovider.RepairPolicy{{
 				ConditionType: "AcceleratorReady",
-				Action:        cloudprovider.ReplaceNode,
+				Action:        cloudprovider.Replace,
 			}},
 			supportedActions,
 			"invalid condition status",
@@ -107,7 +107,7 @@ var _ = Describe("Repair Policies", func() {
 					ConditionType:   "AcceleratorReady",
 					ConditionStatus: corev1.ConditionFalse,
 					ReasonRegex:     "[",
-					Action:          cloudprovider.RebootNode,
+					Action:          cloudprovider.Reboot,
 				},
 				defaultFallback,
 			},
@@ -116,15 +116,15 @@ var _ = Describe("Repair Policies", func() {
 		),
 		Entry("rejects an unsupported action",
 			[]cloudprovider.RepairPolicy{validSpecific, defaultFallback},
-			sets.New(cloudprovider.ReplaceNode),
-			`unsupported action "RebootNode"`,
+			sets.New(cloudprovider.Replace),
+			`unsupported action "Reboot"`,
 		),
 		Entry("rejects a negative toleration",
 			[]cloudprovider.RepairPolicy{{
 				ConditionType:      "AcceleratorReady",
 				ConditionStatus:    corev1.ConditionFalse,
 				TolerationDuration: -time.Second,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			}},
 			supportedActions,
 			"negative toleration duration",
@@ -134,7 +134,7 @@ var _ = Describe("Repair Policies", func() {
 				ConditionType:          "AcceleratorReady",
 				ConditionStatus:        corev1.ConditionFalse,
 				TerminationGracePeriod: &negativeDuration,
-				Action:                 cloudprovider.ReplaceNode,
+				Action:                 cloudprovider.Replace,
 			}},
 			supportedActions,
 			"negative termination grace period",
@@ -144,7 +144,7 @@ var _ = Describe("Repair Policies", func() {
 				ConditionType:   "AcceleratorReady",
 				ConditionStatus: corev1.ConditionFalse,
 				Priority:        -1,
-				Action:          cloudprovider.ReplaceNode,
+				Action:          cloudprovider.Replace,
 			}},
 			supportedActions,
 			"priority -1 outside the supported range [0, 100]",
@@ -154,7 +154,7 @@ var _ = Describe("Repair Policies", func() {
 				ConditionType:   "AcceleratorReady",
 				ConditionStatus: corev1.ConditionFalse,
 				Priority:        101,
-				Action:          cloudprovider.ReplaceNode,
+				Action:          cloudprovider.Replace,
 			}},
 			supportedActions,
 			"priority 101 outside the supported range [0, 100]",
@@ -170,7 +170,7 @@ var _ = Describe("Repair Policies", func() {
 				{
 					ConditionType:   "StorageReady",
 					ConditionStatus: corev1.ConditionFalse,
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 			},
 			supportedActions,
@@ -180,7 +180,7 @@ var _ = Describe("Repair Policies", func() {
 			[]cloudprovider.RepairPolicy{{
 				ConditionType:   "AcceleratorReady",
 				ConditionStatus: corev1.ConditionFalse,
-				Action:          cloudprovider.RebootNode,
+				Action:          cloudprovider.Reboot,
 			}},
 			supportedActions,
 			"default fallback policy",
@@ -194,7 +194,7 @@ var _ = Describe("Repair Policies", func() {
 				ConditionStatus: corev1.ConditionFalse,
 				ReasonRegex:     "[",
 				Priority:        17,
-				Action:          cloudprovider.RebootNode,
+				Action:          cloudprovider.Reboot,
 			},
 			defaultFallback,
 		}
@@ -236,19 +236,19 @@ var _ = Describe("Repair Policies", func() {
 					ConditionStatus:    condition.Status,
 					ReasonRegex:        `XID(48|63)`,
 					TolerationDuration: 10 * time.Minute,
-					Action:             cloudprovider.RebootNode,
+					Action:             cloudprovider.Reboot,
 				},
 				{
 					ConditionType:      condition.Type,
 					ConditionStatus:    condition.Status,
 					ReasonRegex:        `48Error$`,
 					TolerationDuration: 30 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 				{
 					ConditionType:   condition.Type,
 					ConditionStatus: condition.Status,
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 			}
 			matcher = newMatcher(policies)
@@ -256,12 +256,12 @@ var _ = Describe("Repair Policies", func() {
 
 		It("suppresses an eligible fallback while specific policies are waiting", func() {
 			Expect(evaluate(matcher, now.Add(5*time.Minute), condition).Action).To(BeEmpty())
-			Expect(evaluate(matcher, now.Add(10*time.Minute), condition).Action).To(Equal(cloudprovider.RebootNode))
+			Expect(evaluate(matcher, now.Add(10*time.Minute), condition).Action).To(Equal(cloudprovider.Reboot))
 		})
 
 		It("merges eligible policies into a single result", func() {
 			result := evaluate(matcher, now.Add(15*time.Minute), condition)
-			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
+			Expect(result.Action).To(Equal(cloudprovider.Reboot))
 			Expect(result.Condition).To(Equal(condition.Type))
 			Expect(result.ConditionStatus).To(Equal(condition.Status))
 			Expect(result.Reason).To(Equal(condition.Reason))
@@ -270,7 +270,7 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 
 			result = evaluate(matcher, now.Add(35*time.Minute), condition)
-			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+			Expect(result.Action).To(Equal(cloudprovider.Replace))
 			Expect(result.Condition).To(Equal(condition.Type))
 			Expect(result.ConditionStatus).To(Equal(condition.Status))
 			Expect(result.Reason).To(Equal(condition.Reason))
@@ -287,19 +287,19 @@ var _ = Describe("Repair Policies", func() {
 					ConditionStatus:    condition.Status,
 					ReasonRegex:        "XID48",
 					TolerationDuration: 20 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 				{
 					ConditionType:      condition.Type,
 					ConditionStatus:    condition.Status,
 					ReasonRegex:        "48Error",
 					TolerationDuration: 10 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 				{
 					ConditionType:   condition.Type,
 					ConditionStatus: condition.Status,
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 			}
 			reversed := slices.Clone(sameActionPolicies)
@@ -307,7 +307,7 @@ var _ = Describe("Repair Policies", func() {
 			for _, orderedPolicies := range [][]cloudprovider.RepairPolicy{sameActionPolicies, reversed} {
 				sameActionMatcher := newMatcher(orderedPolicies)
 				result := evaluate(sameActionMatcher, now.Add(25*time.Minute), condition)
-				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+				Expect(result.Action).To(Equal(cloudprovider.Replace))
 				Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			}
 		})
@@ -321,19 +321,19 @@ var _ = Describe("Repair Policies", func() {
 					ConditionStatus:        condition.Status,
 					ReasonRegex:            "XID48",
 					TerminationGracePeriod: &longGracePeriod,
-					Action:                 cloudprovider.ReplaceNode,
+					Action:                 cloudprovider.Replace,
 				},
 				{
 					ConditionType:          condition.Type,
 					ConditionStatus:        condition.Status,
 					ReasonRegex:            "48Error",
 					TerminationGracePeriod: &shortGracePeriod,
-					Action:                 cloudprovider.RebootNode,
+					Action:                 cloudprovider.Reboot,
 				},
 				{
 					ConditionType:   condition.Type,
 					ConditionStatus: condition.Status,
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 			}
 			reversed := slices.Clone(crossActionPolicies)
@@ -342,7 +342,7 @@ var _ = Describe("Repair Policies", func() {
 				gracePeriodMatcher := newMatcher(orderedPolicies)
 
 				result := evaluate(gracePeriodMatcher, now, condition)
-				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+				Expect(result.Action).To(Equal(cloudprovider.Replace))
 				Expect(result.TerminationGracePeriod).NotTo(BeNil())
 				Expect(*result.TerminationGracePeriod).To(Equal(shortGracePeriod))
 			}
@@ -355,7 +355,7 @@ var _ = Describe("Repair Policies", func() {
 					ConditionType:   "StorageReady",
 					ConditionStatus: corev1.ConditionFalse,
 					ReasonRegex:     "^KnownStorageFailure$",
-					Action:          cloudprovider.RebootNode,
+					Action:          cloudprovider.Reboot,
 				},
 			})
 
@@ -364,7 +364,7 @@ var _ = Describe("Repair Policies", func() {
 			storageCondition.Reason = "NewStorageFailure"
 			result := evaluate(crossConditionMatcher, now.Add(31*time.Minute), storageCondition)
 
-			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+			Expect(result.Action).To(Equal(cloudprovider.Replace))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("StorageReady")))
 			Expect(result.ConditionStatus).To(Equal(storageCondition.Status))
 			Expect(result.Reason).To(Equal(storageCondition.Reason))
@@ -379,17 +379,17 @@ var _ = Describe("Repair Policies", func() {
 					ConditionType:   condition.Type,
 					ConditionStatus: condition.Status,
 					ReasonRegex:     ".*",
-					Action:          cloudprovider.RebootNode,
+					Action:          cloudprovider.Reboot,
 				},
 				{
 					ConditionType:   condition.Type,
 					ConditionStatus: condition.Status,
-					Action:          cloudprovider.ReplaceNode,
+					Action:          cloudprovider.Replace,
 				},
 			}
 			matchAllMatcher := newMatcher(policies)
 
-			Expect(evaluate(matchAllMatcher, now, condition).Action).To(Equal(cloudprovider.RebootNode))
+			Expect(evaluate(matchAllMatcher, now, condition).Action).To(Equal(cloudprovider.Reboot))
 		})
 
 		It("does not match a different condition type or status", func() {
@@ -404,9 +404,9 @@ var _ = Describe("Repair Policies", func() {
 
 		It("scores a node using its most urgent eligible policy", func() {
 			nodeMatcher := newMatcher([]cloudprovider.RepairPolicy{
-				{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.Replace},
+				{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.Replace},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 			})
 			node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
 				{
@@ -423,7 +423,7 @@ var _ = Describe("Repair Policies", func() {
 
 			result := Resolve(nodeMatcher.Match(node), now, time.Time{})
 			Expect(result.ScoreAt(now)).To(Equal(float64(6)))
-			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+			Expect(result.Action).To(Equal(cloudprovider.Replace))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("HighPriority")))
 		})
 
@@ -431,9 +431,9 @@ var _ = Describe("Repair Policies", func() {
 			rebootGracePeriod := 5 * time.Minute
 			replaceGracePeriod := 15 * time.Minute
 			nodeMatcher := newMatcher([]cloudprovider.RepairPolicy{
-				{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, TerminationGracePeriod: &rebootGracePeriod, Action: cloudprovider.RebootNode},
-				{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 10, TerminationGracePeriod: &replaceGracePeriod, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, TerminationGracePeriod: &rebootGracePeriod, Action: cloudprovider.Reboot},
+				{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 10, TerminationGracePeriod: &replaceGracePeriod, Action: cloudprovider.Replace},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 			})
 			highPriority := corev1.NodeCondition{
 				Type:               "HighPriority",
@@ -451,7 +451,7 @@ var _ = Describe("Repair Policies", func() {
 			for _, conditions := range [][]corev1.NodeCondition{{highPriority, lowPriority}, {lowPriority, highPriority}} {
 				result := evaluate(nodeMatcher, now, conditions...)
 				Expect(result.ScoreAt(now)).To(Equal(float64(7)))
-				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+				Expect(result.Action).To(Equal(cloudprovider.Replace))
 				Expect(result.Condition).To(Equal(corev1.NodeConditionType("LowPriority")))
 				Expect(result.ConditionStatus).To(Equal(corev1.ConditionFalse))
 				Expect(result.Reason).To(Equal("LowPriorityFailure"))
@@ -467,10 +467,10 @@ var _ = Describe("Repair Policies", func() {
 		It("uses earliest eligibility, then condition type, to attribute equal termination grace periods", func() {
 			gracePeriod := 5 * time.Minute
 			nodeMatcher := newMatcher([]cloudprovider.RepairPolicy{
-				{ConditionType: "ConditionA", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "ConditionB", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "ConditionC", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "ConditionA", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.Replace},
+				{ConditionType: "ConditionB", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.Replace},
+				{ConditionType: "ConditionC", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.Replace},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 			})
 			conditionA := corev1.NodeCondition{Type: "ConditionA", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now)}
 			conditionB := corev1.NodeCondition{Type: "ConditionB", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Minute))}
@@ -484,9 +484,9 @@ var _ = Describe("Repair Policies", func() {
 
 		It("uses earliest eligibility to break equal-priority condition ties", func() {
 			nodeMatcher := newMatcher([]cloudprovider.RepairPolicy{
-				{ConditionType: "Earlier", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 20 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "Later", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "Earlier", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 20 * time.Minute, Priority: 50, Action: cloudprovider.Replace},
+				{ConditionType: "Later", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.Replace},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 			})
 			earlier := corev1.NodeCondition{
 				Type:               "Earlier",
@@ -507,9 +507,9 @@ var _ = Describe("Repair Policies", func() {
 
 		It("uses condition type to break complete policy ties", func() {
 			nodeMatcher := newMatcher([]cloudprovider.RepairPolicy{
-				{ConditionType: "ConditionA", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", Priority: 50, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "ConditionB", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", Priority: 50, Action: cloudprovider.ReplaceNode},
-				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "ConditionA", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", Priority: 50, Action: cloudprovider.Replace},
+				{ConditionType: "ConditionB", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", Priority: 50, Action: cloudprovider.Replace},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 			})
 			conditionA := corev1.NodeCondition{Type: "ConditionA", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now)}
 			conditionB := corev1.NodeCondition{Type: "ConditionB", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now)}
@@ -528,7 +528,7 @@ var _ = Describe("Repair Policies", func() {
 
 			Expect(Resolve(matcher.Match(node), now.Add(9*time.Minute), time.Time{}).Action).To(BeEmpty())
 			result := Resolve(matcher.Match(node), now.Add(10*time.Minute), time.Time{})
-			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
+			Expect(result.Action).To(Equal(cloudprovider.Reboot))
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 		})
 
@@ -539,13 +539,13 @@ var _ = Describe("Repair Policies", func() {
 					ConditionStatus:    condition.Status,
 					ReasonRegex:        "^ImmediateReason$",
 					TolerationDuration: 30 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 				{
 					ConditionType:      condition.Type,
 					ConditionStatus:    condition.Status,
 					TolerationDuration: 2 * time.Hour,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 			}
 			condition.LastTransitionTime = metav1.NewTime(now.Add(-time.Hour))
@@ -556,15 +556,15 @@ var _ = Describe("Repair Policies", func() {
 			condition.Reason = "ImmediateReason"
 			restartedMatcher := newMatcher(reasonPolicies)
 			result := evaluate(restartedMatcher, now, condition)
-			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+			Expect(result.Action).To(Equal(cloudprovider.Replace))
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(-30 * time.Minute)))
 		})
 	})
 
 	It("ranks a fallback-matched condition by the fallback's priority", func() {
 		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
-			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
-			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^XID$", TolerationDuration: time.Minute, Priority: 0, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: time.Minute, Priority: 10, Action: cloudprovider.Replace},
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^XID$", TolerationDuration: time.Minute, Priority: 0, Action: cloudprovider.Replace},
 		}, supportedActions))
 		node := func(reason string) *corev1.Node {
 			return &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
@@ -587,7 +587,7 @@ var _ = Describe("Repair Policies", func() {
 			"reason", "NvidiaXID48Error",
 			"reason-regex", `^NvidiaXID(48|63|95)Error$`,
 			"fallback", false,
-			"action", cloudprovider.RebootNode,
+			"action", cloudprovider.Reboot,
 			"eligible-at", time.Unix(0, 0).UTC().Add(10 * time.Minute),
 		}))
 	})
@@ -604,18 +604,18 @@ var _ = Describe("Repair Policies", func() {
 
 	It("describes a decision with the condition that set its drain bound", func() {
 		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
-			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: time.Minute, TerminationGracePeriod: lo.ToPtr(time.Minute), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: time.Minute, TerminationGracePeriod: lo.ToPtr(time.Minute), Action: cloudprovider.Replace},
 		}, supportedActions))
 		result := Resolve(matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
 			Type: "AcceleratorReady", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
 		}}}}), time.Unix(0, 0).Add(time.Hour), time.Time{})
-		Expect(result.LogValues()).To(ContainElements("action", cloudprovider.ReplaceNode, "termination-grace-period", time.Minute,
+		Expect(result.LogValues()).To(ContainElements("action", cloudprovider.Replace, "termination-grace-period", time.Minute,
 			"termination-grace-period-condition", corev1.NodeConditionType("AcceleratorReady")))
 	})
 
 	It("measures toleration from no earlier than notBefore", func() {
 		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
-			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 10 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 10 * time.Minute, Action: cloudprovider.Replace},
 		}, supportedActions))
 		matches := matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
 			Type: "AcceleratorReady", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
@@ -623,7 +623,7 @@ var _ = Describe("Repair Policies", func() {
 		notBefore := time.Unix(0, 0).Add(time.Hour)
 		Expect(Resolve(matches, notBefore.Add(9*time.Minute), notBefore).Action).To(BeEmpty())
 		result := Resolve(matches, notBefore.Add(10*time.Minute), notBefore)
-		Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+		Expect(result.Action).To(Equal(cloudprovider.Replace))
 		Expect(result.SelectedEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
 	})
 

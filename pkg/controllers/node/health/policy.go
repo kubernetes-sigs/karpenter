@@ -52,7 +52,7 @@ type compiledPolicy struct {
 }
 
 // supportedRepairActions are the repair actions node repair can perform.
-var supportedRepairActions = sets.New(cloudprovider.ReplaceNode, cloudprovider.RebootNode)
+var supportedRepairActions = sets.New(cloudprovider.Replace, cloudprovider.Reboot)
 
 // RepairPolicyMatcher validates and evaluates provider repair policies.
 type RepairPolicyMatcher struct {
@@ -65,7 +65,7 @@ type RepairPolicyMatcher struct {
 // and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
 // the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it.
 type RepairResult struct {
-	Action                           cloudprovider.RepairAction
+	Action                           cloudprovider.DisruptionAction
 	Condition                        corev1.NodeConditionType
 	ConditionStatus                  corev1.ConditionStatus
 	Reason                           string
@@ -112,7 +112,7 @@ func NewRepairPolicyMatcher(ctx context.Context, cloudProvider cloudprovider.Clo
 }
 
 // newRepairPolicyMatcher validates and compiles a complete provider repair policy set.
-func newRepairPolicyMatcher(policies []cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.RepairAction]) (*RepairPolicyMatcher, error) {
+func newRepairPolicyMatcher(policies []cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.DisruptionAction]) (*RepairPolicyMatcher, error) {
 	groups := map[policyKey][]compiledPolicy{}
 	var fallbackPolicy compiledPolicy
 	hasFallbackPolicy := false
@@ -143,11 +143,11 @@ func newRepairPolicyMatcher(policies []cloudprovider.RepairPolicy, supportedActi
 
 	if !hasFallbackPolicy {
 		errs = multierr.Append(errs, fmt.Errorf("repair policy set must define one default fallback"))
-	} else if fallbackPolicy.Action != cloudprovider.ReplaceNode {
+	} else if fallbackPolicy.Action != cloudprovider.Replace {
 		errs = multierr.Append(errs, fmt.Errorf(
 			"default fallback policy %+v must use action %q",
 			fallbackPolicy.RepairPolicy,
-			cloudprovider.ReplaceNode,
+			cloudprovider.Replace,
 		))
 	}
 	if errs != nil {
@@ -160,7 +160,7 @@ func newRepairPolicyMatcher(policies []cloudprovider.RepairPolicy, supportedActi
 	}, nil
 }
 
-func compileRepairPolicy(index int, policy cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.RepairAction]) (compiledPolicy, error) {
+func compileRepairPolicy(index int, policy cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.DisruptionAction]) (compiledPolicy, error) {
 	compiled := compiledPolicy{RepairPolicy: policy}
 	key := policyKey{conditionType: policy.ConditionType, conditionStatus: policy.ConditionStatus}
 	errs := validateRepairPolicy(index, policy, supportedActions)
@@ -173,7 +173,7 @@ func compileRepairPolicy(index int, policy cloudprovider.RepairPolicy, supported
 	return compiled, errs
 }
 
-func validateRepairPolicy(index int, policy cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.RepairAction]) error {
+func validateRepairPolicy(index int, policy cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.DisruptionAction]) error {
 	key := policyKey{conditionType: policy.ConditionType, conditionStatus: policy.ConditionStatus}
 	var errs error
 	appendError := func(err error) {

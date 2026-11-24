@@ -65,7 +65,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	BeforeEach(func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), TerminateFirstRepair: new(true)}}))
 		useRepairPolicies([]cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(repairTGP), Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(repairTGP), Action: cloudprovider.Replace},
 		})
 		repairController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 			disruption.WithMethods(disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))))

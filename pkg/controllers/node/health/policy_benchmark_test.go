@@ -45,16 +45,16 @@ func BenchmarkRepairPolicyMatcherMatchAndResolve(b *testing.B) {
 						ConditionStatus:    corev1.ConditionFalse,
 						ReasonRegex:        reasonRegex,
 						TolerationDuration: time.Minute,
-						Action:             cloudprovider.ReplaceNode,
+						Action:             cloudprovider.Replace,
 					})
 				}
 				policies = append(policies, cloudprovider.RepairPolicy{
 					ConditionType:      "AcceleratorReady",
 					ConditionStatus:    corev1.ConditionFalse,
 					TolerationDuration: time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				})
-				matcher, err := newRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
+				matcher, err := newRepairPolicyMatcher(policies, sets.New(cloudprovider.Replace))
 				if err != nil {
 					b.Fatal(err)
 				}

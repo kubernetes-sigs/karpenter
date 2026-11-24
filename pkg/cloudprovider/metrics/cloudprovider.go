@@ -67,7 +67,7 @@ var (
 var (
 	Method = opmetrics.Label{
 		Name: metricLabelMethod,
-		Help: "The CloudProvider interface method that was called, e.g. `Create`, `Delete`, `Get`, `List`, `GetInstanceTypes`, `IsDrifted`.",
+		Help: "The CloudProvider interface method that was called, e.g. `Create`, `Delete`, `Get`, `List`, `GetInstanceTypes`, `GetDriftStatus`.",
 	}
 	Provider = opmetrics.Label{
 		Name: metricLabelProvider,
@@ -196,14 +196,14 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 	return instanceType, err
 }
 
-func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (cloudprovider.DriftReason, error) {
-	method := "IsDrifted"
+func (d *decorator) GetDriftStatus(ctx context.Context, nodeClaim *v1.NodeClaim) (cloudprovider.DriftStatus, error) {
+	method := "GetDriftStatus"
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
-	isDrifted, err := d.CloudProvider.IsDrifted(ctx, nodeClaim)
+	driftStatus, err := d.CloudProvider.GetDriftStatus(ctx, nodeClaim)
 	if err != nil {
 		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolNameForNodeClaim(nodeClaim), err))
 	}
-	return isDrifted, err
+	return driftStatus, err
 }
 
 // getLabelsMapForDuration is a convenience func that constructs a map[string]string

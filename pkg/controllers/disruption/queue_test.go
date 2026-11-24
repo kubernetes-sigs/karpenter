@@ -103,7 +103,7 @@ var _ = Describe("Queue", func() {
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -137,7 +137,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -162,7 +162,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -193,7 +193,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -263,7 +263,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -316,7 +316,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -360,7 +360,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -386,7 +386,7 @@ var _ = Describe("Queue", func() {
 				stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 				cmd := &disruption.Command{
-					Method:               disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+					Method:               disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 					CreationTimestamp:    env.Clock.Now(),
 					ID:                   uuid.New(),
 					Results:              scheduling.Results{},
@@ -423,7 +423,7 @@ var _ = Describe("Queue", func() {
 			}}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -432,7 +432,7 @@ var _ = Describe("Queue", func() {
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			cmd2 := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -490,7 +490,7 @@ var _ = Describe("Queue", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: new(true)}}))
 			})
 			driftMethod := func() disruption.Method {
-				return disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)
+				return disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff)
 			}
 			emptinessMethod := func() disruption.Method {
 				return disruption.NewEmptiness(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))

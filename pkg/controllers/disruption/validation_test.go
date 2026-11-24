@@ -78,8 +78,8 @@ var _ = Describe("Repair Method Registration", func() {
 
 	It("fails when the complete policy set is invalid", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "[", Action: cloudprovider.ReplaceNode},
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "[", Action: cloudprovider.Replace},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.Replace},
 		}
 		_, err := health.NewRepairPolicyMatcher(enabledCtx, cloudProvider)
 		Expect(err).To(MatchError(ContainSubstring("node repair requires valid RepairPolicies")))
@@ -112,8 +112,8 @@ func NewMethodsWithNopValidator() []disruption.Method {
 	multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	return []disruption.Method{
-		disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder, nodePoolBackoff),
-		disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
+		disruption.NewStaticDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
+		disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff),
 		emptiness,
 		multiNodeConsolidation,
 		singleNodeConsolidation,

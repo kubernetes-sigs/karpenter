@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -704,6 +705,104 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 				metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonDrifted)),
 			})
+		})
+	})
+	Context("In-Place Remediation", func() {
+		var nodeClaims []*v1.NodeClaim
+		var nodes []*corev1.Node
+
+		BeforeEach(func() {
+			cloudProvider.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Reboot, Reason: "drifted"}
+			nodePool.Spec.Replicas = new(int64(3))
+			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrueWithReason(v1.ConditionTypeDrifted, "drifted", "drifted")
+			}
+		})
+		applyAndReconcile := func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectSingletonReconciled(ctx, disruptionController)
+		}
+		rebooting := func() []*v1.NodeClaim {
+			return lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+				return nc.StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()
+			})
+		}
+
+		It("should reboot drifted nodes without staging replacements when the NodePool is at its node limit", func() {
+			nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("3")}
+			applyAndReconcile()
+
+			// Reboots are in-place, so nothing is queued, no replacement is launched and no node limit is reserved.
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(3))
+			Expect(rebooting()).To(HaveLen(3))
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 3, 0, 0)
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(Equal(0))
+			for _, nc := range rebooting() {
+				Expect(nc.StatusConditions().Get(v1.ConditionTypeDisruptionReason).Reason).To(Equal(string(v1.DisruptionReasonDrifted)))
+			}
+			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 3, map[string]string{
+				"decision":          string(disruption.RebootDecision),
+				metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonDrifted)),
+			})
+		})
+		It("should reboot drifted nodes while the NodePool is scaling down", func() {
+			nodePool.Spec.Replicas = new(int64(1))
+			applyAndReconcile()
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(rebooting()).To(HaveLen(3))
+		})
+		It("should respect the Drifted budget for in-place reboots", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			applyAndReconcile()
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(rebooting()).To(HaveLen(1))
+		})
+		It("should not reboot when the Drifted budget is 0", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted}}}
+			applyAndReconcile()
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(rebooting()).To(BeEmpty())
+		})
+		It("should not disrupt drifted nodes once the cloud provider reports their drift resolved", func() {
+			cloudProvider.DriftStatus = cloudprovider.DriftStatus{}
+			applyAndReconcile()
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(rebooting()).To(BeEmpty())
+		})
+		It("should replace drifted nodes when the cloud provider can't resolve the drift in place", func() {
+			cloudProvider.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			applyAndReconcile()
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			Expect(rebooting()).To(BeEmpty())
 		})
 	})
 	Context("Multiple NodePools", func() {

@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/reboot"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -596,6 +597,30 @@ var _ = Describe("Reboot Lifecycle", func() {
 			node = ExpectExists(ctx, env.Client, node)
 			Expect(hasRebootTaint(node)).To(BeFalse())
 			expectReplaced(nodeClaim, "recovery_timeout")
+		})
+
+		It("labels the metrics of a successful reboot with the disruption reason that committed it", func() {
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = env.Clock.Now().UTC().Format(time.RFC3339Nano)
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(v1.DisruptionReasonDrifted), string(v1.DisruptionReasonDrifted))
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			labels := map[string]string{metrics.ReasonLabel: "drifted", "result": "succeeded"}
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, labels)
+			ExpectMetricHistogramSampleCountValue("karpenter_nodes_reboot_duration_seconds", 1, labels)
+			ExpectMetricHistogramSampleCountValue("karpenter_nodes_reboot_recovery_duration_seconds", 1, map[string]string{metrics.ReasonLabel: "drifted"})
+		})
+
+		It("deletes the NodeClaim and labels the metrics with the disruption reason when a reboot for drift fails", func() {
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(v1.DisruptionReasonDrifted), string(v1.DisruptionReasonDrifted))
+			env.Clock.Step(21 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			expectReplaced(nodeClaim, "recovery_timeout")
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{metrics.ReasonLabel: "drifted", "result": "recovery_timeout"})
 		})
 
 		It("retries the replacement delete when it fails, rather than stranding the node", func() {

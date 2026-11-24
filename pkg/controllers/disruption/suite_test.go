@@ -136,6 +136,8 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
+	// Drift asks the cloud provider how to resolve a Drifted NodeClaim, so specs drift NodeClaims from the provider side.
+	cloudProvider.DriftStatus = cloudprovider.DriftStatus{Action: cloudprovider.Replace, Reason: "drifted"}
 	clusterCost.Reset()
 	ExpectSingletonReconciled(ctx, pricingController)
 
@@ -2107,7 +2109,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
-		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
+		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, cloudProvider, recorder, env.Clock, nodePoolBackoff), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
 		Expect(queue.StartCommand(ctx, cmd))
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)

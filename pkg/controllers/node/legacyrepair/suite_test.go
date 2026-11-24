@@ -232,13 +232,13 @@ var _ = Describe("Node Health", func() {
 					ConditionType:      "BadNode",
 					ConditionStatus:    corev1.ConditionFalse,
 					TolerationDuration: 60 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 				{
 					ConditionType:      "ValidUnhealthyCondition",
 					ConditionStatus:    corev1.ConditionFalse,
 					TolerationDuration: 30 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 			}
 			healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
@@ -282,7 +282,7 @@ var _ = Describe("Node Health", func() {
 				ConditionType:      "BadNode",
 				ConditionStatus:    corev1.ConditionFalse,
 				TolerationDuration: 30 * time.Minute,
-				Action:             cloudprovider.RebootNode,
+				Action:             cloudprovider.Reboot,
 			}}
 			healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
@@ -304,13 +304,13 @@ var _ = Describe("Node Health", func() {
 					ConditionStatus:    corev1.ConditionFalse,
 					ReasonRegex:        "Transient",
 					TolerationDuration: 10 * time.Minute,
-					Action:             cloudprovider.RebootNode,
+					Action:             cloudprovider.Reboot,
 				},
 				{
 					ConditionType:      "BadNode",
 					ConditionStatus:    corev1.ConditionFalse,
 					TolerationDuration: 30 * time.Minute,
-					Action:             cloudprovider.ReplaceNode,
+					Action:             cloudprovider.Replace,
 				},
 			}
 			healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
@@ -338,7 +338,7 @@ var _ = Describe("Node Health", func() {
 				ConditionStatus:    corev1.ConditionFalse,
 				ReasonRegex:        "^Fatal$",
 				TolerationDuration: 30 * time.Minute,
-				Action:             cloudprovider.ReplaceNode,
+				Action:             cloudprovider.Replace,
 			}}
 			healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{

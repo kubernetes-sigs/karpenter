@@ -67,7 +67,7 @@ type CloudProvider struct {
 	GetCalls           []string
 
 	CreatedNodeClaims         map[string]*v1.NodeClaim
-	Drifted                   cloudprovider.DriftReason
+	DriftStatus               cloudprovider.DriftStatus
 	NodeClassGroupVersionKind []schema.GroupVersionKind
 	RepairPolicy              []cloudprovider.RepairPolicy
 }
@@ -99,7 +99,7 @@ func (c *CloudProvider) Reset() {
 	c.RebootCalls = nil
 	c.RebootOperationIDs = nil
 	c.GetCalls = nil
-	c.Drifted = ""
+	c.DriftStatus = cloudprovider.DriftStatus{}
 	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
 		{
 			Group:   "",
@@ -113,7 +113,7 @@ func (c *CloudProvider) Reset() {
 			ConditionStatus:        corev1.ConditionFalse,
 			TolerationDuration:     30 * time.Minute,
 			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
-			Action:                 cloudprovider.ReplaceNode,
+			Action:                 cloudprovider.Replace,
 		},
 	}
 }
@@ -313,11 +313,11 @@ func (c *CloudProvider) Delete(_ context.Context, nc *v1.NodeClaim) error {
 	return cloudprovider.NewNodeClaimNotFoundError(serrors.Wrap(fmt.Errorf("no nodeclaim exists with provider id"), "provider-id", nc.Status.ProviderID))
 }
 
-func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider.DriftReason, error) {
+func (c *CloudProvider) GetDriftStatus(context.Context, *v1.NodeClaim) (cloudprovider.DriftStatus, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.Drifted, nil
+	return c.DriftStatus, nil
 }
 
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
