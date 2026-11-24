@@ -139,7 +139,7 @@ var (
 		Example: "2026-11-05T02:26:51.650Z",
 		UsedOn:  []runtime.Object{&NodeClaim{}},
 		Help: "Karpenter sets this to the time it issued a reboot and bounds recovery from it. Removed when the " +
-			"reboot completes.",
+			"reboot fails; kept after it succeeds so re-initialization ignores DRA slices from before it.",
 		Stage:        docs.Alpha,
 		InternalOnly: true,
 	}

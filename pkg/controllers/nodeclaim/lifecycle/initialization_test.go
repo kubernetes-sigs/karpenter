@@ -17,15 +17,20 @@ limitations under the License.
 package lifecycle_test
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -253,6 +258,70 @@ var _ = Describe("Initialization", func() {
 		Expect(node.Labels).ToNot(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeFalse())
+	})
+	It("should not re-initialize a rebooted node until the pods its reboot deleted finish terminating", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+		pod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning})
+		other := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, other)
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node)
+		// The reboot deleted the pods, and then succeeded.
+		ExpectDeletionTimestampSet(ctx, env.Client, pod, other)
+		env.Clock.Step(time.Minute)
+		ExpectRebootSucceeded(ctx, env.Client, env.Clock, nodeClaim, node)
+
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).Reason).To(Equal("RebootDepartingPodsTerminating"))
+		// It keeps waiting however long the pod takes.
+		env.Clock.Step(24 * time.Hour)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeInitialized).Reason).To(Equal("RebootDepartingPodsTerminating"))
+		Expect(ExpectExists(ctx, env.Client, node).Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeInitialized).Message).To(And(
+			ContainSubstring("2 pod(s) deleted before the reboot are still terminating"),
+			ContainSubstring(client.ObjectKeyFromObject(pod).String()),
+			ContainSubstring(client.ObjectKeyFromObject(other).String()),
+		))
+		nodeClaimEvents := lo.Filter(recorder.Events(), func(e events.Event, _ int) bool { _, ok := e.InvolvedObject.(*v1.NodeClaim); return ok })
+		Expect(lo.Map(nodeClaimEvents, func(e events.Event, _ int) string { return e.Message })).To(ContainElement(ContainSubstring("Waiting to re-initialize after reboot: 2 pod(s)")))
+		// The blocking pods' owners see why on the pods themselves.
+		podEvents := lo.Filter(recorder.Events(), func(e events.Event, _ int) bool {
+			_, ok := e.InvolvedObject.(*corev1.Pod)
+			return ok && e.Reason == events.RebootDepartingPodsTerminating
+		})
+		Expect(lo.Uniq(lo.Map(podEvents, func(e events.Event, _ int) string { return e.InvolvedObject.(*corev1.Pod).Name }))).To(ConsistOf(pod.Name, other.Name))
+		Expect(podEvents[0].Message).To(ContainSubstring("Pod deleted before node " + node.Name + " rebooted is still terminating, pending finalizers testing/finalizer, blocking the node from re-initializing"))
+
+		// Kubelet finishes terminating the pods.
+		for _, p := range []*corev1.Pod{pod, other} {
+			ExpectFinalizersRemoved(ctx, env.Client, p)
+			Expect(env.Client.Delete(ctx, p, client.GracePeriodSeconds(0))).To(Succeed())
+			ExpectNotFound(ctx, env.Client, p)
+		}
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+	})
+	It("should re-initialize a rebooted node without waiting on a pod deleted after the reboot succeeded", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+		// The pod predates the reboot but is deleted only after it succeeded, so it isn't the reboot's.
+		pod := test.Pod(test.PodOptions{NodeName: node.Name, Phase: corev1.PodRunning})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node)
+		// Timestamps are second-granular and the API server stamps the pod with real time, so the reboot succeeds a
+		// second after the pod's creation, and the pod is deleted once real time has passed that.
+		succeeded := ExpectExists(ctx, env.Client, pod).CreationTimestamp.Add(time.Second)
+		env.Clock.SetTime(succeeded)
+		ExpectRebootSucceeded(ctx, env.Client, env.Clock, nodeClaim, node)
+		Eventually(func() bool { return time.Now().After(succeeded.Add(time.Second)) }).WithTimeout(5 * time.Second).Should(BeTrue())
+		ExpectDeletionTimestampSet(ctx, env.Client, pod)
+
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 	})
 	It("should not consider the Node to be initialized when the status of the Node is NotReady", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{

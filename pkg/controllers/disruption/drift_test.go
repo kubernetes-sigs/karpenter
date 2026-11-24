@@ -279,6 +279,52 @@ var _ = Describe("Drift", func() {
 			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaims[1].Name))
 			Expect(ExpectExists(ctx, env.Client, nodes[1]).Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
+		DescribeTable("should replace a drifted node instead of planning onto a rebooting node", func(reinitializing bool, reason string) {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+			}}}})
+			nodeClaims[1].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			ExpectManualBinding(ctx, env.Client, pod, nodes[1])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// The only other node has room for the drifted node's pod, but it's rebooting.
+			ExpectRebooting(ctx, env.Client, env.Clock, reason, nodeClaims[0], nodes[0])
+			if reinitializing {
+				ExpectRebootSucceeded(ctx, env.Client, env.Clock, nodeClaims[0], nodes[0])
+			}
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[0]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaims[1].Name))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+		},
+			Entry("when the reboot is requested", false, v1.RebootReasonRequested),
+			Entry("when the reboot is issued", false, v1.RebootReasonIssued),
+			Entry("when the node is re-initializing after the reboot", true, v1.RebootReasonIssued),
+		)
 		It("should respect budgets for multiple nodepools", func() {
 			// Create 10 nodepools
 			nps := test.NodePools(10, v1.NodePool{
