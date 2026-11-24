@@ -52,6 +52,7 @@ import (
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimhydration "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/hydration"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
 	nodeclaimreboot "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/reboot"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
@@ -78,6 +79,14 @@ import (
 type ControllerOptions struct {
 	registrationHooks   []cloudprovider.NodeLifecycleHook
 	enableVPAPrediction bool
+	launchedRegistry    *launched.Registry
+}
+
+// WithLaunchedRegistry shares unpersisted launch results with provider controllers, e.g. instance garbage collection.
+func WithLaunchedRegistry(registry *launched.Registry) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.launchedRegistry = registry
+	}
 }
 
 // WithVPAPrediction enables the VPA prediction controller as the prediction source.
@@ -146,7 +155,7 @@ func NewControllers(
 		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, cluster, npState, o.registrationHooks),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, cluster, npState, o.launchedRegistry, o.registrationHooks),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
