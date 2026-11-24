@@ -27,8 +27,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// Suite registers each scenario as a Ginkgo spec for the provider. Specs for scenarios the provider has
-// no levels for are skipped, so a provider opts in scenario by scenario. With KARPENTER_PERF_SWEEP=<scenario>
+// Suite registers each scenario as a Ginkgo spec for the provider. Every scenario runs by default, measured only
+// where the provider sets no levels; a provider opts out with Provider.Skip, and a scenario whose Requires the
+// provider doesn't meet is skipped with the reason. With KARPENTER_PERF_SWEEP=<scenario>
 // (or "all"), each cell of the scenario's Sweep grid becomes its own spec; sweep cells are measured, never gated.
 func Suite(provider func() *Provider, scenarios ...Scenario) bool {
 	sweep := os.Getenv("KARPENTER_PERF_SWEEP")
@@ -62,8 +63,8 @@ func Suite(provider func() *Provider, scenarios ...Scenario) bool {
 
 func run(ctx context.Context, p *Provider, all []Scenario, s *Scenario, cell map[Vector]int) {
 	Expect(Validate(p, all)).To(Succeed())
-	if !p.enabled(s) {
-		Skip("scenario " + s.Name + " is off for provider " + p.Name)
+	if why := p.skipped(s); why != "" {
+		Skip("scenario " + s.Name + " is skipped for provider " + p.Name + ": " + why)
 	}
 	r := newRun(ctx, p, s, cell)
 	r.expectClean()
@@ -85,11 +86,17 @@ func EnabledScenarios(p *Provider, scenarios []Scenario) []string {
 	return out
 }
 
-func (p *Provider) enabled(s *Scenario) bool {
-	for id := range p.Levels {
-		if strings.HasPrefix(id, s.Name+"/") {
-			return true
+func (p *Provider) enabled(s *Scenario) bool { return p.skipped(s) == "" }
+
+// skipped says why the provider doesn't run the scenario, or "" if it does.
+func (p *Provider) skipped(s *Scenario) string {
+	if why, ok := p.Skip[s.Name]; ok {
+		return why
+	}
+	if s.Requires != nil {
+		if err := s.Requires(p); err != nil {
+			return err.Error()
 		}
 	}
-	return false
+	return ""
 }

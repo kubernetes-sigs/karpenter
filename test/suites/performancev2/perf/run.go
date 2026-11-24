@@ -48,12 +48,19 @@ const ScenarioLabel = "perf.karpenter.sh/scenario"
 // Scenario is a provider-agnostic workload along one vector. Summary and the phase summaries say what it
 // stresses and why; what each metric means comes from the Metric, so alarms and the inventory are generated.
 type Scenario struct {
-	Name    string
+	Name string
+	// Question is the customer question the scenario answers, in a customer's words. Validate requires it, and the
+	// inventory, alarms and bounds table lead with it.
+	Question string
+	// Group sorts a variant under the scenario it varies (for example "nodepools" for diverseNodePools), so the
+	// inventory and README list one row per customer question with its variants under it. Empty means the scenario
+	// is its own group. A variant is a full scenario: it can change anything.
+	Group   string
 	Summary string
 	Vectors map[Vector]int
 	Sweep   map[Vector][]int
 	Phases  []PhaseSpec
-	// Requires reports why a provider can't run the scenario. Validate fails a provider that enables it anyway.
+	// Requires reports why a provider can't run the scenario. Providers that don't meet it skip the scenario with the reason.
 	Requires func(*Provider) error
 	Run      func(*Run)
 }
@@ -76,6 +83,7 @@ type Run struct {
 	created   []client.Object
 	nodePools sets.Set[string]
 	sweep     bool
+	resized   bool
 	off       string
 	breaches  []string
 }
@@ -93,7 +101,7 @@ func newRun(ctx context.Context, p *Provider, s *Scenario, cell map[Vector]int) 
 			sizes[v] = n
 		}
 	}
-	return &Run{Provider: p, Scenario: s, Sizes: sizes, NodeClass: nc, NodePool: np, ctx: ctx, nodePools: sets.New[string](), sweep: cell != nil}
+	return &Run{Provider: p, Scenario: s, Sizes: sizes, NodeClass: nc, NodePool: np, ctx: ctx, nodePools: sets.New[string](), sweep: cell != nil, resized: p.resized(s, sizes)}
 }
 
 // Size is the run's size along a vector the scenario declares.
@@ -214,13 +222,17 @@ func (r *Run) Patch(o client.Object, mutate func()) {
 	GinkgoHelper()
 	base := o.DeepCopyObject().(client.Object)
 	mutate()
-	Expect(r.Provider.Client.Patch(r.ctx, o, client.MergeFrom(base))).To(Succeed())
+	patch := client.MergeFrom(base)
+	data, err := patch.Data(o)
+	Expect(err).ToNot(HaveOccurred())
+	Expect(string(data)).ToNot(Equal("{}"), "Patch of %s changed nothing", client.ObjectKeyFromObject(o))
+	Expect(r.Provider.Client.Patch(r.ctx, o, patch)).To(Succeed())
 }
 
 // AwaitHealthyPods waits for exactly n healthy pods without ending a phase.
 func (r *Run) AwaitHealthyPods(n int, timeout time.Duration) {
 	GinkgoHelper()
-	r.awaitHealthyPods(n, r.timeout(timeout))
+	Expect(r.awaitHealthyPods(n, r.timeout(timeout))).To(Succeed())
 }
 
 // Replicas sums the replicas of the run's deployments, as last set by Create or Scale.
@@ -343,9 +355,20 @@ func podReady(p *corev1.Pod) bool {
 	return false
 }
 
-func (r *Run) awaitHealthyPods(n int, timeout time.Duration) {
+// awaitHealthyPods waits for exactly n healthy pods and returns an error if the timeout passes first.
+func (r *Run) awaitHealthyPods(n int, timeout time.Duration) error {
 	GinkgoHelper()
-	Eventually(r.healthyPods).WithTimeout(timeout).WithPolling(2*time.Second).Should(Equal(n), "healthy %s pods", r.Scenario.Name)
+	deadline := time.Now().Add(timeout)
+	for {
+		h := r.healthyPods()
+		if h == n {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s with %d of %d %s pods healthy", timeout, h, n, r.Scenario.Name)
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 func (r *Run) disrupting() int {
@@ -368,29 +391,42 @@ func hasTaint(n *corev1.Node, key string) bool {
 }
 
 func (r *Run) reserved() (cpu, memory float64) {
-	var allocCPU, allocMem, reqCPU, reqMem int64
-	nodes := sets.New[string]()
-	for _, n := range r.nodes() {
-		allocCPU += n.Status.Allocatable.Cpu().MilliValue()
-		allocMem += n.Status.Allocatable.Memory().Value()
-		nodes.Insert(n.Name)
-	}
 	pods := &corev1.PodList{}
 	Expect(r.Provider.Client.List(r.ctx, pods)).To(Succeed())
-	for _, p := range pods.Items {
-		if !nodes.Has(p.Spec.NodeName) || p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+	return utilization(r.nodes(), pods.Items)
+}
+
+// utilization is the workload's requests over the capacity left for it: allocatable minus DaemonSet requests.
+// DaemonSets are per-node overhead set by the cluster's add-ons, so they're out of both sides, and utilization
+// measures how Karpenter packed the workload rather than the environment.
+func utilization(nodes []corev1.Node, pods []corev1.Pod) (cpu, memory float64) {
+	var capCPU, capMem, reqCPU, reqMem int64
+	names := sets.New[string]()
+	for _, n := range nodes {
+		capCPU += n.Status.Allocatable.Cpu().MilliValue()
+		capMem += n.Status.Allocatable.Memory().Value()
+		names.Insert(n.Name)
+	}
+	for _, p := range pods {
+		if !names.Has(p.Spec.NodeName) || p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue
 		}
+		var podCPU, podMem int64
 		for _, c := range p.Spec.Containers {
-			reqCPU += c.Resources.Requests.Cpu().MilliValue()
-			reqMem += c.Resources.Requests.Memory().Value()
+			podCPU += c.Resources.Requests.Cpu().MilliValue()
+			podMem += c.Resources.Requests.Memory().Value()
 		}
+		if isDaemonSetPod(&p) {
+			capCPU, capMem = capCPU-podCPU, capMem-podMem
+			continue
+		}
+		reqCPU, reqMem = reqCPU+podCPU, reqMem+podMem
 	}
-	if allocCPU > 0 {
-		cpu = float64(reqCPU) / float64(allocCPU)
+	if capCPU > 0 {
+		cpu = float64(reqCPU) / float64(capCPU)
 	}
-	if allocMem > 0 {
-		memory = float64(reqMem) / float64(allocMem)
+	if capMem > 0 {
+		memory = float64(reqMem) / float64(capMem)
 	}
 	return cpu, memory
 }
@@ -425,7 +461,10 @@ func (r *Run) finish(id string, gates []Gate, rep *Result) *Result {
 			GinkgoWriter.Printf("perf %s: sink failed: %v\n", id, err)
 		}
 	}
-	if !r.sweep {
+	if r.resized && !r.sweep {
+		GinkgoWriter.Printf("perf %s: sizes %s differ from the provider's calibrated ones, so its gates are reported, not enforced\n", id, sizesLabel(r.Sizes, "=", " "))
+	}
+	if !r.sweep && !r.resized {
 		assertGates(r, id, rep.Gates)
 	}
 	return rep
@@ -496,4 +535,8 @@ func writeSummary(rep *Result, repro string) {
 		_, _ = f.WriteString(b.String())
 		_ = f.Close()
 	}
+}
+
+func isDaemonSetPod(p *corev1.Pod) bool {
+	return lo.ContainsBy(p.OwnerReferences, func(o metav1.OwnerReference) bool { return o.Kind == "DaemonSet" })
 }
