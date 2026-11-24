@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,7 +29,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -113,8 +116,8 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		env.EventuallyExpectHealthyPodCount(selector, 5)
 		nodes := env.EventuallyExpectNodeCount("==", 5)
 
-		// 2 of 5 unhealthy (40% > 20%) trips the breaker for the pool: repair must NOT disrupt any node. The faults are
-		// backdated past toleration, so they're eligible from the start and only the breaker holds them back.
+		// 2 of 5 unhealthy (40% > 20%) trips the breaker for the pool: repair must NOT disrupt any node, even once the
+		// faults are eligible.
 		env.ExpectRepairFaultInjected(nodes[0])
 		env.ExpectRepairFaultInjected(nodes[1])
 		env.ConsistentlyExpectNoDisruptions(5, time.Minute)
@@ -136,8 +139,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		env.EventuallyExpectHealthyPodCount(selector, 5)
 		nodes := env.EventuallyExpectNodeCount("==", 5)
 
-		// Trip the breaker (2/5 unhealthy) -> frozen. The faults are backdated past toleration, so the breaker is what
-		// freezes repair.
+		// Trip the breaker with 2 of 5 nodes unhealthy, so repair stays frozen even once the faults are eligible.
 		env.ExpectRepairFaultInjected(nodes[0])
 		env.ExpectRepairFaultInjected(nodes[1])
 		env.ConsistentlyExpectNoDisruptions(5, 1*time.Minute)
@@ -155,8 +157,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		// FORCE-termination once repair's drain bound elapses. The pod grace stays below the drain bound, since the
 		// terminator deletes a pod whose grace outlasts the remaining bound as soon as the drain starts. The drain bound
 		// is min(RepairPolicy TGP, NodePool TGP), so the NodePool TGP bounds it even for a provider whose policy sets
-		// none. Fault only 1 of 5 (under the breaker threshold) so repair runs; a single-node pool would read 100%
-		// unhealthy and trip the breaker.
+		// none. Fault only 1 of 5 (under the breaker threshold) so repair runs.
 		// (This asserts the force behavior, not an exact TGP duration: on KWOK node removal is near-instant once the
 		// force-delete is issued, so the elapsed time isn't a reliable signal.)
 		nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Minute}
@@ -250,24 +251,35 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 		var selector labels.Selector
 		var dep *appsv1.Deployment
 		var numPods int
-		// kwok resets the conditions of a node that isn't Ready, so label the node into a no-op stage
-		// (hack/kwok/stages/node-unhealthy.yaml) before injecting the condition to keep it in place. KWOK skips the
+		// KWOK's node-initialize stage resets the conditions of a node that isn't Ready, so label the node into a no-op
+		// stage that outweighs it (hack/kwok/stages/node-unhealthy.yaml) before injecting the condition. KWOK skips the
 		// drain of a NotReady node (its instance is the Node itself), so these specs cover the Ready policies' candidate
 		// selection, not the drain bound.
 		expectUnhealthy := func(node *corev1.Node, cond corev1.NodeCondition) {
 			GinkgoHelper()
+			// Repair counts a condition from the node's creation at the earliest, so inject once the node is older
+			// than the repair policy's toleration and repair can act at once. That's 10 minutes, about when KWOK's
+			// heartbeat can reset Ready even on a labeled node, so wait a minute more.
+			age := kwokToleration(cond) + time.Minute
+			By(fmt.Sprintf("waiting until node %s is %s old", node.Name, age))
+			time.Sleep(time.Until(node.CreationTimestamp.Add(age)))
+
+			// Re-read the node so the updates below don't overwrite newer changes with a stale copy.
+			env.ExpectExists(node)
 			node.Labels["kwok.x-k8s.io/stage"] = "unhealthy"
 			env.ExpectUpdated(node)
+			cond.LastTransitionTime = node.CreationTimestamp
 			env.ExpectStatusUpdated(env.ReplaceNodeConditions(node, cond))
 		}
 
 		BeforeEach(func() {
-			// A real kubelet owns Ready and resets an injected value; only KWOK can pin it (see expectUnhealthy).
+			// A real kubelet resets an injected Ready; only KWOK holds it until repair acts (see expectUnhealthy).
 			if !env.IsDefaultNodeClassKWOK() {
 				Skip("[unsupported:kwok] injecting kubelet Ready conditions requires the KWOK provider")
 			}
 			numPods = 1
-			// Add pods with a do-not-disrupt annotation so that we can check node metadata before we disrupt
+			// Repair must replace the node even though its pod has do-not-disrupt. The pod tolerates a NotReady node's
+			// taints, so it stays until repair removes the node.
 			dep = test.Deployment(test.DeploymentOptions{
 				Replicas: int32(numPods),
 				PodOptions: test.PodOptions{
@@ -278,6 +290,10 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 						Annotations: map[string]string{
 							v1.DoNotDisruptAnnotationKey: "true",
 						},
+					},
+					Tolerations: []corev1.Toleration{
+						{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute},
+						{Key: corev1.TaintNodeUnreachable, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute},
 					},
 					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
 				},
@@ -292,23 +308,32 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 
 			expectUnhealthy(node, unhealthyCondition)
 
-			env.EventuallyExpectNotFound(pod, node)
+			// Repair can act as soon as the fault is injected, so fail fast instead of waiting the default 15 minutes.
+			env.EventuallyExpectNotFoundAssertion(pod, node).WithTimeout(5 * time.Minute).Should(Succeed())
 			env.EventuallyExpectHealthyPodCount(selector, numPods)
 		},
 			// Kubelet Supported Conditions
 			Entry("Node Ready False", corev1.NodeCondition{
-				Type:               corev1.NodeReady,
-				Status:             corev1.ConditionFalse,
-				LastTransitionTime: metav1.Time{Time: time.Now().Add(-31 * time.Hour)},
+				Type:   corev1.NodeReady,
+				Status: corev1.ConditionFalse,
 			}),
 			Entry("Node Ready Unknown", corev1.NodeCondition{
-				Type:               corev1.NodeReady,
-				Status:             corev1.ConditionUnknown,
-				LastTransitionTime: metav1.Time{Time: time.Now().Add(-31 * time.Hour)},
+				Type:   corev1.NodeReady,
+				Status: corev1.ConditionUnknown,
 			}),
 		)
 	})
 })
+
+// kwokToleration returns how long KWOK's repair policy for cond waits before repair can act.
+func kwokToleration(cond corev1.NodeCondition) time.Duration {
+	GinkgoHelper()
+	policy, ok := lo.Find(kwok.CloudProvider{}.RepairPolicies(), func(p cloudprovider.RepairPolicy) bool {
+		return p.ConditionType == cond.Type && p.ConditionStatus == cond.Status
+	})
+	Expect(ok).To(BeTrue(), "no KWOK repair policy for %s=%s", cond.Type, cond.Status)
+	return policy.TolerationDuration
+}
 
 // hostnameAntiAffinity forces each pod carrying the given labels onto its own node.
 func hostnameAntiAffinity(matchLabels map[string]string) []corev1.PodAffinityTerm {
