@@ -319,7 +319,7 @@ func (c *Controller) transitionToIssued(ctx context.Context, nodeClaim *v1.NodeC
 	// Initialization is boot-scoped; mark it Unknown while rebooting.
 	nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, v1.RebootReasonRebooting, "node is rebooting")
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
@@ -416,7 +416,7 @@ func (c *Controller) ensureRebootTaint(ctx context.Context, node *corev1.Node) e
 	}
 	stored := node.DeepCopy()
 	node.Spec.Taints = append(node.Spec.Taints, v1.RebootingNoScheduleTaint)
-	return c.kubeClient.Patch(ctx, node, client.MergeFrom(stored))
+	return c.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
 }
 
 func (c *Controller) removeRebootTaint(ctx context.Context, node *corev1.Node) error {
@@ -425,7 +425,7 @@ func (c *Controller) removeRebootTaint(ctx context.Context, node *corev1.Node) e
 	if equality.Semantic.DeepEqual(stored, node) {
 		return nil
 	}
-	return c.kubeClient.Patch(ctx, node, client.MergeFrom(stored))
+	return c.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
 }
 
 func (c *Controller) removeInitializedLabel(ctx context.Context, node *corev1.Node) error {
