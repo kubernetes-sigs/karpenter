@@ -151,7 +151,9 @@ func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volum
 	}
 
 	// Persistent Volume Requirements
-	if pvc.Spec.VolumeName != "" {
+	// A generic ephemeral volume's PVC is deleted with its pod, so a bound pod being rescheduled during
+	// disruption gets a new volume. Only the StorageClass constrains where that volume can be provisioned.
+	if pvc.Spec.VolumeName != "" && (volume.Ephemeral == nil || pod.Spec.NodeName == "") {
 		requirements, err := v.getPersistentVolumeRequirements(ctx, pod, pvc.Spec.VolumeName)
 		if err != nil {
 			return nil, fmt.Errorf("getting existing requirements, %w", err)
