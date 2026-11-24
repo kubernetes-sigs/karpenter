@@ -112,13 +112,38 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodeNames ...string)
 		if nodeName == "" {
 			continue
 		}
-		var podList corev1.PodList
-		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
-			return nil, serrors.Wrap(fmt.Errorf("listing pods, %w", err), "Node", klog.KRef("", nodeName))
+		nodePods, err := GetPodsForNode(ctx, kubeClient, nodeName)
+		if err != nil {
+			return nil, err
 		}
-		for i := range podList.Items {
-			pods = append(pods, &podList.Items[i])
-		}
+		pods = append(pods, nodePods...)
+	}
+	return pods, nil
+}
+
+// GetPodsForNode grabs all pods that are currently bound to the passed node name, passing opts through to the List.
+//
+// NOTE: a caller passing client.UnsafeDisableDeepCopy MUST treat the returned Pods as read-only. The returned
+// pointers address this function's own PodList, whose elements are shallow struct copies of the cached Pods, so
+// assigning a top-level field (p.Spec.NodeName, p.Labels) only touches the copy - but every map, slice and pointer
+// the Pod holds is shared with the informer cache, so writing through one (p.Labels["k"]=v,
+// p.Spec.Containers[0].Image=x, p.Spec.Affinity.NodeAffinity...=y) corrupts the cache for every controller in the
+// process. DeepCopy before handing such a Pod to code that may mutate it - in particular the scheduler, which relaxes
+// pod preferences in place.
+func GetPodsForNode(ctx context.Context, kubeClient client.Client, nodeName string, opts ...client.ListOption) ([]*corev1.Pod, error) {
+	if nodeName == "" {
+		return nil, nil
+	}
+	listOpts := make([]client.ListOption, 0, len(opts)+1)
+	listOpts = append(listOpts, client.MatchingFields{"spec.nodeName": nodeName})
+	listOpts = append(listOpts, opts...)
+	var podList corev1.PodList
+	if err := kubeClient.List(ctx, &podList, listOpts...); err != nil {
+		return nil, serrors.Wrap(fmt.Errorf("listing pods, %w", err), "Node", klog.KRef("", nodeName))
+	}
+	pods := make([]*corev1.Pod, 0, len(podList.Items))
+	for i := range podList.Items {
+		pods = append(pods, &podList.Items[i])
 	}
 	return pods, nil
 }
