@@ -12,6 +12,22 @@ on:
         type: string
         required: false
         description: "Ginkgo focus pattern to run specific tests"
+      focus_file:
+        type: string
+        required: false
+        description: "Space-separated ginkgo --focus-file filters"
+      skip_file:
+        type: string
+        required: false
+        description: "Space-separated ginkgo --skip-file filters"
+      runs:
+        type: number
+        default: 1
+        description: "Run the suite this many times, stopping at the first failure"
+      ginkgo_timeout:
+        type: string
+        required: false
+        description: "ginkgo --timeout for each run. Empty keeps the Makefile default"
       test_name:
         type: string
         required: false
@@ -31,6 +47,9 @@ on:
       retention_days:
         type: number
         default: 30
+      timeout_minutes:
+        type: number
+        default: 360
 # A called workflow can only reduce the caller's token permissions, so every caller must grant at least these.
 permissions:
   contents: read
@@ -38,6 +57,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
     - name: Debug workflow_run trigger
       run: |
@@ -45,6 +65,9 @@ jobs:
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        # No later step uses git credentials, so the token needn't sit on disk while PR code runs.
+        persist-credentials: false
     - name: apply regression ${{ inputs.regression }}
       if: inputs.regression != ''
       env:
@@ -119,6 +142,10 @@ jobs:
       env:
           SUITE: ${{ inputs.suite }}
           FOCUS: ${{ inputs.focus }}
+          FOCUS_FILE: ${{ inputs.focus_file }}
+          SKIP_FILE: ${{ inputs.skip_file }}
+          RUNS: ${{ inputs.runs }}
+          GINKGO_TIMEOUT: ${{ inputs.ginkgo_timeout }}
           PERF_ENV: ${{ inputs.perf_env }}
       shell: bash
       run: |
@@ -126,7 +153,10 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         while IFS= read -r kv; do [ -n "$kv" ] && export "${kv?}"; done <<< "$PERF_ENV"
-        TEST_SUITE="$SUITE" make e2etests
+        # An empty GINKGO_TIMEOUT would override the Makefile's ?= default.
+        [ -n "$GINKGO_TIMEOUT" ] || unset GINKGO_TIMEOUT
+        # go test can't rerun a ginkgo suite, and --ginkgo.repeat is ginkgo CLI only.
+        for _ in $(seq "$RUNS"); do TEST_SUITE="$SUITE" make e2etests; done
     - name: plot performance results
       if: always() && inputs.plot && env.OUTPUT_DIR != ''
       shell: bash
