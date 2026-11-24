@@ -248,6 +248,16 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 				&corev1.Service{}: {
 					Transform: cache.TransformStripManagedFields(),
 				},
+				// Karpenter never reads a Pod's managedFields, and it never server-side-applies a Pod: the only Pod
+				// write is the deletion-cost annotation, a JSON merge patch whose base and modified object both come
+				// from this cache, so a field absent from both never appears in the diff. Eviction goes through the
+				// eviction subresource with only a name and namespace. Dropping managedFields therefore shrinks the
+				// Pod cache and, because every cache-backed Pod read deep-copies, cuts the cost of each of those
+				// reads. Pods are the most numerous cached object and the most frequently re-listed: the disruption
+				// loop lists the pods of every node on every candidate-construction pass.
+				&corev1.Pod{}: {
+					Transform: cache.TransformStripManagedFields(),
+				},
 			},
 		},
 		Controller: ctrlconfig.Controller{
