@@ -23,20 +23,20 @@ import (
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
-	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
@@ -61,9 +61,17 @@ type ProvisionerTrigger interface {
 // (from podTemplateRef or scalableRef), computing target replica count, and
 // updating status so the provisioner knows what buffer capacity to maintain.
 type Controller struct {
-	kubeClient      client.Client
+	kubeClient client.Client
+	// workloadReader reads scalableRef targets from the API server. A cached Get
+	// would start an informer that retains every object of that kind. Nil in
+	// tests falls back to kubeClient.
+	workloadReader  client.Reader
 	trigger         ProvisionerTrigger
 	virtualPodCache *virtualpods.Cache
+	// workloadEvents carries buffers to reconcile when one of their scalableRef
+	// targets changes. The watches behind it are per referenced object.
+	workloadEvents  chan event.TypedGenericEvent[*autoscalingv1beta1.CapacityBuffer]
+	workloadWatches *workloadWatchSet
 }
 
 func NewController(kubeClient client.Client, trigger ProvisionerTrigger, virtualPodCache *virtualpods.Cache) *Controller {
@@ -87,11 +95,15 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			// The buffer was deleted; drop its virtual pods from the cache and
 			// wake the provisioner so it refreshes cluster state (e.g.
 			// bufferPodCounts).
+			c.releaseScalableWatch(req.NamespacedName)
 			c.virtualPodCache.RemoveEntry(req.NamespacedName)
 			c.trigger.TriggerReconcile()
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	// Open (or drop) the single-object watch before resolving, so a buffer whose
+	// workload does not exist yet is reconciled when that object is created.
+	c.syncScalableWatch(cb)
 
 	stored := cb.DeepCopy()
 
@@ -140,14 +152,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 const (
 	// podTemplateRefIndex indexes CapacityBuffers by spec.podTemplateRef.name.
 	podTemplateRefIndex = "spec.podTemplateRef.name"
-	// scalableRefIndex indexes CapacityBuffers by the workload their spec.scalableRef names, keyed by scalableRefKey.
-	scalableRefIndex = "spec.scalableRef"
 )
-
-// scalableRefKey identifies a workload for scalableRefIndex. An empty group means apps, as in apps.ResolveScalableRef.
-func scalableRefKey(group, kind, name string) string {
-	return fmt.Sprintf("%s/%s/%s", lo.CoalesceOrEmpty(group, appsv1.GroupName), kind, name)
-}
 
 // indexFields registers the field indexes the watch mappers list buffers by.
 func indexFields(ctx context.Context, indexer client.FieldIndexer) error {
@@ -159,14 +164,6 @@ func indexFields(ctx context.Context, indexer client.FieldIndexer) error {
 	}); err != nil {
 		return fmt.Errorf("indexing %s, %w", podTemplateRefIndex, err)
 	}
-	if err := indexer.IndexField(ctx, &autoscalingv1beta1.CapacityBuffer{}, scalableRefIndex, func(o client.Object) []string {
-		if ref := o.(*autoscalingv1beta1.CapacityBuffer).Spec.ScalableRef; ref != nil {
-			return []string{scalableRefKey(ref.APIGroup, ref.Kind, ref.Name)}
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("indexing %s, %w", scalableRefIndex, err)
-	}
 	return nil
 }
 
@@ -174,6 +171,28 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	if err := indexFields(ctx, m.GetFieldIndexer()); err != nil {
 		return err
 	}
+	// Direct reads so resolving a scalableRef cannot start a cluster-wide
+	// Deployment, ReplicaSet, or StatefulSet informer.
+	c.workloadReader = m.GetAPIReader()
+	c.virtualPodCache.SetWorkloadReader(c.workloadReader)
+
+	watchClient, err := client.NewWithWatch(m.GetConfig(), client.Options{
+		Scheme: m.GetScheme(),
+		Mapper: m.GetRESTMapper(),
+	})
+	if err != nil {
+		return fmt.Errorf("creating scalableRef watch client, %w", err)
+	}
+	c.workloadEvents = make(chan event.TypedGenericEvent[*autoscalingv1beta1.CapacityBuffer])
+	// Already canceled: watches stay closed until Start runs on the leader.
+	c.workloadWatches = newWorkloadWatchSet(cancelledContext(), func(watchCtx context.Context, key workloadKey) (watch.Interface, error) {
+		return watchClient.Watch(watchCtx, key.metadataList(), workloadListOptions(key)...)
+	}, c.enqueueBuffer)
+	c.workloadWatches.name = c.Name()
+	if err := m.Add(c.workloadWatches); err != nil {
+		return fmt.Errorf("adding scalableRef watches, %w", err)
+	}
+
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&autoscalingv1beta1.CapacityBuffer{}).
@@ -181,23 +200,14 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			&v1.PodTemplate{},
 			handler.EnqueueRequestsFromMapFunc(c.podTemplateToBuffers),
 		).
-		// A buffer whose scalableRef doesn't exist yet otherwise only re-resolves on its periodic requeue. Spec changes
-		// (including replicas) bump generation; status-only updates can't change the resolved shape or replica count.
-		Watches(
-			&appsv1.Deployment{},
-			handler.EnqueueRequestsFromMapFunc(c.scalableRefToBuffers(autoscalingv1beta1.KindDeployment)),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
-		).
-		Watches(
-			&appsv1.StatefulSet{},
-			handler.EnqueueRequestsFromMapFunc(c.scalableRefToBuffers(autoscalingv1beta1.KindStatefulSet)),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
-		).
-		Watches(
-			&appsv1.ReplicaSet{},
-			handler.EnqueueRequestsFromMapFunc(c.scalableRefToBuffers(autoscalingv1beta1.KindReplicaSet)),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
-		).
+		// ScalableRef targets are not watched here. A Watch on the kind would
+		// cache every Deployment, ReplicaSet, and StatefulSet in the cluster
+		// even when no CapacityBuffer exists. Per-object watches push the
+		// affected buffers onto workloadEvents instead.
+		WatchesRawSource(source.Channel(
+			c.workloadEvents,
+			&handler.TypedEnqueueRequestForObject[*autoscalingv1beta1.CapacityBuffer]{},
+		)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             reasonable.RateLimiter(),
@@ -209,9 +219,39 @@ func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object
 	return c.buffersMatching(ctx, obj.GetNamespace(), podTemplateRefIndex, obj.GetName())
 }
 
-func (c *Controller) scalableRefToBuffers(kind string) handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		return c.buffersMatching(ctx, obj.GetNamespace(), scalableRefIndex, scalableRefKey(appsv1.GroupName, kind, obj.GetName()))
+// syncScalableWatch tracks the workload this buffer references. A podTemplateRef
+// buffer holds no workload watch.
+func (c *Controller) syncScalableWatch(cb *autoscalingv1beta1.CapacityBuffer) {
+	if c.workloadWatches == nil {
+		return
+	}
+	var ref *autoscalingv1beta1.ScalableRef
+	if cb.Spec.PodTemplateRef == nil {
+		ref = cb.Spec.ScalableRef
+	}
+	c.workloadWatches.Sync(client.ObjectKeyFromObject(cb), ref)
+}
+
+func (c *Controller) releaseScalableWatch(nn types.NamespacedName) {
+	if c.workloadWatches == nil {
+		return
+	}
+	c.workloadWatches.Release(nn)
+}
+
+func (c *Controller) scalableReader() client.Reader {
+	if c.workloadReader != nil {
+		return c.workloadReader
+	}
+	return c.kubeClient
+}
+
+func (c *Controller) enqueueBuffer(ctx context.Context, nn types.NamespacedName) {
+	select {
+	case <-ctx.Done():
+	case c.workloadEvents <- event.TypedGenericEvent[*autoscalingv1beta1.CapacityBuffer]{
+		Object: &autoscalingv1beta1.CapacityBuffer{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}},
+	}:
 	}
 }
 
@@ -237,7 +277,13 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 		return false, nil, nil
 	}
 
-	result, err := apps.ResolveCapacityBuffer(ctx, c.kubeClient, cb)
+	reader := client.Reader(c.kubeClient)
+	// PodTemplates are watched explicitly and are few. scalableRef targets are
+	// read from the API server so this Get cannot start a cluster-wide informer.
+	if cb.Spec.PodTemplateRef == nil && cb.Spec.ScalableRef != nil {
+		reader = c.scalableReader()
+	}
+	result, err := apps.ResolveCapacityBuffer(ctx, reader, cb)
 	if err != nil {
 		reason := ReasonScalableRefNotFound
 		if cb.Spec.PodTemplateRef != nil {
