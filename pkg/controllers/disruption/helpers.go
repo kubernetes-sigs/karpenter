@@ -279,6 +279,18 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	if err != nil {
 		return nil, nil, err
 	}
+	return getCandidatesWithTotals(ctx, cluster, kubeClient, recorder, clk, shouldDisrupt, disruptionClass, queue, clusterCost,
+		nodePoolMap, nodePoolToInstanceTypesMap)
+}
+
+// getCandidatesWithTotals builds candidates against an already-resolved NodePool map, so a caller evaluating several
+// disruption methods against the same NodePools resolves their instance types once rather than once per method. It
+// reads cluster state, pods and PodDisruptionBudgets on every call, so a node that stops being disruptable is not
+// handed to a later caller.
+func getCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
+	shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue, clusterCost *cost.ClusterCost,
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType,
+) ([]*Candidate, map[string]NodePoolTotals, error) {
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)

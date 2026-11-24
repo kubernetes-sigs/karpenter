@@ -177,10 +177,19 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	clearUndriftedNodePoolBackoffs(ctx, c.cluster, c.queue.backoff)
 
+	// Every method needs the same NodePools and the same instance types for them, and neither depends on which method
+	// is asking, so resolve them once for the loop instead of once per method. Everything else candidate construction
+	// reads — cluster state, pods, PodDisruptionBudgets — is still read per method, so a node that stops being
+	// disruptable part way through a loop is not offered to the methods that follow.
+	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
+		return reconciler.Result{}, fmt.Errorf("building nodepool map, %w", err)
+	}
+
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
-		success, err := c.disrupt(ctx, m)
+		success, err := c.disrupt(ctx, m, nodePoolMap, nodePoolToInstanceTypesMap)
 		if err != nil {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil
@@ -196,12 +205,15 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
-func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+func (c *Controller) disrupt(ctx context.Context, disruption Method, nodePoolMap map[string]*v1.NodePool,
+	nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType,
+) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
+	candidates, nodePoolTotals, err := getCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock,
+		disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost, nodePoolMap, nodePoolToInstanceTypesMap)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
