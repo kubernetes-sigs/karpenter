@@ -63,6 +63,7 @@ var _ = Describe("Options", func() {
 		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
+		"DISRUPTION_REPLACEMENT_TIMEOUT",
 		"PREFERENCE_POLICY",
 		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
@@ -100,6 +101,13 @@ var _ = Describe("Options", func() {
 	})
 
 	Context("Parse", func() {
+		DescribeTable("should reject non-positive disruption replacement timeouts",
+			func(timeout string) {
+				Expect(opts.Parse(fs, "--disruption-replacement-timeout", timeout)).To(MatchError(ContainSubstring("DISRUPTION_REPLACEMENT_TIMEOUT must be greater than zero")))
+			},
+			Entry("zero", "0s"),
+			Entry("negative", "-1m"),
+		)
 		It("should use the correct default values", func() {
 			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
@@ -121,6 +129,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              new("stderr"),
 				BatchMaxDuration:                 lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(time.Second),
+				DisruptionReplacementTimeout:     lo.ToPtr(10 * time.Minute),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
@@ -159,6 +168,7 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
+				"--disruption-replacement-timeout", "20m",
 				"--preference-policy", "Ignore",
 				"--min-values-policy", "BestEffort",
 				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true,NodePoolDriftBackoff=true",
@@ -183,6 +193,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              new("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(5 * time.Second),
+				DisruptionReplacementTimeout:     lo.ToPtr(20 * time.Minute),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
@@ -225,6 +236,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("DISRUPTION_REPLACEMENT_TIMEOUT", "30m")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true,NodePoolDriftBackoff=true")
@@ -253,6 +265,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              new("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(5 * time.Second),
+				DisruptionReplacementTimeout:     lo.ToPtr(30 * time.Minute),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
@@ -290,6 +303,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("DISRUPTION_REPLACEMENT_TIMEOUT", "30m")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true,NodePoolDriftBackoff=true")
@@ -324,6 +338,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              new("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(5 * time.Second),
+				DisruptionReplacementTimeout:     lo.ToPtr(30 * time.Minute),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
@@ -597,6 +612,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
+	Expect(optsA.DisruptionReplacementTimeout).To(Equal(optsB.DisruptionReplacementTimeout))
 	Expect(optsA.PreferencePolicy).To(Equal(optsB.PreferencePolicy))
 	Expect(optsA.MinValuesPolicy).To(Equal(optsB.MinValuesPolicy))
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
