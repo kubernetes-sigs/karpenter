@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -376,7 +377,7 @@ func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Clie
 		log.FromContext(ctx).V(1).Error(err, "node has no nodeclaim, failed looking up pod eviction reason")
 		return ""
 	}
-	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason); cond.IsTrue() {
+	if cond := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDisruptionReason); cond.IsTrue() {
 		return cond.Reason
 	}
 	return ForcefulTerminationReason

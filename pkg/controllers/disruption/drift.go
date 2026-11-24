@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
@@ -62,7 +63,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	return !c.OwnedByStaticNodePool() && c.NodeClaim.StatusConditions().Get(string(d.Reason())).IsTrue()
+	return !c.OwnedByStaticNodePool() && c.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(string(d.Reason())).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -70,8 +71,8 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 	initDriftBackoffMetrics(ctx, d.backoff, lo.Uniq(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name }))...)
 
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
+		return candidates[i].NodeClaim.StatusConditions(status.WithObservedOnly()).Get(string(d.Reason())).LastTransitionTime.Time.Before(
+			candidates[j].NodeClaim.StatusConditions(status.WithObservedOnly()).Get(string(d.Reason())).LastTransitionTime.Time)
 	})
 
 	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
