@@ -173,7 +173,7 @@ func ValidateClaimRequest(
 		if err != nil {
 			return nil, err
 		}
-		data.Requests = append(data.Requests, *rd)
+		data.Requests = append(data.Requests, *rd) //nolint:nilaway // rd is non-nil whenever err is nil
 	}
 
 	// Compute the base device total: ExactCount requests contribute NumDevices,

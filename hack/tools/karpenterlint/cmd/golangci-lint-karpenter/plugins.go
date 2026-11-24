@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	_ "go.uber.org/nilaway/cmd/gclplugin"
 	_ "sigs.k8s.io/kube-api-linter"
 
 	_ "sigs.k8s.io/karpenter/hack/tools/karpenterlint"

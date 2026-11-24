@@ -221,8 +221,8 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 			} else {
 				inVal := (*in)[key]
 				in, out := &inVal, &outVal
-				*out = new(scheduling.Requirement)
-				(*in).DeepCopyInto(*out)
+				*out = new(scheduling.Requirement) //nolint:nilaway // outVal is assigned through out on this line
+				(*in).DeepCopyInto(*out)           //nolint:nilaway // outVal is assigned through out on the line above
 			}
 			(*out)[key] = outVal
 		}
@@ -337,13 +337,13 @@ func (i *InstanceType) groupOfferingsByOverride() []AllocatableOfferings {
 	for idx, key := range order {
 		group := groups[key]
 		if idx == 0 {
-			group.Allocatable = i.computeAllocatable(nil, nil)
+			group.Allocatable = i.computeAllocatable(nil, nil) //nolint:nilaway // groups has an entry for every key in order
 		} else {
 			// Use the first offering in the group to get the override values
-			o := group.Offerings[0]
+			o := group.Offerings[0] //nolint:nilaway // groups has an entry for every key in order
 			group.Allocatable = i.computeAllocatable(o.CapacityOverride, o.OverheadOverride)
 		}
-		result = append(result, *group)
+		result = append(result, *group) //nolint:nilaway // groups has an entry for every key in order
 	}
 	return result
 }
@@ -443,12 +443,12 @@ func (i *InstanceType) resolveDynamicResources() {
 	i.allDynamicResources = make([]*DynamicResources, 0, len(i.DynamicResources))
 	for setIndex, dr := range i.DynamicResources {
 		set := &DynamicResources{
-			Requirements:           dr.Requirements,
+			Requirements:           dr.Requirements, //nolint:nilaway // CloudProviders never set nil DynamicResources entries
 			ResourceSliceTemplates: make([]*ResourceSliceTemplate, 0, len(dr.ResourceSliceTemplates)),
 		}
 		for _, t := range dr.ResourceSliceTemplates {
 			// A shallow copy is enough: only the pool name changes, and devices and counters are shared read-only.
-			namespacedTemplate := *t
+			namespacedTemplate := *t //nolint:nilaway // CloudProviders never set nil ResourceSliceTemplates entries
 			namespacedTemplate.Pool = ResourcePool{Name: unique.Make(TemplatePoolName(poolName(t.Pool), setIndex))}
 			set.ResourceSliceTemplates = append(set.ResourceSliceTemplates, &namespacedTemplate)
 			for _, d := range t.Devices {
@@ -470,7 +470,7 @@ func (i *InstanceType) resolveDynamicResources() {
 	for _, b := range i.AttributeBindings {
 		// A binding needs at least two distinct provider devices. Check before expanding: a one-device binding on a
 		// device reused across sets would otherwise expand into copies that look like a pair but can never coexist.
-		if len(lo.Uniq(b.Devices)) < 2 {
+		if len(lo.Uniq(b.Devices)) < 2 { //nolint:nilaway // CloudProviders never set nil AttributeBindings entries
 			continue
 		}
 		i.resolvedAttributeBindings = append(i.resolvedAttributeBindings, &AttributeBinding{
@@ -541,7 +541,7 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 	})
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].price < sorted[j].price })
 	for i := range sorted {
-		its[i] = sorted[i].it
+		its[i] = sorted[i].it //nolint:nilaway // its is non-nil, Truncate returns its input on error
 	}
 	return its
 }

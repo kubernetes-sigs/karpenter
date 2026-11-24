@@ -326,7 +326,10 @@ func (cc *ClusterCost) internalAddFixedPrice(npName string, nn types.NamespacedN
 
 // internalRemoveFixedPrice removes a NodeClaim priced from the NodeClaim alone from a nodepool's cost.
 func (cc *ClusterCost) internalRemoveFixedPrice(npName string, nn types.NamespacedName) {
-	npc := cc.npCostMap[npName]
+	npc, ok := cc.npCostMap[npName]
+	if !ok {
+		return
+	}
 	npc.cost -= npc.fixedPrices[nn]
 	delete(npc.fixedPrices, nn)
 	if len(npc.offeringCounts) == 0 && len(npc.fixedPrices) == 0 {

@@ -164,6 +164,7 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 
 karpenterlint: ## Run linters for recurring regressions (not yet part of verify)
 	go tool -modfile=go.tools.mod golangci-lint-karpenter run -c .golangci.karpenterlint.yaml
+	go tool -modfile=go.tools.mod golangci-lint-karpenter run -c .golangci.nilaway.yaml
 
 test-karpenterlint: ## Test the karpenterlint analyzers
 	cd hack/tools/karpenterlint && go test ./...

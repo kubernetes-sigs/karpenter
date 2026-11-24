@@ -153,9 +153,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// required
 		validDecision := cmd.Decision() == DeleteDecision
 		if cmd.Decision() == ReplaceDecision {
-			cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
-			// we check the error before the replacement instanceTypeOptions since we return nil for the replacement if we get an error
-			if err == nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
+			// Only overwrite the replacement on success, since filterOutSameInstanceType returns nil when it errors
+			if replacement, err := filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate); err == nil && len(replacement.InstanceTypeOptions) > 0 {
+				cmd.Replacements[0] = replacement
 				validDecision = true
 			}
 		}
