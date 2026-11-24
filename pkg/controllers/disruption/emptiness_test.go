@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -753,6 +755,143 @@ var _ = Describe("Emptiness", func() {
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+	})
+	Context("Pods with no disruption cost", func() {
+		// a cost annotation at or below -2^27 takes a pod at default priority to zero disruption cost
+		const noDisruptionCost = "-1000000000"
+
+		DescribeTable("should delete nodes whose pods all have no disruption cost",
+			func(policy v1.ConsolidationPolicy) {
+				nodePool.Spec.Disruption.ConsolidationPolicy = policy
+				pods := test.Pods(2, test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{v1.DisruptionCostAnnotationKey: noDisruptionCost},
+				}})
+				ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pods[0], pods[1])
+				ExpectManualBinding(ctx, env.Client, pods[0], node)
+				ExpectManualBinding(ctx, env.Client, pods[1], node)
+
+				// inform cluster state about nodes and nodeclaims
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Reason()).To(Equal(v1.DisruptionReasonEmpty))
+				ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+
+				// Cascade any deletion of the nodeClaim to the node
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+				// the node is empty even though it still has pods
+				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+				ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			},
+			Entry("with WhenEmpty", v1.ConsolidationPolicyWhenEmpty),
+			Entry("with WhenEmptyOrUnderutilized", v1.ConsolidationPolicyWhenEmptyOrUnderutilized),
+			Entry("with Balanced", v1.ConsolidationPolicyBalanced),
+		)
+		It("should fall back to pod-deletion-cost when the PodDeletionCostManagement gate is off", func() {
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{corev1.PodDeletionCost: noDisruptionCost},
+			}})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Reason()).To(Equal(v1.DisruptionReasonEmpty))
+		})
+		It("should ignore pod-deletion-cost when the PodDeletionCostManagement gate is on", func() {
+			gateOnOpts := test.Options()
+			gateOnOpts.FeatureGates.PodDeletionCostManagement = true
+			gateOnCtx := options.ToContext(ctx, gateOnOpts)
+
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{corev1.PodDeletionCost: noDisruptionCost},
+			}})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(gateOnCtx, disruptionController)
+
+			// There should be no commands in the queue
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should ignore nodes where only some pods have no disruption cost", func() {
+			zeroCostPod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.DisruptionCostAnnotationKey: noDisruptionCost},
+			}})
+			pod := test.Pod()
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, zeroCostPod, pod)
+			ExpectManualBinding(ctx, env.Client, zeroCostPod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// There should be no commands in the queue
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should ignore nodes whose pods have no disruption cost but are blocked by a PDB", func() {
+			labels := map[string]string{"app": "test"}
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels:      labels,
+				Annotations: map[string]string{v1.DisruptionCostAnnotationKey: noDisruptionCost},
+			}})
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         labels,
+				MaxUnavailable: fromInt(0),
+				Status: &policyv1.PodDisruptionBudgetStatus{
+					ObservedGeneration: 1,
+					DisruptionsAllowed: 0,
+					CurrentHealthy:     1,
+					DesiredHealthy:     1,
+					ExpectedPods:       1,
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod, pdb)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// There should be no commands in the queue
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should ignore nodes whose pods have no disruption cost but have the karpenter.sh/do-not-disrupt annotation", func() {
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1.DisruptionCostAnnotationKey: noDisruptionCost,
+					v1.DoNotDisruptAnnotationKey:   "true",
+				},
+			}})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// There should be no commands in the queue
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 	})
 	Context("Static NodePool", func() {
 		It("should not consolidate static NodePool nodes", func() {
