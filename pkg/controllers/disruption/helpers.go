@@ -329,7 +329,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 			}
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it
-			log.FromContext(ctx).Error(err, "failed listing instance types", "nodepool", np.Name)
+			log.FromContext(ctx).Error(err, "failed listing instance types", "NodePool", klog.KObj(np))
 			continue
 		}
 		if len(nodePoolInstanceTypes) == 0 {
@@ -356,7 +356,7 @@ func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[strin
 		remaining := allowed - disrupting[name]
 		if remaining < 0 {
 			log.FromContext(ctx).V(1).WithValues(
-				"nodePool", name,
+				"NodePool", klog.KRef("", name),
 				"reason", string(reason),
 				"allowed", allowed,
 				"disrupting", disrupting[name],

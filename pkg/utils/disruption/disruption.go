@@ -23,8 +23,8 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -102,7 +102,7 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 		parsedCost, err := strconv.ParseInt(costStr, 10, 32)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed parsing disruption cost",
-				"annotation", v1.DisruptionCostAnnotationKey, "value", costStr, "pod", client.ObjectKeyFromObject(p))
+				"annotation", v1.DisruptionCostAnnotationKey, "value", costStr, "Pod", klog.KObj(p))
 		} else {
 			// the disruptionCost is in [-2147483647, 2147483647]
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
@@ -115,7 +115,7 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 			podDeletionCost, err := strconv.ParseInt(podDeletionCostStr, 10, 32)
 			if err != nil {
 				log.FromContext(ctx).Error(err, "failed parsing pod deletion cost",
-					"annotation", corev1.PodDeletionCost, "value", podDeletionCostStr, "pod", client.ObjectKeyFromObject(p))
+					"annotation", corev1.PodDeletionCost, "value", podDeletionCostStr, "Pod", klog.KObj(p))
 			} else {
 				cost += float64(podDeletionCost) / math.Pow(2, 27.0)
 			}
