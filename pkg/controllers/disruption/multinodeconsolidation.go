@@ -138,7 +138,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
+				ConsolidationTimeoutsTotal.Inc(map[string]string{
+					ConsolidationTypeLabel: m.ConsolidationType(),
+					TimeoutScopeLabel:      SchedulingSimulationTimeoutScope.Name,
+				})
 				if lastSavedCommand.Candidates == nil {
 					log.FromContext(ctx).V(1).Info("failed to find a multi-node consolidation after timeout", "last_batch_size", (min+max)/2)
 					return Command{}, nil, nil
