@@ -19,6 +19,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 
@@ -109,11 +110,13 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 	domainGroups := map[string]TopologyDomainGroup{}
 	for npName, its := range instanceTypes {
 		np := nodePoolIndex[npName]
+		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+		nodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
 		for _, it := range its {
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
-			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
+			// Entries are shared with nodePoolRequirements, so they must not be mutated in place.
+			requirements := maps.Clone(nodePoolRequirements)
 			requirements.Add(it.Requirements.Values()...)
 
 			for topologyKey, requirement := range requirements {
@@ -126,9 +129,7 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 			}
 		}
 
-		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-		requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-		for key, requirement := range requirements {
+		for key, requirement := range nodePoolRequirements {
 			if requirement.Operator() == corev1.NodeSelectorOpIn {
 				if _, ok := domainGroups[key]; !ok {
 					domainGroups[key] = NewTopologyDomainGroup()
