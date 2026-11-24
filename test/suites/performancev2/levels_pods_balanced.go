@@ -18,12 +18,11 @@ package performancev2
 
 import "sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 
-// podsBalancedLevels: see levels.go for the rule. Utilization is measured only until recalibrated without DaemonSet
-// requests, and kwok-ci keeps only heap and CPU, the series perfv1 measured the same way.
+// podsBalancedLevels: Experimental starting bounds; calibrate before promoting any to Stable.
 var podsBalancedLevels = scenarioLevels{
 	KWOK: perf.Levels{
 		"podsBalanced/scaleOut": {
-			perf.PodReady.P95.Stable(23), perf.PodReady.P99.Stable(24), perf.PodReady.Max.Experimental(24), perf.Nodes.Experimental(196), perf.HeapMB.Experimental(155), perf.CPUCores.Experimental(1.124),
+			perf.PodReady.P95.Experimental(23), perf.PodReady.P99.Experimental(24), perf.PodReady.Max.Experimental(24), perf.Nodes.Experimental(196), perf.HeapMB.Experimental(155), perf.CPUCores.Experimental(1.124),
 		},
 		"podsBalanced/consolidation": {
 			perf.TotalTimeSeconds.Experimental(667), perf.Nodes.Experimental(140), perf.PodsDisrupted.Experimental(177), perf.HeapMB.Experimental(141), perf.CPUCores.Experimental(0.24),

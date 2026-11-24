@@ -31,7 +31,9 @@ import (
 	"sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 )
 
-//go:embed calibration/kwok.json calibration/kwok
+// Add calibration/kwok to the directive with the first calibration/kwok/<scenario>.json.
+//
+//go:embed calibration/kwok.json
 var kwokCalibration embed.FS
 
 // Provider returns the plugin named by KARPENTER_PERF_PROVIDER: kwok (the default) or kwok-ci.
