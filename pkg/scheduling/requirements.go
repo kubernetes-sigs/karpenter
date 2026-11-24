@@ -123,6 +123,8 @@ func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirementWit
 	for _, req := range r {
 		if req.gte != nil && req.lte != nil {
 			result = append(result, req.BoundedNodeSelectorRequirements()...)
+		} else if req.mustExist && req.gte == nil && req.lte == nil && req.Operator() == corev1.NodeSelectorOpNotIn {
+			result = append(result, v1.NodeSelectorRequirementWithMinValues{Key: req.Key, Operator: corev1.NodeSelectorOpExists, MinValues: req.minValues}, req.NodeSelectorRequirement())
 		} else {
 			result = append(result, req.NodeSelectorRequirement())
 		}
@@ -187,7 +189,7 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 		if opts.AllowUndefined.Has(key) {
 			continue
 		}
-		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
+		if r.Has(key) || requirements[key].mayBeAbsent() {
 			continue
 		}
 		// break early so we only report the first error
@@ -258,12 +260,9 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 		existing := r.Get(key)
 		incoming := requirements.Get(key)
 		if !existing.HasIntersection(incoming) {
-			// where the incoming requirement has operator { NotIn, DoesNotExist }
-			if operator := incoming.Operator(); operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
-				// and the existing requirement has operator { NotIn, DoesNotExist }
-				if operator := existing.Operator(); operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
-					continue
-				}
+			// both requirements are satisfied by nodes without the label, e.g. { NotIn, DoesNotExist }
+			if incoming.mayBeAbsent() && existing.mayBeAbsent() {
+				continue
 			}
 			errs = multierr.Append(errs, badKeyError{
 				key:      key,
