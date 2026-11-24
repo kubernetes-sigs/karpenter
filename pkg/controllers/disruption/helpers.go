@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -346,7 +347,13 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 // The disrupting count is reason-dependent, so pass the same reason on to
 // MustGetAllowedDisruptions or NodePoolBudgetMap.
 func NodePoolStats(cluster *state.Cluster, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
-	return NodePoolStatsFromNodes(cluster.DeepCopyNodes(), reason)
+	numNodes, disrupting = map[string]int{}, map[string]int{}
+	// Count against cluster state directly rather than a snapshot of it. Every field this reads lives on the state
+	// node, so there is nothing to copy, and nothing in the loop takes the cluster lock again or calls the API server.
+	for node := range cluster.Nodes() {
+		countNodePoolStats(node, reason, numNodes, disrupting)
+	}
+	return numNodes, disrupting
 }
 
 func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[string]*v1.NodePool, numNodes, disrupting map[string]int, reason v1.DisruptionReason) map[string]int {
@@ -373,47 +380,54 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason
 	numNodes = map[string]int{}
 	disrupting = map[string]int{}
 	for _, node := range nodes {
-		// We only consider nodes that we own and are initialized towards the total.
-		// If a node is launched/registered, but not initialized, pods aren't scheduled
-		// to the node, and these are treated as unhealthy until they're cleaned up.
-		// This prevents odd roundup cases with percentages where replacement nodes that
-		// aren't initialized could be counted towards the total, resulting in more disruptions
-		// to active nodes than desired, where Karpenter should wait for these nodes to be
-		// healthy before continuing. Reboot resets Initialized at issuance, but the node
-		// still counts against the budget until it re-initializes after the reboot
-		// succeeds, so a stuck re-initialization keeps holding the budget.
-		rebootDisrupting := node.RebootInProgress() || node.RebootReinitializing()
-		if !node.Managed() || (!node.Initialized() && !rebootDisrupting) {
-			continue
-		}
-
-		// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
-		// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
-		// on the underlying cloud provider machine.
-		if node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
-			continue
-		}
-
-		nodePool := node.Labels()[v1.NodePoolLabelKey]
-		numNodes[nodePool]++
-
-		// A node is subtracted from the allowed disruptions when it is:
-		//   1. Marked for deletion (a disruption is already in flight),
-		//   2. Rebooting or re-initializing after a reboot (an in-place disruption is still in flight), for every reason, or
-		//   3. NotReady — EXCEPT for the Unhealthy (repair) budget.
-		// Repair must not count merely-unhealthy nodes: NotReady is precisely repair's trigger, so counting those
-		// nodes against the repair budget would let a wave of unhealthy nodes starve the very budget that repairs them
-		// (a node.health cohort could zero the budget and freeze repair). An in-flight repair still counts once its
-		// candidate is MarkedForDeletion. Other reasons keep the reason-agnostic "unhealthy nodes consume budget"
-		// semantics introduced for consolidation/drift (kubernetes-sigs/karpenter#981).
-		notReady := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status != corev1.ConditionTrue
-		// Count reboots against every disruption budget until the node re-initializes, otherwise
-		// other methods could disrupt concurrently and exceed the NodePool budget.
-		if node.MarkedForDeletion() || rebootDisrupting || (notReady && reason != v1.DisruptionReasonUnhealthy) {
-			disrupting[nodePool]++
-		}
+		countNodePoolStats(node, reason, numNodes, disrupting)
 	}
 	return numNodes, disrupting
+}
+
+// countNodePoolStats accumulates one node into the per-NodePool node and disrupting counts. It only reads the node.
+func countNodePoolStats(node *state.StateNode, reason v1.DisruptionReason, numNodes, disrupting map[string]int) {
+	// We only consider nodes that we own and are initialized towards the total.
+	// If a node is launched/registered, but not initialized, pods aren't scheduled
+	// to the node, and these are treated as unhealthy until they're cleaned up.
+	// This prevents odd roundup cases with percentages where replacement nodes that
+	// aren't initialized could be counted towards the total, resulting in more disruptions
+	// to active nodes than desired, where Karpenter should wait for these nodes to be
+	// healthy before continuing. Reboot resets Initialized at issuance, but the node
+	// still counts against the budget until it re-initializes after the reboot
+	// succeeds, so a stuck re-initialization keeps holding the budget.
+	rebootDisrupting := node.RebootInProgress() || node.RebootReinitializing()
+	if !node.Managed() || (!node.Initialized() && !rebootDisrupting) {
+		return
+	}
+
+	// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
+	// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
+	// on the underlying cloud provider machine.
+	// Observed-only: reading a condition through the default ConditionSet initializes any absent root or dependent
+	// condition on the NodeClaim, which would write cluster state from under its read lock.
+	if node.NodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+		return
+	}
+
+	nodePool := node.Labels()[v1.NodePoolLabelKey]
+	numNodes[nodePool]++
+
+	// A node is subtracted from the allowed disruptions when it is:
+	//   1. Marked for deletion (a disruption is already in flight),
+	//   2. Rebooting or re-initializing after a reboot (an in-place disruption is still in flight), for every reason, or
+	//   3. NotReady — EXCEPT for the Unhealthy (repair) budget.
+	// Repair must not count merely-unhealthy nodes: NotReady is precisely repair's trigger, so counting those
+	// nodes against the repair budget would let a wave of unhealthy nodes starve the very budget that repairs them
+	// (a node.health cohort could zero the budget and freeze repair). An in-flight repair still counts once its
+	// candidate is MarkedForDeletion. Other reasons keep the reason-agnostic "unhealthy nodes consume budget"
+	// semantics introduced for consolidation/drift (kubernetes-sigs/karpenter#981).
+	notReady := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status != corev1.ConditionTrue
+	// Count reboots against every disruption budget until the node re-initializes, otherwise
+	// other methods could disrupt concurrently and exceed the NodePool budget.
+	if node.MarkedForDeletion() || rebootDisrupting || (notReady && reason != v1.DisruptionReasonUnhealthy) {
+		disrupting[nodePool]++
+	}
 }
 
 // BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps each disruption reason to the number of allowed disruptions.
