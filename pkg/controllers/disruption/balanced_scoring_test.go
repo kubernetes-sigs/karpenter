@@ -177,7 +177,8 @@ func makeShouldDisruptCandidate(np *v1.NodePool, policy v1.ConsolidationPolicy) 
 		},
 		instanceType:             it,
 		NodePool:                 np,
-		RescheduleDisruptionCost: disruptionutils.PerNodeBaseDisruptionCost + 1, // non-empty so consolidation ShouldDisrupt accepts it
+		reschedulablePods:        []*corev1.Pod{makePod("p1", "")}, // non-empty so consolidation ShouldDisrupt accepts it
+		RescheduleDisruptionCost: disruptionutils.PerNodeBaseDisruptionCost + 1,
 	}
 }
 
