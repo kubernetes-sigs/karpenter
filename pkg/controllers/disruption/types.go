@@ -139,12 +139,10 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 	return c.NodePool.Spec.Replicas != nil
 }
 
-// IsEmpty reports that no pod contributes positive reschedule disruption cost.
-// A node with running pods whose eviction costs all clamp to zero is Empty under
-// this definition; the Empty disruption reason and Empty budgets govern its
-// deletion through the Emptiness method.
+// IsEmpty reports that the candidate has no reschedulable pods. Emptiness deletes
+// without a scheduling simulation, so pods with zero eviction cost must not count.
 func (c *Candidate) IsEmpty() bool {
-	return c.RescheduleDisruptionCost <= disruptionutils.PerNodeBaseDisruptionCost
+	return len(c.reschedulablePods) == 0
 }
 
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,

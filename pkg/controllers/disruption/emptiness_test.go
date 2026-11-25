@@ -462,6 +462,23 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		DescribeTable("should ignore nodes whose pods have a large negative disruption cost",
+			func(annotation string) {
+				pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{annotation: "-351877556"}}})
+				ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				Expect(queue.GetCommands()).To(BeEmpty())
+				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+				ExpectExists(ctx, env.Client, nodeClaim)
+			},
+			Entry("pod-deletion-cost", corev1.PodDeletionCost),
+			Entry("karpenter.sh/disruption-cost", v1.DisruptionCostAnnotationKey),
+		)
 		It("should ignore nodes with the consolidatable status condition set to false", func() {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeConsolidatable, "NotEmpty", "NotEmpty")
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
