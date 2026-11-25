@@ -78,6 +78,8 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		return len(c.reschedulablePods) == 0
 	})
 
+	// Solve the pending-pod baseline at most once for this pass rather than once per simulated candidate.
+	baseline := newPendingPodBaseline()
 	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
 	// Disrupting empty candidates first also helps reduce the overall churn because if a non-empty candidate is disrupted first,
 	// the pods from that node can reschedule on the empty nodes and will need to move again when those nodes get disrupted.
@@ -94,7 +96,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		// Simulate rescheduling the candidate's pods. When they can't be replaced-first and the candidate holds a full
 		// reservation, this reports terminate-first (RFC #3203): delete the candidate and let reactive provisioning
 		// refill the freed slot. See SimulateSchedulingWithReservedFallback.
-		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, candidate, options.FromContext(ctx).FeatureGates.TerminateFirstDrift, SimulationOptions{})
+		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, candidate, options.FromContext(ctx).FeatureGates.TerminateFirstDrift, SimulationOptions{pendingPodBaseline: baseline})
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {

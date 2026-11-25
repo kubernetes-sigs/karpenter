@@ -142,6 +142,8 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 	if err != nil {
 		return []Command{}, err
 	}
+	// Solve the pending-pod baseline at most once for this pass rather than once per simulated candidate.
+	baseline := newPendingPodBaseline()
 	for _, candidate := range candidates {
 		if trippedPools[candidate.NodePool.Name] {
 			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
@@ -233,7 +235,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		}
 		// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
 		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate,
-			terminateFirstEnabled, SimulationOptions{IncludeBlockedCandidatePods: true})
+			terminateFirstEnabled, SimulationOptions{IncludeBlockedCandidatePods: true, pendingPodBaseline: baseline})
 		if err != nil {
 			if errors.Is(err, errCandidateDeleting) {
 				continue

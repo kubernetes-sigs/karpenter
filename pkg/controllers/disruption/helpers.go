@@ -56,6 +56,13 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 type SimulationOptions struct {
 	// IncludeBlockedCandidatePods includes candidate pods even when they cannot currently be evicted.
 	IncludeBlockedCandidatePods bool
+	// pendingPodBaseline, when set, keeps capacity that pods need regardless of the disruption out of the results.
+	pendingPodBaseline *pendingPodBaseline
+}
+
+// ConsolidationSimulationOptions returns SimulationOptions with a fresh pendingPodBaseline.
+func ConsolidationSimulationOptions() SimulationOptions {
+	return SimulationOptions{pendingPodBaseline: newPendingPodBaseline()}
 }
 
 // SimulateScheduling determines whether candidate workloads can be rescheduled after disruption.
@@ -82,6 +89,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
+	pendingPods := pods
 
 	// candidatePods are the pods on consolidation candidate nodes that we will reschedule. Their UIDs feed
 	// deletingPodUIDs below so the DRA allocator frees the devices they hold and re-allocates their claims onto the
@@ -119,6 +127,15 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		opts = append(opts, scheduling.IgnorePreferences)
 	}
 	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
+
+	var needsNewCapacity sets.Set[types.UID]
+	if simulationOpts.pendingPodBaseline != nil {
+		// Base options only: caller options model the disruption, which the baseline must not see.
+		if needsNewCapacity, err = simulationOpts.pendingPodBaseline.podsNeedingNewCapacity(ctx, cluster, provisioner, pendingPods, deletingNodePods, opts); err != nil {
+			return scheduling.Results{}, err
+		}
+		opts = append(opts, scheduling.IsolatePods(needsNewCapacity))
+	}
 	opts = append(opts, schedulerOpts...)
 	// Both consolidation candidate pods and pods on already-deleting nodes are migrating off their current nodes, so
 	// the DRA allocator should treat the devices they hold as available for reallocation (and re-allocate their claims).
@@ -139,6 +156,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}
 	results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+	// Drop NodeClaims that hold only pods needing new capacity regardless; reactive provisioning launches those.
+	if len(needsNewCapacity) > 0 {
+		results.NewNodeClaims = lo.Reject(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) bool {
+			return lo.EveryBy(nc.Pods, func(p *corev1.Pod) bool { return needsNewCapacity.Has(p.UID) })
+		})
+	}
 	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *corev1.Pod) (client.ObjectKey, any) {
 		return client.ObjectKeyFromObject(p), nil
 	})
@@ -163,6 +186,69 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		}
 	}
 	return results, nil
+}
+
+// pendingPodBaseline finds the pending and deleting-node pods that need new capacity whatever disruption decides: those
+// a simulation of the cluster as it stands (candidates included) does not place on an existing node. Disruption is not
+// charged for their NodeClaims. It is shared across the sequential simulations of one pass and re-solved when the
+// cluster's consolidation state changes or an unseen pod goes pending. Not safe for concurrent use.
+type pendingPodBaseline struct {
+	needsNewCapacity   sets.Set[types.UID] // nil until solved
+	solvedPendingPods  sets.Set[types.UID]
+	solvedClusterState time.Time
+}
+
+func newPendingPodBaseline() *pendingPodBaseline {
+	return &pendingPodBaseline{}
+}
+
+// podsNeedingNewCapacity returns the cached baseline, solving it if missing or stale. Errors are not cached.
+func (b *pendingPodBaseline) podsNeedingNewCapacity(ctx context.Context, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+	pendingPods, deletingNodePods []*corev1.Pod, opts []scheduling.Options,
+) (sets.Set[types.UID], error) {
+	if len(pendingPods) == 0 && len(deletingNodePods) == 0 {
+		return sets.New[types.UID](), nil
+	}
+	pendingPodUIDs := sets.New(lo.Map(pendingPods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
+	// Read before solving so a change during the solve invalidates the result.
+	clusterState := cluster.ConsolidationState()
+	if b.needsNewCapacity != nil && clusterState.Equal(b.solvedClusterState) && b.solvedPendingPods.IsSuperset(pendingPodUIDs) {
+		return b.needsNewCapacity, nil
+	}
+	needsNewCapacity, err := solvePendingPodBaseline(ctx, cluster, provisioner, pendingPods, deletingNodePods, opts)
+	if err != nil {
+		return nil, err
+	}
+	b.needsNewCapacity = needsNewCapacity
+	b.solvedPendingPods = pendingPodUIDs
+	b.solvedClusterState = clusterState
+	return needsNewCapacity, nil
+}
+
+func solvePendingPodBaseline(ctx context.Context, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+	pendingPods, deletingNodePods []*corev1.Pod, opts []scheduling.Options,
+) (sets.Set[types.UID], error) {
+	pods := make([]*corev1.Pod, 0, len(pendingPods)+len(deletingNodePods))
+	pods = append(pods, pendingPods...)
+	pods = append(pods, deletingNodePods...)
+	// Match the disruption simulation: devices held by deleting-node pods are free for DRA reallocation.
+	deletingPodUIDs := sets.New(lo.Map(deletingNodePods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
+	// The scheduler mutates its state nodes, so give it its own copy.
+	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, cluster.DeepCopyNodes().Active(), deletingPodUIDs, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating baseline scheduler, %w", err)
+	}
+	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
+	if err != nil {
+		return nil, fmt.Errorf("simulating baseline scheduling, %w", err)
+	}
+	needsNewCapacity := sets.New(lo.Map(pods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
+	for _, n := range results.ExistingNodes {
+		for _, p := range n.Pods {
+			needsNewCapacity.Delete(p.UID)
+		}
+	}
+	return needsNewCapacity, nil
 }
 
 // SimulateSchedulingWithReservedFallback runs the candidate-gone scheduling simulation for a single voluntary-disruption

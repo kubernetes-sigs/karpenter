@@ -177,6 +177,37 @@ var _ = Describe("Repair", func() {
 		newRepairController()
 	})
 
+	It("should size a replacement for the candidate's pods only when a pending pod needs a new node", func() {
+		// The pending pod is pinned to a pool the unhealthy node isn't in, so it needs a new node no matter what happens
+		// to the unhealthy node; that node is left to provisioning rather than launched as a replacement.
+		nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+			Key:      "pool",
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{"x"},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		initNode(nodeClaim, node)
+		bindReschedulablePod(node)
+		pending := test.UnschedulablePod(test.PodOptions{
+			NodeSelector: map[string]string{"pool": "x"},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+			},
+		})
+		ExpectApplied(ctx, env.Client, pending)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(candidates).To(HaveLen(1))
+		cmds, err := repair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Replacements).To(HaveLen(1))
+		Expect(lo.Map(cmds[0].Replacements[0].Pods, func(p *corev1.Pod, _ int) string { return p.Name })).NotTo(ContainElement(pending.Name))
+	})
+
 	// Repair pre-spins a replacement (replace-then-terminate) and only after the toleration elapses.
 	It("should pre-spin a replacement and terminate the unhealthy node only after the replacement is healthy", func() {
 		initNode(nodeClaim, node)

@@ -750,6 +750,50 @@ var _ = Describe("Drift", func() {
 			// All grace periods expired, drift should now proceed
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 		})
+		It("should size a replacement for the candidate's pods only when a pending pod needs a new node", func() {
+			// The pending pod is pinned to a pool the drifted node isn't in, so it needs a new node no matter what
+			// happens to the drifted node; that node is left to provisioning rather than launched as a replacement.
+			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+				Key:      "pool",
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"x"},
+			})
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+			pending := test.UnschedulablePod(test.PodOptions{
+				NodeSelector: map[string]string{"pool": "x"},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, rs, pod, pending, nodeClaim, node, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			drift := disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, drift.ShouldDisrupt, drift.Class(), queue)
+			Expect(err).To(Succeed())
+			Expect(candidates).To(HaveLen(1))
+			cmds, err := drift.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
+			Expect(err).To(Succeed())
+			Expect(cmds).To(HaveLen(1))
+			Expect(lo.Map(cmds[0].Replacements, func(r *disruption.Replacement, _ int) []string {
+				return lo.Map(r.Pods, func(p *corev1.Pod, _ int) string { return p.Name })
+			})).To(Equal([][]string{{pod.Name}}))
+		})
 		It("should replace drifted nodes", func() {
 			labels := map[string]string{
 				"app": "test",

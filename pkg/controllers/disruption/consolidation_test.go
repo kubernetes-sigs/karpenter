@@ -1059,6 +1059,75 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		It("can replace node without sizing the replacement for a pending pod that needs a new node", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+
+			// A pending pod that fits on no existing node, only on a new node. It needs that new capacity regardless of
+			// any disruption decision, so the candidate's replacement must not be sized and priced to carry it.
+			pending := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("48")},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool, pending)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Process the item so that the nodes can be deleted.
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			// the replacement carries only the candidate's pod; the pending pod's new capacity is provisioned
+			// independently of consolidation
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims[0].Pods).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims[0].Pods[0].Name).To(Equal(pod.Name))
+
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// should create a new nodeclaim as there is a cheaper one that can hold the pod
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodes).To(HaveLen(1))
+
+			// Expect that the new nodeclaim does not request the most expensive instance type
+			Expect(nodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+
+			// pending pod is still here and hasn't been scheduled
+			pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
+			Expect(pending.Spec.NodeName).To(BeEmpty())
+		})
 		DescribeTable("only requires Spot for an on-demand replacement when a Spot offering is available", func(spotAvailable bool) {
 			offerings := func(price float64) []cloudprovider.Offering {
 				return []cloudprovider.Offering{
@@ -3558,6 +3627,372 @@ var _ = Describe("Consolidation", func() {
 			pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
 			Expect(pending.Spec.NodeName).To(BeEmpty())
 		})
+		It("can delete nodes with a pending pod that needs a new node", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+
+			// A pending pod that fits on no existing node, only on a new node. Whether or not that node ever launches
+			// (e.g. the cloud provider is out of capacity), the pod needs new capacity regardless of any disruption
+			// decision, so it must not block consolidation of unrelated nodes.
+			pending := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("48")},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool, pending)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Process the item so that the nodes can be deleted.
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Replacements).To(BeEmpty())
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+
+			// we don't need a new node to replace the candidate, and the pending pod's new capacity is provisioned
+			// independently of consolidation
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+
+			// pending pod is still here and hasn't been scheduled
+			pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
+			Expect(pending.Spec.NodeName).To(BeEmpty())
+		})
+		Context("Pending Pod Baseline", func() {
+			// Nodes and pods are pinned to a "pool" label so each spec controls exactly which existing node a pod can use.
+			// The NodePool allows both pools, so a pod that fits no existing node can still land on a new NodeClaim.
+			const poolLabel = "pool"
+			var rs *appsv1.ReplicaSet
+			var nodeClaimsToInit []*v1.NodeClaim
+			var nodesToInit []*corev1.Node
+
+			// poolNode makes a 32 cpu node in pool; setup applies and initializes it.
+			poolNode := func(pool string) *corev1.Node {
+				nc, n := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+							poolLabel:                      pool,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						// Capacity counts against NodePool limits; the linked Node copies both from the NodeClaim.
+						Capacity: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
+						},
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+				nodeClaimsToInit, nodesToInit = append(nodeClaimsToInit, nc), append(nodesToInit, n)
+				return n
+			}
+			// poolPodOptions describes a reschedulable pod requesting cpu; an empty pool leaves it unpinned.
+			poolPodOptions := func(pool, cpu string) test.PodOptions {
+				opts := test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
+							},
+						}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu)},
+					},
+				}
+				if pool != "" {
+					opts.NodeSelector = map[string]string{poolLabel: pool}
+				}
+				return opts
+			}
+			poolPod := func(pool, cpu string) *corev1.Pod { return test.Pod(poolPodOptions(pool, cpu)) }
+			pendingPoolPod := func(pool, cpu string) *corev1.Pod { return test.UnschedulablePod(poolPodOptions(pool, cpu)) }
+			// setup applies every poolNode and the given pods, binds each bound pod to its node, and initializes cluster state.
+			setup := func(bound map[*corev1.Pod]*corev1.Node, pending ...*corev1.Pod) {
+				GinkgoHelper()
+				objs := []client.Object{rs, nodePool}
+				for i := range nodesToInit {
+					objs = append(objs, nodeClaimsToInit[i], nodesToInit[i])
+				}
+				for p := range bound {
+					objs = append(objs, p)
+				}
+				for _, p := range pending {
+					objs = append(objs, p)
+				}
+				ExpectApplied(ctx, env.Client, objs...)
+				for p, n := range bound {
+					ExpectManualBinding(ctx, env.Client, p, n)
+				}
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodesToInit, nodeClaimsToInit)
+			}
+			// simulateWithout runs the consolidation simulation for the candidate on node, the way computeConsolidation and
+			// validateCommand do.
+			simulateWithout := func(node *corev1.Node) pscheduling.Results {
+				GinkgoHelper()
+				snc := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+				candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, snc.ShouldDisrupt, snc.Class(), queue)
+				Expect(err).To(Succeed())
+				candidate, ok := lo.Find(candidates, func(c *disruption.Candidate) bool { return c.Name() == node.Name })
+				Expect(ok).To(BeTrue())
+				results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, disruption.ConsolidationSimulationOptions(), candidate)
+				Expect(err).To(Succeed())
+				return results
+			}
+			// podsOf returns the names of the pods each new NodeClaim holds.
+			podsOf := func(results pscheduling.Results) [][]string {
+				return lo.Map(results.NewNodeClaims, func(nc *pscheduling.NodeClaim, _ int) []string {
+					return lo.Map(nc.Pods, func(p *corev1.Pod, _ int) string { return p.Name })
+				})
+			}
+			// addReservation adds a reservation with a single free slot, priced far below on-demand like every reservation.
+			addReservation := func() {
+				reservationID := fmt.Sprintf("r-%s", mostExpensiveInstance.Name)
+				mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+				mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+				mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+					Price:               mostExpensiveOffering.Price / 1_000_000.0,
+					Available:           true,
+					Compatible:          true,
+					ReservationCapacity: 1,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{
+						v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
+						corev1.LabelTopologyZone:    mostExpensiveOffering.Zone(),
+						v1alpha1.LabelReservationID: reservationID,
+					}),
+				})
+				ExpectSingletonReconciled(ctx, pricingController)
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true)}}))
+			}
+			withCPULimit := func(cpu string) func() {
+				return func() { nodePool.Spec.Limits = v1.Limits{corev1.ResourceCPU: resource.MustParse(cpu)} }
+			}
+
+			BeforeEach(func() {
+				// Apply the ReplicaSet up front so it has a UID for the pods' owner references.
+				rs = test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				nodeClaimsToInit, nodesToInit = nil, nil
+				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+					Key:      poolLabel,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"x", "c"},
+				})
+			})
+
+			// Each case has node x, filled by a filler pod, and the candidate c holding one pod. The pending pod is pinned
+			// to x. Expectations name pods by role: "candidate" for c's pod, "pending" for the pending pod.
+			type baselineCase struct {
+				fillerCPU, candidatePool, candidateCPU, pendingCPU string
+				prep                                               func()
+				// newNodeClaims are the pods on each NodeClaim the disruption is charged for.
+				newNodeClaims [][]string
+				// unschedulable are the pods the simulation can't place.
+				unschedulable []string
+				// replacementReserved, when set, is whether the first charged NodeClaim may use the reservation.
+				replacementReserved *bool
+			}
+			DescribeTable("should charge the disruption only for the capacity it causes",
+				func(c baselineCase) {
+					if c.prep != nil {
+						c.prep()
+					}
+					nodeX, nodeC := poolNode("x"), poolNode("c")
+					candidatePod := poolPod(c.candidatePool, c.candidateCPU)
+					pending := pendingPoolPod("x", c.pendingCPU)
+					setup(map[*corev1.Pod]*corev1.Node{poolPod("x", c.fillerCPU): nodeX, candidatePod: nodeC}, pending)
+					names := map[string]string{"candidate": candidatePod.Name, "pending": pending.Name}
+
+					results := simulateWithout(nodeC)
+					Expect(podsOf(results)).To(Equal(lo.Map(c.newNodeClaims, func(roles []string, _ int) []string {
+						return lo.Map(roles, func(r string, _ int) string { return names[r] })
+					})))
+					Expect(lo.Map(lo.Keys(results.PodErrors), func(p *corev1.Pod, _ int) string { return p.Name })).To(
+						ConsistOf(lo.Map(c.unschedulable, func(r string, _ int) string { return names[r] })))
+					if c.replacementReserved != nil {
+						Expect(results.NewNodeClaims[0].Requirements.Has(cloudprovider.ReservationIDLabel)).To(Equal(*c.replacementReserved))
+					}
+				},
+				// x has 2 cpu free and x and c use the whole 64 cpu limit, so the pending pod can't schedule at all. Deleting c
+				// releases c's share of the limit, letting the pending pod fit a new node; that node isn't a cost of deleting c.
+				Entry("ignores a pending pod a NodePool limit keeps from scheduling", baselineCase{
+					fillerCPU: "30", candidateCPU: "1", pendingCPU: "10", prep: withCPULimit("64"),
+				}),
+				// x has 4 cpu free, so the pending pod fits there now. Without c, c's larger pod is placed on x first and pushes
+				// the pending pod onto a new node, a node only the disruption makes necessary.
+				Entry("counts a new node the disruption pushes a pending pod onto", baselineCase{
+					fillerCPU: "28", candidateCPU: "3500m", pendingCPU: "3",
+					newNodeClaims: [][]string{{"pending"}},
+				}),
+				// x has 1 cpu free, so both pods need a new node without c; c's pod must not be packed onto the pending pod's.
+				Entry("sizes a replacement for the candidate's pods only", baselineCase{
+					fillerCPU: "31", candidateCPU: "2", pendingCPU: "3",
+					newNodeClaims: [][]string{{"candidate"}},
+				}),
+				// The pending pod needs a new node and takes the only reserved slot, so c's replacement can't be priced at the
+				// reservation's rate.
+				Entry("keeps a reserved slot for the pending pod that takes it", baselineCase{
+					fillerCPU: "31", candidatePool: "c", candidateCPU: "1", pendingCPU: "2", prep: addReservation,
+					newNodeClaims: [][]string{{"candidate"}}, replacementReserved: new(false),
+				}),
+				Entry("ignores a pending pod bound for a reserved slot when the candidate's pods fit elsewhere", baselineCase{
+					fillerCPU: "30", candidateCPU: "1", pendingCPU: "3", prep: addReservation,
+				}),
+				// Without c, 64 cpu of the 96 cpu limit is free. The pending pod, placed first, claims it for its new node, so
+				// c's pod, pinned to pool c, has no limit left for a replacement. Dropping the pending pod would spend the
+				// headroom it needs on the replacement.
+				Entry("keeps NodePool limit headroom for the pending pod that needs it", baselineCase{
+					fillerCPU: "30", candidatePool: "c", candidateCPU: "1", pendingCPU: "10", prep: withCPULimit("96"),
+					unschedulable: []string{"candidate"},
+				}),
+			)
+			It("should keep a candidate's pod out of a topology domain a pending pod's new node takes", func() {
+				// x has 4 cpu free, enough for c's pod, but the 10 cpu pending pod pinned to x needs a new node there either way.
+				// c's pod has pool anti-affinity to it, so with the pending pod placed first (it is larger) c's pod can't take x
+				// and needs a new node in pool c. Dropping the pending pod would let c's pod take x and leave the pending pod
+				// unable to schedule there once it can launch.
+				nodeX, nodeC := poolNode("x"), poolNode("c")
+				pending := pendingPoolPod("x", "10")
+				pending.Labels = map[string]string{"app": "pending"}
+				candidateOpts := poolPodOptions("", "1")
+				candidateOpts.PodAntiRequirements = []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: pending.Labels},
+					TopologyKey:   poolLabel,
+				}}
+				candidatePod := test.Pod(candidateOpts)
+				setup(map[*corev1.Pod]*corev1.Node{poolPod("x", "28"): nodeX, candidatePod: nodeC}, pending)
+
+				Expect(podsOf(simulateWithout(nodeC))).To(Equal([][]string{{candidatePod.Name}}))
+			})
+			// x has 12 cpu free, wanted by the pending pod and the pod on deleting node d. Whichever is placed second needs a
+			// new node no matter what happens to c, so neither may block deleting c.
+			DescribeTable("can delete nodes when a deleting node's pod and a pending pod compete for the same space",
+				func(migratingCPU, pendingCPU string) {
+					nodeX, nodeD, nodeC := poolNode("x"), poolNode("x"), poolNode("c")
+					setup(map[*corev1.Pod]*corev1.Node{
+						poolPod("x", "20"):         nodeX,
+						poolPod("x", migratingCPU): nodeD,
+						poolPod("", "500m"):        nodeC,
+					}, pendingPoolPod("x", pendingCPU))
+					cluster.MarkForDeletion(nodeD.Spec.ProviderID)
+
+					results := simulateWithout(nodeC)
+					Expect(results.AllNonPendingPodsScheduled()).To(BeTrue())
+					Expect(results.NewNodeClaims).To(BeEmpty())
+				},
+				Entry("when the pending pod is the one left needing a new node", "11", "10"),
+				Entry("when the deleting node's pod is the one left needing a new node", "10", "11"),
+			)
+			It("can delete multiple nodes with a pending pod that needs a new node", func() {
+				// x has 4 cpu free: enough for the 1 cpu pods on c1 and c2, not for the 10 cpu pending pod pinned to x, which
+				// needs a new node whatever happens to c1 and c2. x's filler can't be disrupted, so x is not a candidate.
+				nodeX, nodeC1, nodeC2 := poolNode("x"), poolNode("c"), poolNode("c")
+				filler := poolPod("x", "28")
+				filler.Annotations = map[string]string{v1.DoNotDisruptAnnotationKey: "true"}
+				setup(map[*corev1.Pod]*corev1.Node{filler: nodeX, poolPod("", "1"): nodeC1, poolPod("", "1"): nodeC2}, pendingPoolPod("x", "10"))
+
+				mnc := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue), disruption.WithValidator(NopValidator{}))
+				budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, mnc.Reason())
+				Expect(err).To(Succeed())
+				candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, mnc.ShouldDisrupt, mnc.Class(), queue)
+				Expect(err).To(Succeed())
+				Expect(candidates).To(HaveLen(2))
+
+				cmds, err := mnc.ComputeCommands(ctx, budgets, candidates...)
+				Expect(err).To(Succeed())
+				Expect(cmds).To(HaveLen(1))
+				// both candidates go without a replacement; the pending pod's node is left to provisioning
+				Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+				Expect(cmds[0].Replacements).To(BeEmpty())
+				Expect(lo.Map(cmds[0].Candidates, func(c *disruption.Candidate, _ int) string { return c.Name() })).To(ConsistOf(nodeC1.Name, nodeC2.Name))
+			})
+			Context("Caching", func() {
+				BeforeEach(func() {
+					// Every node is full enough that none can be consolidated, so a pass simulates every candidate. The pending
+					// pod fits no existing node, so the baseline has to run.
+					bound := map[*corev1.Pod]*corev1.Node{}
+					for range 3 {
+						bound[poolPod("", "30")] = poolNode("c")
+					}
+					setup(bound, pendingPoolPod("", "48"))
+				})
+				// expectSchedulerBuilds runs a single-node consolidation pass, publishing through rec, and expects it to build
+				// want schedulers. Every scheduler build records one topology build sample.
+				expectSchedulerBuilds := func(rec events.Recorder, want int) {
+					GinkgoHelper()
+					snc := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, rec, queue))
+					budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, snc.Reason())
+					Expect(err).To(Succeed())
+					candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, snc.ShouldDisrupt, snc.Class(), queue)
+					Expect(err).To(Succeed())
+					Expect(candidates).To(HaveLen(3))
+					pscheduling.TopologyBuildDurationSeconds.Reset()
+					cmds, err := snc.ComputeCommands(ctx, budgets, candidates...)
+					Expect(err).To(Succeed())
+					Expect(cmds).To(BeEmpty())
+					ExpectMetricHistogramSampleCountValue("karpenter_scheduler_topology_build_duration_seconds", uint64(want), map[string]string{})
+				}
+				It("should solve the pending pod baseline once per single-node consolidation pass", func() {
+					// One simulation per candidate, plus a single baseline shared by all of them.
+					expectSchedulerBuilds(recorder, 3+1)
+				})
+				It("should re-solve the pending pod baseline when the cluster's consolidation state changes during the pass", func() {
+					// Once the first candidate is found unconsolidatable, after the pass solved its baseline and before the next
+					// candidate is simulated, move the cluster's consolidation state, as any binding, deletion, or node change
+					// would. The clock steps first because the consolidation state is the time of the last change.
+					changed := false
+					hooked := &hookedRecorder{Recorder: recorder, onPublish: func(evt events.Event) {
+						if changed || evt.Reason != events.Unconsolidatable {
+							return
+						}
+						changed = true
+						env.Clock.Step(time.Second)
+						cluster.MarkUnconsolidated()
+					}}
+					// One simulation per candidate, plus the baseline solved before the change and the one re-solved after it.
+					expectSchedulerBuilds(hooked, 3+2)
+					Expect(changed).To(BeTrue())
+				})
+			})
+		})
 		It("won't delete nodes if it would make a non-pending pod go pending", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -5545,4 +5980,18 @@ type fixedPricer float64
 
 func (p fixedPricer) NodeClaimPrice(context.Context, *v1.NodeClaim, *cloudprovider.InstanceType) (float64, bool) {
 	return float64(p), true
+}
+
+// hookedRecorder forwards every event to the wrapped Recorder after running onPublish against it, letting a spec change
+// the cluster at a point a disruption pass reports through an event, such as between two candidates' simulations.
+type hookedRecorder struct {
+	events.Recorder
+	onPublish func(events.Event)
+}
+
+func (h *hookedRecorder) Publish(evts ...events.Event) {
+	for _, evt := range evts {
+		h.onPublish(evt)
+	}
+	h.Recorder.Publish(evts...)
 }
