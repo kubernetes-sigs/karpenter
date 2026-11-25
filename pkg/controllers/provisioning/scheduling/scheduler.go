@@ -102,6 +102,8 @@ type options struct {
 	// disruption candidate will free when it is terminated. Used by the terminate-first "would the pods fit once the
 	// slot is freed?" pass.
 	creditReservationCapacity map[string]int
+	// isolatedPods is a set of pods that may only share a new NodeClaim with each other. See IsolatePods.
+	isolatedPods sets.Set[types.UID]
 }
 
 type Options = option.Function[options]
@@ -139,6 +141,15 @@ var MinValuesPolicy = func(policy karpopts.MinValuesPolicy) func(*options) {
 
 var IsConsolidationSimulation = func(opts *options) {
 	opts.enforceConsolidateAfter = true
+}
+
+// IsolatePods keeps the given pods on new NodeClaims of their own, never shared with other pods. Existing nodes are
+// unaffected. Disruption uses it to keep accounting for pods that need new capacity regardless of the disruption
+// without packing candidate pods onto their NodeClaims.
+var IsolatePods = func(uids sets.Set[types.UID]) Options {
+	return func(opts *options) {
+		opts.isolatedPods = uids
+	}
 }
 
 func NewScheduler(
@@ -223,6 +234,7 @@ func NewScheduler(
 		cachedOwnerResolutions:    prediction.OwnerResolutions{},
 		deletingPodUIDs:           deletingPodUIDs,
 		predictionStore:           predictionStore,
+		isolatedPods:              resolved.isolatedPods,
 	}
 
 	npByName := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) {
@@ -295,6 +307,7 @@ type Scheduler struct {
 	cachedOwnerResolutions prediction.OwnerResolutions
 	deletingPodUIDs        sets.Set[types.UID] // pods being rescheduled off their nodes, the only ones predictions apply to
 	predictionStore        *prediction.Store
+	isolatedPods           sets.Set[types.UID] // pods that may only share a new NodeClaim with each other
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -709,6 +722,10 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod, volu
 	var offeringsToReserve []*cloudprovider.Offering
 	var allocationResult *dynamicresources.AllocationResult
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
+		// A NodeClaim's pods are all isolated or all not, so its first pod decides.
+		if s.isolatedPods.Has(s.newNodeClaims[i].Pods[0].UID) != s.isolatedPods.Has(pod.UID) {
+			return true
+		}
 		r, its, ofr, result, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, false, s.allocator)
 		if err == nil {
 			mu.Lock()
