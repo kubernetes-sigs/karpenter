@@ -1879,7 +1879,7 @@ var _ = Describe("Topology", func() {
 				NodeSelector: nodeSelector,
 				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
 					MaxSkew:            1,
-					MinDomains:         lo.ToPtr(int32(3)),
+					MinDomains:         new(int32(3)),
 					TopologyKey:        topologyKey,
 					WhenUnsatisfiable:  corev1.DoNotSchedule,
 					LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
