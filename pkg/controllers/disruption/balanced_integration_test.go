@@ -488,6 +488,71 @@ var _ = Describe("Balanced Consolidation", func() {
 			Expect(cmd.EstimatedSavings()).To(BeNumerically("~", sourceOffering.Price, 0.01))
 		})
 
+		It("should approve deleting a node whose pods have a large negative pod-deletion-cost", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+			ownerRef := []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "ReplicaSet",
+				Name:               rs.Name,
+				UID:                rs.UID,
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
+			}}
+
+			sourceInstance := onDemandInstances[len(onDemandInstances)/2]
+			sourceOffering := sourceInstance.Offerings[0]
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: sourceInstance.Name,
+						v1.CapacityTypeLabelKey:        sourceOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       sourceOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaimA, nodeA, nodeClaimB, nodeB := nodeClaims[0], nodes[0], nodeClaims[1], nodes[1]
+			nodeClaimA.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			nodeClaimB.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			podOpts := test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: ownerRef},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			}
+			podsB := test.Pods(30, podOpts)
+			podOpts.Annotations = map[string]string{corev1.PodDeletionCost: "-351877556"}
+			podA := test.Pod(podOpts)
+
+			ExpectApplied(ctx, env.Client, rs, nodePool, nodeClaimA, nodeA, nodeClaimB, nodeB, podA)
+			ExpectManualBinding(ctx, env.Client, podA, nodeA)
+			for _, p := range podsB {
+				ExpectApplied(ctx, env.Client, p)
+				ExpectManualBinding(ctx, env.Client, p, nodeB)
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{nodeA, nodeB},
+				[]*v1.NodeClaim{nodeClaimA, nodeClaimB})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Reason()).To(Equal(v1.DisruptionReasonUnderutilized))
+			Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+			Expect(cmds[0].Candidates).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaimA.Name))
+		})
+
 		It("should choose replace when pods need a new cheaper node", func() {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)

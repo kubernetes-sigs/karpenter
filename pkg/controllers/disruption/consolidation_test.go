@@ -2578,6 +2578,41 @@ var _ = Describe("Consolidation", func() {
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
+		It("can delete nodes whose pods have a large negative pod-deletion-cost", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			ownerRefs := []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "ReplicaSet",
+				Name:               rs.Name,
+				UID:                rs.UID,
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
+			}}
+			pods := test.Pods(2, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: ownerRefs}})
+			lowCostPod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: ownerRefs,
+				Annotations: map[string]string{corev1.PodDeletionCost: "-351877556"}}})
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], lowCostPod, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, lowCostPod, nodes[1])
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Reason()).To(Equal(v1.DisruptionReasonUnderutilized))
+			Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+			Expect(cmds[0].Candidates).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaims[1].Name))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+		})
 		It("does not delete nodes with pod churn, deletes nodes without pod churn", func() {
 			// create our RS so we can link a pod to it
 			ExpectApplied(ctx, env.Client, nodePool)
