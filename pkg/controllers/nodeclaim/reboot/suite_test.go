@@ -440,6 +440,38 @@ var _ = Describe("Reboot Lifecycle", func() {
 			expectReplaced(nodeClaim, "provider_error")
 		})
 
+		It("observes a reboot that already happened when the issuance check lands after the timeout", func() {
+			// The provider returns an error, but the node reboots anyway. The next check is after
+			// the issuance timeout and must observe the new boot instead of replacing the node.
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+				v1.RebootPreBootIDAnnotationKey: "boot-1",
+			})
+			cloudProvider.NextRebootErr = fmt.Errorf("throttled")
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			_ = ExpectObjectReconcileFailed(ctx, env.Client, rebootController, nodeClaim)
+
+			env.Clock.Step(6 * time.Minute)
+			node = ExpectExists(ctx, env.Client, node)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(env.Clock.Now().Add(-time.Minute)),
+			}}
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			Expect(cloudProvider.RebootCalls).To(BeEmpty())
+			Expect(recorder.Calls(events.RebootFailed)).To(Equal(0))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
+
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+		})
+
 		It("re-seeds the issuance timer on restart and still enforces the timeout", func() {
 			// Simulate restart with persisted issuing state but no in-memory timer.
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
@@ -588,7 +620,159 @@ var _ = Describe("Reboot Lifecycle", func() {
 			ExpectMetricHistogramSampleCountValue("karpenter_nodes_reboot_recovery_duration_seconds", 1, map[string]string{})
 		})
 
+		It("succeeds when the node recovered within the window but is first seen just after it", func() {
+			// Ready flipped just before the window ended; the next check lands just after it.
+			issuedAt := env.Clock.Now()
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = issuedAt.UTC().Format(time.RFC3339Nano)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(19*time.Minute + 55*time.Second)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+			Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(hasRebootTaint(node)).To(BeFalse())
+			Expect(node.Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{"result": "succeeded"})
+		})
+
+		It("succeeds on a late reconcile when issuedAt falls back to the Initialized transition", func() {
+			// No reboot-issued-at annotation. The window starts when Initialized became Unknown.
+			delete(nodeClaim.Annotations, v1.RebootIssuedAtAnnotationKey)
+			issuedAt := env.Clock.Now()
+			// Status has to change for LastTransitionTime to take the fake clock.
+			nodeClaim.StatusConditions(status.WithClock(env.Clock)).SetTrue(v1.ConditionTypeInitialized)
+			nodeClaim.StatusConditions(status.WithClock(env.Clock)).SetUnknownWithReason(v1.ConditionTypeInitialized, v1.RebootReasonRebooting, "node is rebooting")
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(19*time.Minute + 55*time.Second)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.RebootIssuedAtAnnotationKey))
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{"result": "succeeded"})
+		})
+
+		It("fails with recovery_timeout when the Initialized fallback window has elapsed and Ready is later", func() {
+			delete(nodeClaim.Annotations, v1.RebootIssuedAtAnnotationKey)
+			issuedAt := env.Clock.Now()
+			nodeClaim.StatusConditions(status.WithClock(env.Clock)).SetTrue(v1.ConditionTypeInitialized)
+			nodeClaim.StatusConditions(status.WithClock(env.Clock)).SetUnknownWithReason(v1.ConditionTypeInitialized, v1.RebootReasonRebooting, "node is rebooting")
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(20*time.Minute + 5*time.Second)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			expectReplaced(nodeClaim, "recovery_timeout")
+		})
+
+		It("succeeds on the first reconcile after a restart when the node recovered inside the window", func() {
+			issuedAt := env.Clock.Now()
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = issuedAt.UTC().Format(time.RFC3339Nano)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(19*time.Minute + 55*time.Second)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+
+			restarted := reboot.NewController(env.Clock, env.Client, cloudProvider, terminator.NewTerminator(env.Clock, env.Client, queue, recorder), recorder)
+			ExpectObjectReconciled(ctx, env.Client, restarted, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+			Expect(recorder.Calls(events.RebootFailed)).To(Equal(0))
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{"result": "succeeded"})
+		})
+
+		It("fails with recovery_timeout when Ready is true again only after the window", func() {
+			// Ready keeps its latest transition. A rejoin at 15m that flaps to NotReady and
+			// back to Ready at 20m05s is only visible as 20m05s, so the node is replaced.
+			issuedAt := env.Clock.Now()
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = issuedAt.UTC().Format(time.RFC3339Nano)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(20*time.Minute + 5*time.Second)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			expectReplaced(nodeClaim, "recovery_timeout")
+		})
+
+		It("succeeds when Ready predates issuance and the node is first seen after the window", func() {
+			// A fast reboot can leave Ready=True with a transition from before issuance.
+			issuedAt := env.Clock.Now()
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = issuedAt.UTC().Format(time.RFC3339Nano)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(-time.Hour)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{"result": "succeeded"})
+		})
+
+		It("fails with recovery_timeout when the node becomes Ready after the window", func() {
+			issuedAt := env.Clock.Now()
+			nodeClaim.Annotations[v1.RebootIssuedAtAnnotationKey] = issuedAt.UTC().Format(time.RFC3339Nano)
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(issuedAt.Add(20*time.Minute + 5*time.Second)),
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			env.Clock.Step(20*time.Minute + 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(hasRebootTaint(node)).To(BeFalse())
+			expectReplaced(nodeClaim, "recovery_timeout")
+		})
+
 		It("fails with recovery_timeout when the observation window elapses without recovery", func() {
+			env.Clock.Step(21 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(hasRebootTaint(node)).To(BeFalse())
+			expectReplaced(nodeClaim, "recovery_timeout")
+		})
+
+		It("fails with recovery_timeout when the boot changed but the node is not Ready after the window", func() {
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionFalse}}
 			env.Clock.Step(21 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
