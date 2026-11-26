@@ -2359,7 +2359,7 @@ var _ = Context("Scheduling", func() {
 					},
 				}}
 				// This pod should not schedule on the inflight node as it requires more CPU than we have.  This verifies
-				// we don't reintroduce a bug where more daemonsets scheduled than anticipated due to unexepected labels
+				// we don't reintroduce a bug where more daemonsets scheduled than anticipated due to unexpected labels
 				// appearing on the node which caused us to compute a negative amount of resources remaining for daemonsets
 				// which in turn caused us to mis-calculate the amount of resources that were free on the node.
 				secondPod := test.UnschedulablePod(opts)
@@ -4102,7 +4102,7 @@ var _ = Context("Scheduling", func() {
 
 				var nodeList corev1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
-				// no nodes should be created as the storage class doesn't eixst
+				// no nodes should be created as the storage class doesn't exist
 				Expect(nodeList.Items).To(HaveLen(1))
 			},
 			Entry("non-existent storage class", "non-existent"),
@@ -4138,7 +4138,7 @@ var _ = Context("Scheduling", func() {
 
 				var nodeList corev1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
-				// no nodes should be created as the storage class doesn't eixst
+				// no nodes should be created as the storage class doesn't exist
 				Expect(nodeList.Items).To(HaveLen(0))
 			},
 			Entry("non-existent storage class", "non-existent"),
@@ -4770,7 +4770,7 @@ var _ = Context("Scheduling", func() {
 					}), []string{"test-zone-2"}, "none",
 				),
 			)
-			DescribeTable("should report zone of pods corectly", func(existingPods []*corev1.Pod, pendingPods []*corev1.Pod, expectedZones map[string]int) {
+			DescribeTable("should report zone of pods correctly", func(existingPods []*corev1.Pod, pendingPods []*corev1.Pod, expectedZones map[string]int) {
 				nodePool = test.NodePool()
 				ExpectApplied(ctx, env.Client, nodePool)
 
@@ -4817,7 +4817,7 @@ var _ = Context("Scheduling", func() {
 							NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
 						}),
 					}, map[string]int{"test-zone-1": 1, "test-zone-2": 1}),
-				Entry("when pod has preffered zone affinity", []*corev1.Pod{},
+				Entry("when pod has preferred zone affinity", []*corev1.Pod{},
 					[]*corev1.Pod{
 						test.UnschedulablePod(test.PodOptions{
 							Phase: corev1.PodPending,

@@ -121,7 +121,7 @@ type NodeSelectorRequirementWithMinValues struct {
 }
 
 // ResourceRequirements models the required resources for the NodeClaim to launch
-// Ths will eventually be transformed into v1.ResourceRequirements when we support resources.limits
+// This will eventually be transformed into v1.ResourceRequirements when we support resources.limits
 type ResourceRequirements struct {
 	//nolint:kubeapilinter
 	// Requests describes the minimum required resources for the NodeClaim to launch

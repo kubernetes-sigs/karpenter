@@ -65,7 +65,7 @@ type NodeClaim struct {
 	creditReservationCapacity map[string]int // reservationID -> credit count
 }
 
-// ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
+// ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an existing NodeClaim
 // due to
 type ReservedOfferingError struct {
 	error

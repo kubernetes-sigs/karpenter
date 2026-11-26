@@ -130,7 +130,7 @@ func benchStateNodes(count int, nodePools []*v1.NodePool) []*state.StateNode {
 	return sn
 }
 
-// benchDaemonSetPods buils distinct daemon-overhead groups, a scaling vector
+// benchDaemonSetPods builds distinct daemon-overhead groups, a scaling vector
 // introduced with https://github.com/kubernetes-sigs/karpenter/pull/2975
 func benchDaemonSetPods(count int) []*corev1.Pod {
 	pods := make([]*corev1.Pod, count)

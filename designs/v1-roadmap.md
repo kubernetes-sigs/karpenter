@@ -59,7 +59,7 @@ Karpenter currently adds taints, labels, and annotations to nodes from the NodeC
 
 For instance, a pod may not tolerate a specific taint that was configured in the NodeClaim template, but the taint did not appear on the node immediately on startup, meaning that the pod was able to successfully schedule when it shouldn't have been able to.
 
-To mitigate this, Karpenter is introducing the `karpenter.sh/unregistered:NoExecute` taint at v1. Nodes registering with Karpenter will be required to have this taint present on their nodes when the node first joins. Karpenter will propagate lables, annotations, and taints, and remove this `karpenter.sh/unregistered` taint simultaneously, allowing Karpenter to ensure that pods will not schedule against the node before it has had a chance to add configuration.
+To mitigate this, Karpenter is introducing the `karpenter.sh/unregistered:NoExecute` taint at v1. Nodes registering with Karpenter will be required to have this taint present on their nodes when the node first joins. Karpenter will propagate labels, annotations, and taints, and remove this `karpenter.sh/unregistered` taint simultaneously, allowing Karpenter to ensure that pods will not schedule against the node before it has had a chance to add configuration.
 
 #### Tasks
 

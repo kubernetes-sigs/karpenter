@@ -1724,7 +1724,7 @@ var _ = Describe("Topology", func() {
 	Context("NodeAffinityPolicy", func() {
 		BeforeEach(func() {
 			if env.Version.Minor() < 26 {
-				Skip("NodeAffinityPolicy ony enabled by default for K8s >= 1.26.x")
+				Skip("NodeAffinityPolicy only enabled by default for K8s >= 1.26.x")
 			}
 		})
 		It("should balance pods across a label (NodeAffinityPolicy=ignore)", func() {

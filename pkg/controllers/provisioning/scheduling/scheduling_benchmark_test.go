@@ -305,7 +305,7 @@ func makePodAffinityPods(count int, key string) []*corev1.Pod {
 	var pods []*corev1.Pod
 	for range count {
 		// We use self-affinity here because using affinity that relies on other pod
-		// domains doens't guarantee that all pods can schedule. In the case where you are not
+		// domains doesn't guarantee that all pods can schedule. In the case where you are not
 		// using self-affinity and the domain doesn't exist, scheduling will fail for all pods with
 		// affinities against this domain
 		labels := randomAffinityLabels()

@@ -509,7 +509,7 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on an instance with enough resources", func() {
 		// this is a pretty thorough exercise of scheduling, so we also check an invariant that scheduling doesn't
 		// modify the instance type's Overhead() or Resources() maps so they can return the same map every time instead
-		// of re-alllocating a new one per call
+		// of re-allocating a new one per call
 		resourceHashes := map[string]uint64{}
 		overheadHashes := map[string]uint64{}
 		for _, it := range cloudProvider.InstanceTypes {

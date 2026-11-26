@@ -341,7 +341,7 @@ spec:
 
 ```
 > karpenteradm diagnose --type instance-type --overlay price-modification extended-resource --nodepool default
-NODEPOOL    OVERLAY                      INSTANCE_TYPE   CAPACITY TYPE      PRICE    CAPCITY
+NODEPOOL    OVERLAY                      INSTANCE_TYPE   CAPACITY TYPE      PRICE    CAPACITY
 default     "price-modification"         m5.large        spot               0.47     
 default     "extended-resource"          c5.large        spot               0         smarter-devices/fuse: 1
 ...
