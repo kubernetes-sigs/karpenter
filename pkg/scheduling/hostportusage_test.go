@@ -23,9 +23,75 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ = Describe("HostPortUsage", func() {
+	Context("native sidecars", func() {
+		It("tracks restartable init container ports without tracking ordinary init containers", func() {
+			always := v1.ContainerRestartPolicyAlways
+			pod := &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{{
+						Name: "app",
+						Ports: []v1.ContainerPort{
+							{ContainerPort: 8080, HostPort: 8080, Protocol: v1.ProtocolTCP},
+							{ContainerPort: 8081, Protocol: v1.ProtocolTCP},
+						},
+					}},
+					InitContainers: []v1.Container{
+						{
+							Name:  "init",
+							Ports: []v1.ContainerPort{{ContainerPort: 9090, HostPort: 9090, Protocol: v1.ProtocolTCP}},
+						},
+						{
+							Name:          "sidecar",
+							RestartPolicy: &always,
+							Ports: []v1.ContainerPort{
+								{ContainerPort: 5353, HostPort: 5353, HostIP: "::1", Protocol: v1.ProtocolUDP},
+								{ContainerPort: 5354, Protocol: v1.ProtocolUDP},
+							},
+						},
+					},
+				},
+			}
+			original := pod.DeepCopy()
+			Expect(GetHostPorts(pod)).To(ConsistOf(
+				HostPort{IP: net.IPv4zero, Port: 8080, Protocol: v1.ProtocolTCP},
+				HostPort{IP: net.ParseIP("::1"), Port: 5353, Protocol: v1.ProtocolUDP},
+			))
+			Expect(pod).To(Equal(original))
+		})
+		It("rejects conflicting host ports in either scheduling order", func() {
+			always := v1.ContainerRestartPolicyAlways
+			sidecarPod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "sidecar-pod", Namespace: "default"},
+				Spec: v1.PodSpec{
+					InitContainers: []v1.Container{{
+						Name:          "sidecar",
+						RestartPolicy: &always,
+						Ports:         []v1.ContainerPort{{ContainerPort: 8080, HostPort: 8080, Protocol: v1.ProtocolTCP}},
+					}},
+				},
+			}
+			appPod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "app-pod", Namespace: "default"},
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{{
+						Name:  "app",
+						Ports: []v1.ContainerPort{{ContainerPort: 8080, HostPort: 8080, Protocol: v1.ProtocolTCP}},
+					}},
+				},
+			}
+			usage := NewHostPortUsage()
+			usage.Add(sidecarPod, GetHostPorts(sidecarPod))
+			Expect(usage.Conflicts(appPod, GetHostPorts(appPod))).To(HaveOccurred())
+
+			usage = NewHostPortUsage()
+			usage.Add(appPod, GetHostPorts(appPod))
+			Expect(usage.Conflicts(sidecarPod, GetHostPorts(sidecarPod))).To(HaveOccurred())
+		})
+	})
 	Context("entry type UT", func() {
 		It("String() output", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)

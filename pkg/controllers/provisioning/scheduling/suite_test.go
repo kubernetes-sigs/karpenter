@@ -2608,6 +2608,29 @@ var _ = Context("Scheduling", func() {
 			node2 := ExpectScheduled(ctx, env.Client, pods[1])
 			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
+		It("should schedule pods with the same native sidecar host port to different nodes", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := []*corev1.Pod{
+				test.UnschedulablePod(),
+				test.UnschedulablePod(),
+			}
+			for _, pod := range pods {
+				pod.Spec.InitContainers = []corev1.Container{{
+					Name:          "sidecar",
+					Image:         "registry.k8s.io/pause:3.10",
+					RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+					Ports: []corev1.ContainerPort{{
+						ContainerPort: 8080,
+						HostPort:      8080,
+						Protocol:      corev1.ProtocolTCP,
+					}},
+				}}
+			}
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			node1 := ExpectScheduled(ctx, env.Client, pods[0])
+			node2 := ExpectScheduled(ctx, env.Client, pods[1])
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+		})
 	})
 
 	Describe("Existing Nodes", func() {
