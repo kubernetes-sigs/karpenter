@@ -70,6 +70,19 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeTrue())
 	})
 
+	It("should return false and not emit event for 'false' annotation", func() {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "false"},
+			},
+			Status: corev1.PodStatus{
+				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
+			},
+		}
+		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
+		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation")).To(BeFalse())
+	})
+
 	It("should return false and emit event for invalid duration format", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
