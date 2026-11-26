@@ -90,9 +90,10 @@ func (u *HostPortUsage) DeletePod(key types.NamespacedName) {
 	delete(u.reserved, key)
 }
 
+// GetHostPorts returns host ports for regular containers and restartable init containers.
 func GetHostPorts(pod *v1.Pod) []HostPort {
 	var usage []HostPort
-	for _, c := range pod.Spec.Containers {
+	addPorts := func(c v1.Container) {
 		for _, p := range c.Ports {
 			if p.HostPort == 0 {
 				continue
@@ -109,6 +110,14 @@ func GetHostPorts(pod *v1.Pod) []HostPort {
 				Port:     p.HostPort,
 				Protocol: p.Protocol,
 			})
+		}
+	}
+	for _, c := range pod.Spec.Containers {
+		addPorts(c)
+	}
+	for _, c := range pod.Spec.InitContainers {
+		if c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways {
+			addPorts(c)
 		}
 	}
 	return usage

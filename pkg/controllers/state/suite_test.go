@@ -392,6 +392,29 @@ var _ = Describe("HostPort Usage", func() {
 			},
 		})).ToNot(BeNil())
 	})
+	It("should hydrate native sidecar host port usage on a Node update", func() {
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		pod := test.Pod()
+		pod.Spec.InitContainers = []corev1.Container{{
+			Name:          "sidecar",
+			Image:         "registry.k8s.io/pause:3.10",
+			RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+			Ports: []corev1.ContainerPort{{
+				ContainerPort: 8080,
+				HostPort:      8080,
+				Protocol:      corev1.ProtocolTCP,
+			}},
+		}}
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(cluster, node)
+
+		conflictingPod := test.Pod(test.PodOptions{HostPorts: []int32{8080}})
+		Expect(stateNode.HostPortUsage().Conflicts(conflictingPod, scheduling.GetHostPorts(conflictingPod))).To(HaveOccurred())
+	})
 	It("should maintain the host port usage state when receiving NodeClaim updates", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
