@@ -231,7 +231,8 @@ func parseDoNotDisrupt(value string) (time.Duration, error) {
 }
 
 // IsDoNotDisruptActive checks if the do-not-disrupt protection is still active for a pod
-// It considers both boolean ("true") and duration-based values (e.g., "5m", "1h")
+// It considers boolean ("true"/"false") and duration-based values (e.g., "5m", "1h")
+// "false" is treated as if the annotation doesn't exist, without emitting an event
 // For duration-based values, it checks if the pod has been running longer than the specified duration
 // Invalid annotation formats are treated as if the annotation doesn't exist (returns false)
 // and an event is emitted if a recorder is provided
