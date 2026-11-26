@@ -95,7 +95,7 @@ Karpenter will not persist a default for the `Schedule` and `Duration` fields.
 Adding the `Budgets` field into the `NodePool` implicitly defines a per-`NodePool` grouping for the `Budgets`.
 
 * 👍 Karpenter doesn't have to create/manage another CRD
-* 👍 All disruption fields are colocated, which creates a natural spot for any future disruption-based behaivoral fields to live. (e.g. `terminationGracePeriodSeconds`, `rolloutStrategy`, `evictionPolicy`)
+* 👍 All disruption fields are colocated, which creates a natural spot for any future disruption-based behavioral fields to live. (e.g. `terminationGracePeriodSeconds`, `rolloutStrategy`, `evictionPolicy`)
 * 👎 Introduces redundancy for cluster admins that use the same `Disruption` settings for every `NodePool`. If a user wanted to change a parallelism throughout their cluster, they’d need to persist the same value for all known resources. This means users cannot set a cluster-scoped Node Disruption Budget.
 
 ### New Custom Resource

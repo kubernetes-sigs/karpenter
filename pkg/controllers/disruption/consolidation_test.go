@@ -2005,7 +2005,7 @@ var _ = Describe("Consolidation", func() {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
 				if env.Version.Minor() < 27 {
-					Skip("PDB policy ony enabled by default for K8s >= 1.27.x")
+					Skip("PDB policy only enabled by default for K8s >= 1.27.x")
 				}
 				// create our RS so we can link a pod to it
 				rs := test.ReplicaSet()

@@ -414,13 +414,13 @@ type classificationResult struct {
 	// unallocatedClaims is the set of claims that haven't already been allocated, either in-cluster or via previous
 	// invocations of the allocator.
 	unallocatedClaims []*resourcev1.ResourceClaim
-	// requirements is the intersection of the NodeClaim's requiremnts and the requirements derived from allocated claims.
+	// requirements is the intersection of the NodeClaim's requirements and the requirements derived from allocated claims.
 	requirements scheduling.Requirements
 }
 
 // ClassifyClaims evaluates the set of claims for the NodeClaims. It checks allocation status and ensures compatibility.
 // If any of claim is already allocated and incompatible with the NodeClaim, it returns an error. The result is the set
-// of unallocated claims and the cumalative requirements derived from the base NodeClaim and the allocated claims.
+// of unallocated claims and the cumulative requirements derived from the base NodeClaim and the allocated claims.
 func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.ResourceClaim) (classificationResult, error) {
 	result := classificationResult{
 		requirements: copyRequirements(nodeClaim.Requirements()),

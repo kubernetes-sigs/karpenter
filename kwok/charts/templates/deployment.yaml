@@ -176,13 +176,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.affinity }}
-      # The template below patches the .Values.affinity to add a default label selector where not specificed
+      # The template below patches the .Values.affinity to add a default label selector where not specified
       {{- $_ := include "karpenter.patchAffinity" $ }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.topologySpreadConstraints }}
-      # The template below patches the .Values.topologySpreadConstraints to add a default label selector where not specificed
+      # The template below patches the .Values.topologySpreadConstraints to add a default label selector where not specified
       {{- $_ := include "karpenter.patchTopologySpreadConstraints" $ }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}

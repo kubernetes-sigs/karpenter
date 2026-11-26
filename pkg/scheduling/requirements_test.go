@@ -622,7 +622,7 @@ var _ = Describe("Requirements", func() {
 			))
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
 		})
-		It("should convert combinations of labels with flexiblity to expected NodeSelectorRequirements", func() {
+		It("should convert combinations of labels with flexibility to expected NodeSelectorRequirements", func() {
 			exists := NewRequirementWithFlexibility("exists", corev1.NodeSelectorOpExists, new(3))
 			doesNotExist := NewRequirementWithFlexibility("doesNotExist", corev1.NodeSelectorOpDoesNotExist, new(2))
 			inA := NewRequirementWithFlexibility("inA", corev1.NodeSelectorOpIn, new(1), "A")

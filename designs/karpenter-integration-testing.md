@@ -197,7 +197,7 @@ As part of the initial functional integration testing, the cloud-agnostic tests 
     * should apply annotations to the node
     * Labels
         * should support restricted label domain exceptions
-            * node-restriction.kuberentes.io
+            * node-restriction.kubernetes.io
             * node.kubernetes.io
             * kops.k8s.io
     * Provisioning
