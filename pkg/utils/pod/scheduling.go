@@ -249,6 +249,12 @@ func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock, recorder events.Reco
 		return true
 	}
 
+	// "false" is a common value from Helm charts rendering a boolean default.
+	// Treat it as unset without emitting an InvalidDoNotDisruptAnnotation event.
+	if value == "false" {
+		return false
+	}
+
 	duration, err := parseDoNotDisrupt(value)
 	if err != nil {
 		// Invalid format - emit event and treat as if annotation doesn't exist
