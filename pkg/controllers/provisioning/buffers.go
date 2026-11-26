@@ -68,15 +68,25 @@ func IsVirtualPod(pod *corev1.Pod) bool {
 // bufferKeyOf returns "namespace/name" for the buffer a virtual pod belongs to,
 // or "" if it isn't a virtual pod.
 func bufferKeyOf(pod *corev1.Pod) string {
+	namespace, name, ok := virtualPodBuffer(pod)
+	if !ok {
+		return ""
+	}
+	return namespace + "/" + name
+}
+
+// virtualPodBuffer returns the CapacityBuffer namespace and name a virtual pod
+// belongs to. Real pods and virtual pods missing either annotation are skipped.
+func virtualPodBuffer(pod *corev1.Pod) (namespace, name string, ok bool) {
 	if !IsVirtualPod(pod) {
-		return ""
+		return "", "", false
 	}
-	ns := pod.Annotations[autoscalingv1beta1.BufferNamespaceAnnotation]
-	name := pod.Annotations[autoscalingv1beta1.BufferNameAnnotation]
-	if ns == "" || name == "" {
-		return ""
+	namespace = pod.Annotations[autoscalingv1beta1.BufferNamespaceAnnotation]
+	name = pod.Annotations[autoscalingv1beta1.BufferNameAnnotation]
+	if namespace == "" || name == "" {
+		return "", "", false
 	}
-	return ns + "/" + name
+	return namespace, name, true
 }
 
 // bufferProvisioningStatus summarizes, per buffer, which virtual pods scheduled
