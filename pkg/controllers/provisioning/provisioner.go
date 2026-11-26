@@ -169,17 +169,22 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	if err != nil {
 		return reconciler.Result{}, err
 	}
-	// Update CapacityBuffer state. Two things happen here:
+	// Update CapacityBuffer state. Three things happen here:
 	// 1. Patch the Provisioning condition on each buffer (FitsExistingCapacity vs RequiresNewCapacity).
 	// 2. Update cluster.bufferPodCounts so the emptiness disruption path knows
 	//    which nodes host buffer capacity and should not be deleted as "empty".
 	//    Consolidation does NOT use this — it naturally accounts for buffer pods
 	//    because GetPendingPods injects them into the simulation's pending set.
+	// 3. Replace the virtual-pod placement gauge with this simulation's snapshot.
+	//    ReplaceAll drops series for nodes and buffers that no longer have virtual
+	//    pods, including when the snapshot is empty. Disruption simulations do not
+	//    write the gauge; only a completed provisioning Schedule does.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
 		if err := p.updateBufferProvisioningStatus(ctx, results); err != nil {
 			log.FromContext(ctx).Error(err, "updating CapacityBuffer provisioning status")
 		}
 		p.cluster.UpdateBufferPodCounts(bufferPodCountsFromResults(results))
+		recordCapacityBufferVirtualPods(results)
 	}
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
