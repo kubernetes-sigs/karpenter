@@ -360,7 +360,7 @@ var _ = Describe("StaticCapacity", func() {
 			label = map[string]string{"app": "large-app"}
 		})
 
-		It("should provision dynamic nodeclaims when static nodeclaims cant satisfy pod constraints", func() {
+		It("should provision dynamic nodeclaims when static nodeclaims can't satisfy pod constraints", func() {
 			env.ExpectCreated(nodeClass, nodePool, dynamicNodePool)
 
 			env.EventuallyExpectInitializedNodeCount("==", 2)

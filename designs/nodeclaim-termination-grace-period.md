@@ -129,7 +129,7 @@ Consider the following scenario.
 3. The Deployment has an associated PDB with maxUnavailable 1 requiring that only one of these pods be disrupted at a time.
 
 1. The cluster admin has configured NodePool.spec.disruption.terminationGracePeriod at 15m.
-2. A full node reconcilliation has started which has caused all nodes which contain the pods above to enter a deleting state at the same time.
+2. A full node reconciliation has started which has caused all nodes which contain the pods above to enter a deleting state at the same time.
 
 During the standard node deletion process, k8s would:
 1. Evict pod A only, which takes 10m of the available 15m to terminate gracefully. Pod B and C are not evicted, due to their PDB only allowing 1 disruption at a time.
@@ -146,7 +146,7 @@ Risks
 This feature carries some risk for cluster administrators given that it can bypass the configured grace periods and PDBs set by users of a cluster. These risks should be called out explicitly in the docs for the feature to minimize the risk of a cluster administrator unintentionally disrupting their users' workloads.
 1. Enabling this feature by setting NodePool.spec.template.terminationGracePeriod to any value will result in a drift reconciliation that will replace all nodes. The new terminationGracePeriod value will not be active until new NodeClaims have been provisioned.
 2. Enabling this feature can result in termination of user pods, violating their configured grace periods or PDBs. If a pod has a terminationGracePeriodSeconds greater than the NodeClaim's TGP, it will be deleted as soon as the Node begins disruption, effectively limiting a pod's maximum TGPS to the NodeClaim's TGP.
-3. Because of the optimization stated above, user pods could be terminated in violdation of their PDBs **before** the configured NodeClaim grace period is reached.
+3. Because of the optimization stated above, user pods could be terminated in violation of their PDBs **before** the configured NodeClaim grace period is reached.
 
 ## Manual Intervention
 If needed, a cluster-admin can prematurely forcefully terminate a node by starting a `kubectl delete node` followed by `kubectl drain --disable-eviction=true`.

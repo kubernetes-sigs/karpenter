@@ -145,7 +145,7 @@ We need to define a mechanism for communicating breaking changes to the library 
 
 **Category:** Breaking, Stability
 
-Karpenter needs to stabalize a set of metrics, status conditions, and events that can be relied-upon for monitoring. The design for these metrics, status conditions and events will be added in a separate RFC.
+Karpenter needs to stabilize a set of metrics, status conditions, and events that can be relied-upon for monitoring. The design for these metrics, status conditions and events will be added in a separate RFC.
 
 ### NodeClaim Conceptual Documentation
 
