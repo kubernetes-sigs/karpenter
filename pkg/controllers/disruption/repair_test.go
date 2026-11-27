@@ -878,6 +878,9 @@ var _ = Describe("Repair", func() {
 		for i := range 3 {
 			markUnhealthy(nodes[i], "BadNode")
 		}
+		// Repair stops at the first node it repairs, and here nodes with equal scores are sorted by their random names.
+		// Marking other's node a minute later lowers its score, so repair reports nodePool's nodes as blocked first.
+		env.Clock.Step(time.Minute)
 		markUnhealthy(otherNodes[0], "BadNode")
 		env.Clock.Step(31 * time.Minute)
 
