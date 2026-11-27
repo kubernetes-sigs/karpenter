@@ -21,8 +21,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -79,17 +79,16 @@ func newPastDueRepairs(matcher *health.RepairPolicyMatcher) *pastDueRepairs {
 
 // update reports each managed node in a NodePool: how long it has been past due, or 0 while it isn't. It records each
 // past-due stretch that ended since the last pass. heldBack is cluster state's RepairBlockedReasons.
-func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time, heldBack map[string]string) map[string][]*metrics.StoreMetric {
+func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time, heldBack map[string]string) map[string]*metrics.StoreMetric {
 	// Add the time since the last pass to the reason each past-due node had then, or nothing if the clock stepped back.
 	for _, previous := range r.pastDue {
 		previous.reasonTimes[previous.reason] += max(now.Sub(r.lastPass), 0)
 	}
 	pastDue := map[string]pastDueNode{}
-	res := map[string][]*metrics.StoreMetric{}
+	res := map[string]*metrics.StoreMetric{}
 	for _, n := range nodes {
-		// Repair only acts on managed nodes in a NodePool, as disruption.RepairPastDueSince checks first, so no other node
-		// can be past due.
-		if !n.Managed() || n.Labels()[v1.NodePoolLabelKey] == "" {
+		// No other node can be past due.
+		if !disruption.RepairActsOn(n) {
 			continue
 		}
 		labels := getNodeLabels(n)
@@ -123,13 +122,11 @@ func (r *pastDueRepairs) update(nodes state.StateNodes, now time.Time, heldBack 
 			pastDue[n.ProviderID()] = current
 			pastDueFor = current.durationAt(now)
 		}
-		// Each node gets its own store key, since the store compares every old series under a key with every new one,
-		// which gets slow with many nodes.
-		res["repairPastDue/"+n.Node.Name] = []*metrics.StoreMetric{{
+		res[client.ObjectKeyFromObject(n.Node).String()] = &metrics.StoreMetric{
 			GaugeMetric: RepairPastDueTimeSeconds,
 			Value:       pastDueFor.Seconds(),
 			Labels:      labels,
-		}}
+		}
 	}
 	for providerID, previous := range r.pastDue {
 		if _, found := pastDue[providerID]; !found {
