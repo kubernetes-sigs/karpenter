@@ -173,6 +173,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		// Blocked (not silently skipped): at the limit with the gate off there's nothing repair can safely do.
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		expectHeldBack(node, disruption.RepairBlockedNoReplacement)
 	})
 
 	// A static NodePool at its limit is only terminate-first'd if it's actually refillable: static provisioning refuses
@@ -193,6 +194,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		// Blocked (not silently skipped): a NotReady pool can't be refilled, so terminating first would strand the workload.
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		expectHeldBack(node, disruption.RepairBlockedNoReplacement)
 	})
 
 	// Repair doesn't disrupt a static pool mid scale-down (mirrors StaticDrift): with more nodes running than the desired
@@ -213,11 +215,15 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		markUnhealthy(nodes[0])
 		env.Clock.Step(31 * time.Minute)
 
+		disruption.EligibleNodes.Reset()
 		ExpectSingletonReconciled(ctx, repairController)
+		// Repair saw the unhealthy node, so the scale-down guard, not an early return, skipped it.
+		ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{metrics.ReasonLabel: "unhealthy"})
 
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		// Skipped by the scale-down guard, NOT Blocked — distinguishes this from the at-limit/NotReady blocked cases.
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(Equal(0))
+		expectNotHeldBack(nodes...)
 	})
 
 	// Terminate-first is behind the TerminateFirstRepair gate: with it off, a reserved candidate whose reservation is
@@ -273,6 +279,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		// Blocked (not silently skipped): with the gate off the full reservation can't pre-spin, so repair is blocked.
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		expectHeldBack(node, disruption.RepairBlockedNoReplacement)
 	})
 
 	// INV-F2-2: a normal (dynamic, headroom) NodePool still replaces-first — a pre-spun replacement is created.
@@ -774,6 +781,8 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(dynamicNodeClaim.Name))
+			// Repair skips the static node without a reason when it can't get the NodePool's instance types.
+			expectNotHeldBack(staticNode)
 		})
 
 		It("should block with the full-reservations reason when the static NodePool is NotReady", func() {
@@ -784,6 +793,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 
 			Expect(queue.GetCommands()).To(HaveLen(0))
 			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+			Expect(lo.Values(cluster.RepairBlockedReasons())).To(ConsistOf(disruption.RepairBlockedNoReplacement.Name))
 		})
 
 		// A node whose reservation is no longer offered frees no slot a refill could launch into, and a pre-spun
@@ -794,6 +804,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 
 			Expect(queue.GetCommands()).To(HaveLen(0))
 			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+			Expect(lo.Values(cluster.RepairBlockedReasons())).To(ConsistOf(disruption.RepairBlockedNoReplacement.Name))
 		})
 
 		It("should block when the node's full reservation is unavailable", func() {
