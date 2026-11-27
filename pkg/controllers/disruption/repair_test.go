@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	karpenterevents "sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -46,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 type terminationTimestampPatchErrorClient struct {
@@ -680,6 +682,126 @@ var _ = Describe("Repair", func() {
 
 		ExpectSingletonReconciled(ctx, repairController)
 		Expect(queue.GetCommands()).To(HaveLen(1))
+	})
+
+	It("should count a node toward the breaker for any policy's condition, whatever its reason", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "KernelFault", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Transient$", TolerationDuration: 30 * time.Minute, Action: cloudprovider.RebootNode},
+		})
+		newRepairController()
+		const count = 10
+		nodeClaims, nodes := test.NodeClaimsAndNodes(count, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		markUnhealthy(nodes[0], "BadNode")
+		env.Clock.Step(31 * time.Minute)
+		// The legacy controller wouldn't count these, since it ignores reboot policies.
+		markUnhealthyWithReason(nodes[1], "KernelFault", "Other")
+		markUnhealthyWithReason(nodes[2], "KernelFault", "Other")
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(queue.GetCommands()).To(BeEmpty())
+		blockedEvents := lo.Filter(recorder.Events(), func(event karpenterevents.Event, _ int) bool {
+			return event.Reason == karpenterevents.NodeRepairBlocked
+		})
+		Expect(lo.Map(blockedEvents, func(event karpenterevents.Event, _ int) string {
+			return string(event.InvolvedObject.(metav1.Object).GetUID())
+		})).To(ConsistOf(string(nodes[0].UID), string(nodeClaims[0].UID), string(nodePool.UID)))
+	})
+
+	It("should count nodes that are still registering toward the breaker, though the breaker metrics leave them out", func() {
+		const count = 5
+		nodeClaims, nodes := test.NodeClaimsAndNodes(count, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		// 5 nodes allow 1 unhealthy.
+		markUnhealthy(nodes[0], "BadNode")
+		env.Clock.Step(31 * time.Minute)
+		// Once cluster state has synced, a node it leaves out doesn't hold up the disruption controller.
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+		// Cluster state leaves out these two unhealthy nodes while they register. One has no provider ID, and the other
+		// isn't initialized and has no instance type label. Repair lists and counts them, so 3 of 7 trips its breaker.
+		for _, providerID := range []string{"", test.RandomProviderID()} {
+			registering := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels()}, ProviderID: providerID})
+			ExpectApplied(ctx, env.Client, registering)
+			markUnhealthy(registering, "BadNode")
+		}
+		// The breaker metrics count from cluster state, which has only the 5 initialized nodes.
+		Expect(cluster.RepairBreakers()[nodePool.Name]).To(Equal(health.Breaker{Nodes: 5, Unhealthy: 1}))
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(queue.GetCommands()).To(BeEmpty())
+		blockedEvents := lo.Filter(recorder.Events(), func(event karpenterevents.Event, _ int) bool {
+			return event.Reason == karpenterevents.NodeRepairBlocked
+		})
+		Expect(lo.Map(blockedEvents, func(event karpenterevents.Event, _ int) string {
+			return string(event.InvolvedObject.(metav1.Object).GetUID())
+		})).To(ConsistOf(string(nodes[0].UID), string(nodeClaims[0].UID), string(nodePool.UID)))
+	})
+
+	It("should stop repair only in the NodePool whose breaker trips", func() {
+		other := test.NodePool()
+		ExpectApplied(ctx, env.Client, other)
+		nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		otherNodeClaims, otherNodes := test.NodeClaimsAndNodes(5, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
+			Labels: lo.Assign(labels(), map[string]string{v1.NodePoolLabelKey: other.Name}),
+		}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		for i := range otherNodes {
+			initNode(otherNodeClaims[i], otherNodes[i])
+		}
+		// 3 of 10 trips nodePool's breaker, and 1 of 5 is within other's limit.
+		for i := range 3 {
+			markUnhealthy(nodes[i], "BadNode")
+		}
+		// Repair stops at the first node it repairs, and here nodes with equal scores are sorted by their random names.
+		// Marking other's node a minute later lowers its score, so repair reports nodePool's nodes as blocked first.
+		env.Clock.Step(time.Minute)
+		markUnhealthy(otherNodes[0], "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Candidates[0].Name()).To(Equal(otherNodes[0].Name))
+		blockedEvents := lo.Filter(recorder.Events(), func(event karpenterevents.Event, _ int) bool {
+			return event.Reason == karpenterevents.NodeRepairBlocked
+		})
+		blockedUIDs := lo.Map(blockedEvents, func(event karpenterevents.Event, _ int) string {
+			return string(event.InvolvedObject.(metav1.Object).GetUID())
+		})
+		Expect(blockedUIDs).To(ContainElement(string(nodePool.UID)))
+		Expect(blockedUIDs).ToNot(ContainElement(string(other.UID)))
+	})
+
+	It("should log a NodePool that the breaker blocks once, not on every pass", func() {
+		logCtx, blockedLogs := CaptureLogs(ctx, "blocking node repair")
+		const count = 10
+		nodeClaims, nodes := test.NodeClaimsAndNodes(count, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		for i := range 3 {
+			markUnhealthy(nodes[i], "BadNode")
+		}
+		env.Clock.Step(31 * time.Minute)
+
+		// Every pass blocks all three nodes, but the NodePool is logged once.
+		ExpectSingletonReconciled(logCtx, repairController)
+		ExpectSingletonReconciled(logCtx, repairController)
+		Expect(queue.GetCommands()).To(BeEmpty())
+		Expect(blockedLogs()).To(HaveLen(1))
+		Expect(blockedLogs()[0]).To(ContainSubstring(nodePool.Name))
+		Expect(blockedLogs()[0]).To(ContainSubstring(`"nodes"=10 "unhealthy-nodes"=3`))
+
+		env.Clock.Step(health.BlockedRepeatInterval)
+		ExpectSingletonReconciled(logCtx, repairController)
+		Expect(blockedLogs()).To(HaveLen(2))
 	})
 
 	// Ordering is prioritizable — a higher-priority fault repairs before a lower-priority one in the same pass.

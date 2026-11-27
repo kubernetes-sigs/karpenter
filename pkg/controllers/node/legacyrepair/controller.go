@@ -23,11 +23,11 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -44,6 +44,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -52,8 +53,6 @@ import (
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
-
-var allowedUnhealthyPercent = intstr.FromString("20%")
 
 // Controller is the legacy node.health repair controller, which deletes unhealthy NodeClaims directly instead of
 // repairing them through the disruption controller. It runs in place of the repair disruption method when
@@ -64,6 +63,7 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	policies      []replacePolicy
+	breakerLog    *health.BreakerLog
 }
 
 // replacePolicy is a ReplaceNode RepairPolicy. The legacy controller can only replace nodes, so it ignores policies with
@@ -91,6 +91,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		policies:      policies,
+		breakerLog:    health.NewBreakerLog(clock),
 	}
 }
 
@@ -185,7 +186,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, err
 		}
 		if !clusterHealthy {
-			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more than %s nodes are unhealthy in the cluster", health.UnhealthyThreshold))...)
 			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
 	}
@@ -271,31 +272,102 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 	return nil
 }
 
-// isNodePoolHealthy checks if the number of unhealthy nodes managed by the given NodePool exceeds the health threshold.
-// defined by the cloud provider
-// Up to 20% of Nodes may be unhealthy before the NodePool becomes unhealthy (or the nearest whole number, rounding up).
+// isNodePoolHealthy returns false when more than health.UnhealthyThreshold of the NodePool's nodes, rounded up, are
+// unhealthy.
 // For example, given a NodePool with three nodes, one may be unhealthy without rendering the NodePool unhealthy, even though that's 33% of the total nodes.
 // This is analogous to how minAvailable and maxUnavailable work for PodDisruptionBudgets: https://kubernetes.io/docs/tasks/run-application/configure-pdb/#rounding-logic-when-specifying-percentages.
 func (c *Controller) isNodePoolHealthy(ctx context.Context, nodePoolName string) (bool, error) {
-	return c.areNodesHealthy(ctx, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
+	return c.areNodesHealthy(ctx, nodePoolName, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
 }
 
 func (c *Controller) isClusterHealthy(ctx context.Context) (bool, error) {
-	return c.areNodesHealthy(ctx)
+	return c.areNodesHealthy(ctx, "")
 }
 
-func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOption) (bool, error) {
+// areNodesHealthy checks the breaker for the nodes that opts select. When it blocks repair, it logs, naming the
+// NodePool unless nodePoolName is empty.
+func (c *Controller) areNodesHealthy(ctx context.Context, nodePoolName string, opts ...client.ListOption) (bool, error) {
 	nodeList := &corev1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList, append(opts, client.UnsafeDisableDeepCopy)...); err != nil {
 		return false, err
 	}
-	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
-		return lo.ContainsBy(c.policies, func(policy replacePolicy) bool {
-			return policy.matches(nodeutils.GetCondition(new(node), policy.ConditionType))
-		})
+	unhealthy := 0
+	for i := range nodeList.Items {
+		if c.unhealthy(&nodeList.Items[i]) {
+			unhealthy++
+		}
+	}
+	breaker := health.CheckBreaker(len(nodeList.Items), unhealthy)
+	if breaker.Tripped {
+		c.breakerLog.Blocked(ctx, nodePoolName, breaker)
+	}
+	return !breaker.Tripped, nil
+}
+
+// NodePoolBreakers checks the breaker of each NodePool the way Reconcile does, for the breaker metrics. It lists every
+// Node, since cluster state doesn't keep the matches of the legacy controller's policies.
+func (c *Controller) NodePoolBreakers(ctx context.Context) (map[string]health.Breaker, error) {
+	nodeList := &corev1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, fmt.Errorf("listing nodes, %w", err)
+	}
+	nodes, unhealthy := map[string]int{}, map[string]int{}
+	for i := range nodeList.Items {
+		nodePool := nodeList.Items[i].Labels[v1.NodePoolLabelKey]
+		if nodePool == "" {
+			continue
+		}
+		nodes[nodePool]++
+		if c.unhealthy(&nodeList.Items[i]) {
+			unhealthy[nodePool]++
+		}
+	}
+	breakers := make(map[string]health.Breaker, len(nodes))
+	for nodePool, count := range nodes {
+		breakers[nodePool] = health.CheckBreaker(count, unhealthy[nodePool])
+	}
+	return breakers, nil
+}
+
+// NodePoolBreakerTrippedAt dates the NodePool's breaker trip from the Nodes that NodePoolBreakers counts for it, or
+// returns zero if it isn't tripped.
+func (c *Controller) NodePoolBreakerTrippedAt(ctx context.Context, nodePool string) (time.Time, error) {
+	nodeList := &corev1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePool}), client.UnsafeDisableDeepCopy); err != nil {
+		return time.Time{}, serrors.Wrap(fmt.Errorf("listing nodes, %w", err), "NodePool", klog.KRef("", nodePool))
+	}
+	var unhealthySince []time.Time
+	for i := range nodeList.Items {
+		if t, ok := c.UnhealthySince(&nodeList.Items[i]); ok {
+			unhealthySince = append(unhealthySince, t)
+		}
+	}
+	return health.TrippedAt(len(nodeList.Items), unhealthySince), nil
+}
+
+// unhealthy returns true when a replace policy matches one of the Node's conditions. The breaker counts such a Node as
+// unhealthy, whatever the toleration.
+func (c *Controller) unhealthy(node *corev1.Node) bool {
+	return lo.ContainsBy(c.policies, func(policy replacePolicy) bool {
+		return policy.matches(nodeutils.GetCondition(node, policy.ConditionType))
 	})
-	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(new(allowedUnhealthyPercent), len(nodeList.Items), true))
-	return unhealthyNodeCount <= threshold, nil
+}
+
+// UnhealthySince returns when the Node became unhealthy, and false if no replace policy matches it. A reason can change
+// without a new transition time, so for a policy with a ReasonRegex this can be earlier than when the reason matched.
+func (c *Controller) UnhealthySince(node *corev1.Node) (time.Time, bool) {
+	var since time.Time
+	unhealthy := false
+	for _, policy := range c.policies {
+		condition := nodeutils.GetCondition(node, policy.ConditionType)
+		if !policy.matches(condition) {
+			continue
+		}
+		if t := health.TransitionTime(node, condition); !unhealthy || t.Before(since) {
+			since, unhealthy = t, true
+		}
+	}
+	return since, unhealthy
 }
 
 func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim, npName string) error {
@@ -303,6 +375,6 @@ func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: npName}, np); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
+	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", health.UnhealthyThreshold))...)
 	return nil
 }

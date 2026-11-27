@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/legacyrepair"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -493,6 +494,121 @@ var _ = Describe("Node Health", func() {
 			ExpectObjectReconciled(ctx, env.Client, healthController, nodes[0])
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[0])
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
+	})
+	// useReplaceAndRebootPolicies replaces on BadNode, replaces on FatalNode only for the Fatal reason, and reboots on
+	// KernelFault.
+	useReplaceAndRebootPolicies := func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "FatalNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^Fatal$", TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "KernelFault", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.RebootNode},
+		}
+		healthController = legacyrepair.NewController(env.Client, cloudProvider, env.Clock, recorder)
+	}
+	Context("Breaker", func() {
+		var logCtx context.Context
+		var blockedLogs func() []string
+		// applyNodes applies 10 NodeClaims and Nodes, in the NodePool if inNodePool is set. Node i gets conditions[i].
+		applyNodes := func(inNodePool bool, conditions ...corev1.NodeCondition) ([]*v1.NodeClaim, []*corev1.Node) {
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range nodes {
+				if i < len(conditions) {
+					condition := conditions[i]
+					condition.LastTransitionTime = metav1.Time{Time: env.Clock.Now()}
+					nodes[i].Status.Conditions = append(nodes[i].Status.Conditions, condition)
+				}
+				if inNodePool {
+					nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+					nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				}
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			return nodeClaims, nodes
+		}
+		badNode := corev1.NodeCondition{Type: "BadNode", Status: corev1.ConditionFalse}
+
+		BeforeEach(func() {
+			logCtx, blockedLogs = CaptureLogs(ctx, "blocking node repair")
+		})
+
+		It("should only count nodes that a replace policy matches toward the 20% limit", func() {
+			useReplaceAndRebootPolicies()
+			// Nodes 1 to 4 would trip the breaker if they counted, but a reboot policy or a reason that doesn't match leaves
+			// them healthy here.
+			nodeClaims, nodes := applyNodes(true,
+				badNode,
+				corev1.NodeCondition{Type: "KernelFault", Status: corev1.ConditionFalse},
+				corev1.NodeCondition{Type: "KernelFault", Status: corev1.ConditionFalse},
+				corev1.NodeCondition{Type: "FatalNode", Status: corev1.ConditionFalse, Reason: "Other"},
+				corev1.NodeCondition{Type: "FatalNode", Status: corev1.ConditionFalse, Reason: "Other"},
+			)
+			env.Clock.Step(60 * time.Minute)
+
+			ExpectObjectReconciled(logCtx, env.Client, healthController, nodes[0])
+			Expect(ExpectExists(ctx, env.Client, nodeClaims[0]).DeletionTimestamp).ToNot(BeNil())
+			Expect(blockedLogs()).To(BeEmpty())
+		})
+		It("should log a NodePool that the breaker blocks once, not on every reconcile", func() {
+			nodeClaims, nodes := applyNodes(true, badNode, badNode, badNode)
+			env.Clock.Step(60 * time.Minute)
+
+			ExpectObjectReconciled(logCtx, env.Client, healthController, nodes[0])
+			ExpectObjectReconciled(logCtx, env.Client, healthController, nodes[1])
+			Expect(ExpectExists(ctx, env.Client, nodeClaims[0]).DeletionTimestamp).To(BeNil())
+			Expect(blockedLogs()).To(HaveLen(1))
+			Expect(blockedLogs()[0]).To(ContainSubstring(nodePool.Name))
+			Expect(blockedLogs()[0]).To(ContainSubstring(`"nodes"=10 "unhealthy-nodes"=3`))
+
+			env.Clock.Step(health.BlockedRepeatInterval)
+			ExpectObjectReconciled(logCtx, env.Client, healthController, nodes[0])
+			Expect(blockedLogs()).To(HaveLen(2))
+		})
+		It("should log once when more than 20% of the cluster's nodes are unhealthy", func() {
+			nodeClaims, nodes := applyNodes(false, badNode, badNode, badNode)
+			env.Clock.Step(60 * time.Minute)
+
+			ExpectObjectReconciled(logCtx, env.Client, healthController, nodes[0])
+			ExpectObjectReconciled(logCtx, env.Client, healthController, nodes[1])
+			Expect(ExpectExists(ctx, env.Client, nodeClaims[0]).DeletionTimestamp).To(BeNil())
+			Expect(blockedLogs()).To(HaveLen(1))
+			Expect(blockedLogs()[0]).To(ContainSubstring(`"nodes"=10 "unhealthy-nodes"=3`))
+		})
+	})
+	Context("UnhealthySince", func() {
+		BeforeEach(func() {
+			useReplaceAndRebootPolicies()
+		})
+		It("should be the earliest condition that a replace policy matches", func() {
+			now := env.Clock.Now()
+			node.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+			node.Status.Conditions = append(node.Status.Conditions,
+				corev1.NodeCondition{Type: "BadNode", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-10 * time.Minute))},
+				corev1.NodeCondition{Type: "FatalNode", Status: corev1.ConditionFalse, Reason: "Fatal", LastTransitionTime: metav1.NewTime(now.Add(-20 * time.Minute))},
+				// The legacy controller only replaces nodes, so a reboot policy's condition doesn't count.
+				corev1.NodeCondition{Type: "KernelFault", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-30 * time.Minute))},
+			)
+			since, unhealthy := healthController.UnhealthySince(node)
+			Expect(unhealthy).To(BeTrue())
+			Expect(since).To(BeTemporally("==", now.Add(-20*time.Minute)))
+		})
+		It("should report a node that no replace policy matches as healthy", func() {
+			node.Status.Conditions = append(node.Status.Conditions,
+				corev1.NodeCondition{Type: "FatalNode", Status: corev1.ConditionFalse, Reason: "Other", LastTransitionTime: metav1.NewTime(env.Clock.Now())},
+				corev1.NodeCondition{Type: "KernelFault", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(env.Clock.Now())},
+			)
+			_, unhealthy := healthController.UnhealthySince(node)
+			Expect(unhealthy).To(BeFalse())
+		})
+		It("should be no earlier than the node's creation", func() {
+			created := env.Clock.Now().Add(-time.Hour)
+			node.CreationTimestamp = metav1.NewTime(created)
+			// An unset transition time would otherwise date the node's failure to year one.
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{Type: "BadNode", Status: corev1.ConditionFalse})
+			since, unhealthy := healthController.UnhealthySince(node)
+			Expect(unhealthy).To(BeTrue())
+			Expect(since).To(BeTemporally("==", created))
 		})
 	})
 	Context("Metrics", func() {
