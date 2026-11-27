@@ -18,7 +18,6 @@ package node
 
 import (
 	"context"
-	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -267,7 +266,9 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	metricsMap["clusterUtilization"] = buildClusterUtilizationMetric(nodes)
 
 	if reportPastDue {
-		maps.Copy(metricsMap, c.pastDueRepairs.update(nodes, c.clock.Now(), heldBack))
+		for key, row := range c.pastDueRepairs.update(nodes, c.clock.Now(), heldBack) {
+			metricsMap[key] = append(metricsMap[key], row)
+		}
 	}
 
 	c.metricStore.ReplaceAll(metricsMap)

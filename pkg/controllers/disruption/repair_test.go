@@ -1783,7 +1783,7 @@ var _ = Describe("Repair", func() {
 			Expect(seen).To(Equal([]bool{true, false}))
 		})
 
-		It("should give no reasons while cluster state isn't synced, since repair doesn't run", func() {
+		It("should keep the last pass's reasons while cluster state isn't synced, since repair doesn't run", func() {
 			holdBackOnBudget(repairController)
 
 			// A NodeClaim without a provider ID, as during any launch, leaves cluster state unsynced.
@@ -1793,7 +1793,7 @@ var _ = Describe("Repair", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(launching))
 			Expect(cluster.Synced(ctx)).To(BeFalse())
 			ExpectSingletonReconciled(ctx, repairController)
-			Expect(cluster.RepairBlockedReasons()).To(BeEmpty())
+			expectHeldBack(node, disruption.RepairBlockedBudget)
 
 			// Once cluster state syncs, the next pass gives the node its reason again.
 			launching = ExpectExists(ctx, env.Client, launching)
@@ -1805,7 +1805,7 @@ var _ = Describe("Repair", func() {
 			expectHeldBack(node, disruption.RepairBlockedBudget)
 		})
 
-		It("should give no reasons while a leftover disruption taint can't be removed, since repair doesn't run", func() {
+		It("should keep the last pass's reasons while a leftover disruption taint can't be removed, since repair doesn't run", func() {
 			patchClient := &patchErrorClient{Client: env.Client, failPatch: &corev1.Node{}}
 			_, patchController := newRepairControllerWith(patchClient)
 			holdBackOnBudget(patchController)
@@ -1818,7 +1818,7 @@ var _ = Describe("Repair", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 			patchClient.err = apierrors.NewConflict(corev1.Resource("nodes"), node.Name, errors.New("injected conflict"))
 			ExpectSingletonReconciled(ctx, patchController)
-			Expect(cluster.RepairBlockedReasons()).To(BeEmpty())
+			expectHeldBack(node, disruption.RepairBlockedBudget)
 
 			// Once the patch succeeds, the next run removes the taint and gives the node its reason again.
 			patchClient.err = nil

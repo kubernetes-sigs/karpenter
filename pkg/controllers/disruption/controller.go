@@ -136,14 +136,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	// Start each pass first, so a Reconcile that returns before repair runs clears the old held-back reasons.
-	for _, m := range c.methods {
-		if observer, ok := m.(passObserver); ok {
-			observer.startPass()
-			defer observer.endPass()
-		}
-	}
-
 	// this won't catch if the reconciler loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)
 	defer c.logAbnormalRuns(ctx)
@@ -189,10 +181,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
-		// Save the pass's held-back reasons as soon as the method finishes, since the methods after it can take minutes.
-		if observer, ok := m.(passObserver); ok {
-			observer.endPass()
-		}
 		if err != nil {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil
@@ -209,6 +197,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+	// Start before candidates are built, since ShouldDisrupt records reasons too.
+	if observer, ok := disruption.(passObserver); ok {
+		observer.startPass()
+		defer observer.endPass()
+	}
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),

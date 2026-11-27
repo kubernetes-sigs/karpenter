@@ -336,7 +336,7 @@ var (
 	}
 	RepairBlockedUnknown = opmetrics.Value{
 		Name: "unknown",
-		Help: "Repair's latest pass gave no reason. It didn't check the node, for example because it acted on another node first, the pass failed, or repair can't run while cluster state isn't synced, as while a new node is launching. Or it skipped the node for a reason it doesn't report, such as a node nominated for pending pods.",
+		Help: "Repair's latest pass gave no reason. It didn't check the node, for example because it acted on another node first or the pass failed. Or it skipped the node for a reason it doesn't report, such as a node nominated for pending pods.",
 	}
 	RepairBlockedReason = opmetrics.Label{
 		Name: repairBlockedReasonLabel,

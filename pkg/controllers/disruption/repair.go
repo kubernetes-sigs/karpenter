@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -102,18 +103,15 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound. It's
 	// checked once a policy is eligible (its toleration has elapsed), so the veto is reported only from then on, and
 	// ahead of the drain-bound check, which it overrides.
-	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424), here and in
-	// RepairPastDueSince.
-	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
+	if doNotRepair(c.StateNode) {
 		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
 			fmt.Sprintf("repair is blocked through the %q annotation", v1.DoNotRepairAnnotationKey))...)
 		// No reason is recorded, since a node with do-not-repair is never past due.
 		return false
 	}
 	if c.hasPodBlockers && repairDrainBound(c.NodeClaim, c.RepairPolicyResult) == nil {
-		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
+		r.holdBack(c, RepairBlockedBlockingPods, disruptionevents.Blocked(c.Node, c.NodeClaim,
 			"repair requires a termination grace period to bypass blocking pods")...)
-		r.block(c, RepairBlockedBlockingPods)
 		return false
 	}
 	return true
@@ -123,8 +121,7 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 // it isn't past due. A node is past due once the node registration timeout and repair's drain bound have passed since
 // its earliest policy became eligible.
 func RepairPastDueSince(n *state.StateNode, now time.Time) (health.RepairResult, time.Time, bool) {
-	// Repair only acts on managed nodes with a NodePool, and do-not-repair vetoes it.
-	if !n.Managed() || n.Labels()[v1.NodePoolLabelKey] == "" || n.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
+	if !RepairActsOn(n) || doNotRepair(n) {
 		return health.RepairResult{}, time.Time{}, false
 	}
 	result := n.GetRepairResult(now)
@@ -137,6 +134,17 @@ func RepairPastDueSince(n *state.StateNode, now time.Time) (health.RepairResult,
 		return health.RepairResult{}, time.Time{}, false
 	}
 	return result, since, true
+}
+
+// RepairActsOn reports whether repair can act on the node at all, which needs a NodeClaim and a NodePool.
+func RepairActsOn(n *state.StateNode) bool {
+	return n.Managed() && n.Labels()[v1.NodePoolLabelKey] != ""
+}
+
+// doNotRepair reports whether the node's do-not-repair annotation vetoes all repair on it.
+// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
+func doNotRepair(n *state.StateNode) bool {
+	return n.Annotations()[v1.DoNotRepairAnnotationKey] == "true"
 }
 
 // RepairPastDueReason returns why repair hasn't finished with a past-due node. heldBack is why repair's latest pass held
@@ -206,15 +214,15 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 	var actionable []*Candidate
 	for _, candidate := range candidates {
 		if trippedPools[candidate.NodePool.Name] {
-			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
+			r.holdBack(candidate, RepairBlockedBreaker, disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
 				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold, candidate.NodePool.Name))...)
-			r.block(candidate, RepairBlockedBreaker)
 			continue
 		}
 		// Budgets only count initialized nodes, since an uninitialized node runs no workload to protect, so repairing one
 		// neither needs nor consumes budget.
 		if candidate.Initialized() && disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
-			r.block(candidate, RepairBlockedBudget)
+			// No event here: the budget mapping already reports a blocking budget once per NodePool.
+			r.holdBack(candidate, RepairBlockedBudget)
 			continue
 		}
 		actionable = append(actionable, candidate)
@@ -263,8 +271,7 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 					continue
 				}
 				if full && !holdsOfferedReservation(candidate, offered) {
-					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
-					r.block(candidate, RepairBlockedNoReplacement)
+					r.holdBack(candidate, RepairBlockedNoReplacement, disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
 					continue
 				}
 				reservationsFull = full
@@ -280,10 +287,9 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 				// the workload with no replacement.
 				refillable := np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
 				if !terminateFirstEnabled || !refillable {
-					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
+					r.holdBack(candidate, RepairBlockedNoReplacement, disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
 						"static NodePool's capacity reservations are full and cannot stage a replacement",
 						"static NodePool is at its node limit and cannot stage a replacement"))...)
-					r.block(candidate, RepairBlockedNoReplacement)
 					continue
 				}
 				return []Command{{
@@ -319,8 +325,8 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {
-			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
-			r.block(candidate, lo.Ternary(waitingOnUninitializedNodes(results), RepairBlockedWaitingOnInitialization, RepairBlockedNoReplacement))
+			r.holdBack(candidate, lo.Ternary(waitingOnUninitializedNodes(results), RepairBlockedWaitingOnInitialization, RepairBlockedNoReplacement),
+				disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
 			continue
 		}
 		return []Command{{
@@ -416,8 +422,9 @@ func waitingOnUninitializedNodes(results pscheduling.Results) bool {
 	})
 }
 
-// block records why repair held back the candidate this pass.
-func (r *Repair) block(c *Candidate, reason opmetrics.Value) {
+// holdBack records why repair held back the candidate this pass, and publishes the events that say so.
+func (r *Repair) holdBack(c *Candidate, reason opmetrics.Value, evts ...events.Event) {
+	r.recorder.Publish(evts...)
 	r.blocked[c.ProviderID()] = reason.Name
 }
 
@@ -426,8 +433,7 @@ func (r *Repair) startPass() {
 	r.blocked = map[string]string{}
 }
 
-// endPass saves why repair held back each node this pass in cluster state. It doesn't clear them, since the controller
-// calls it again when the Reconcile returns.
+// endPass saves why repair held back each node this pass in cluster state.
 func (r *Repair) endPass() {
 	r.cluster.UpdateRepairBlockedReasons(r.blocked)
 }
