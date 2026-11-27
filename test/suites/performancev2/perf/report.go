@@ -52,6 +52,8 @@ type Result struct {
 	StartupSeconds   float64       `json:"startup_seconds,omitempty"`
 	StartupCPUSecond float64       `json:"startup_cpu_seconds,omitempty"`
 	PodReady         Quantiles     `json:"pod_ready_seconds"`
+	// TimedOut says which wait ran out of time. The phase's other fields cover the time until then.
+	TimedOut string `json:"timed_out,omitempty"`
 
 	LatencyStats map[string]HistogramStats `json:"latency_stats,omitempty"`
 	Counters     map[string]uint64         `json:"counters,omitempty"`

@@ -172,7 +172,8 @@ var _ = Describe("Reboot", func() {
 	It("should not reboot more nodes at once than the disruption budget allows", func() {
 		// Two faulted nodes in a pool of 10 stay within repair's breaker (it trips only when more than ceil(20%) = 2
 		// nodes are unhealthy), so both are eligible at once and only the budget of 1 can keep them one at a time.
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+		// The budget must name Unhealthy: reasonless budgets default to Empty/Drifted/Underutilized and don't gate repair.
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		dep.Spec.Replicas = lo.ToPtr[int32](10)
 		dep.Spec.Template.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
@@ -237,7 +238,7 @@ var _ = Describe("Reboot", func() {
 			}).Should(Succeed())
 		}
 		nodePool.Spec.Template.Spec.StartupTaints = []corev1.Taint{startupTaint}
-		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1", Reasons: []v1.DisruptionReason{v1.DisruptionReasonUnhealthy}}}
 		dep.Spec.Replicas = lo.ToPtr[int32](3)
 		dep.Spec.Template.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{

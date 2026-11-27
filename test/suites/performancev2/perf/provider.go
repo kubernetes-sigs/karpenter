@@ -60,7 +60,10 @@ type Provider struct {
 	// ReproEnv names the provider's own environment variables, such as CLUSTER_NAME, to include in repro lines.
 	ReproEnv []string
 	// Catalog lets scenarios vary NodePools by the provider's instance type dimensions.
-	Catalog     Catalog
+	Catalog Catalog
+	// Skip opts the provider out of scenarios, by name, with the reason. Every other scenario runs, measured only
+	// where Levels sets nothing.
+	Skip        map[string]string
 	Levels      Levels
 	Calibration *Calibration
 }
@@ -176,6 +179,22 @@ func sizeOverrides() (all map[Vector]int, byScenario map[string]map[Vector]int, 
 		byScenario[k] = m
 	}
 	return all, byScenario, nil
+}
+
+// resized reports whether sizes differ from the ones the provider's levels were calibrated at: its Sizes, else the
+// scenario's defaults. Levels only hold at those sizes, so a resized run (KARPENTER_PERF_SIZES) is measured, like a
+// sweep cell, instead of failing on gates set for another size.
+func (p *Provider) resized(s *Scenario, sizes map[Vector]int) bool {
+	for v, def := range s.Vectors {
+		want := def
+		if n, ok := p.Sizes[s.Name][v]; ok {
+			want = n
+		}
+		if sizes[v] != want {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) size(scenario string, v Vector, def int) (int, error) {
