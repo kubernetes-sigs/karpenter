@@ -764,4 +764,13 @@ var _ = Describe("Resources", func() {
 			})
 		})
 	})
+	Context("ScaledValue", func() {
+		It("should count cpu in millicores", func() {
+			Expect(resources.ScaledValue(v1.ResourceCPU, resource.MustParse("1.5"))).To(BeEquivalentTo(1500))
+		})
+		It("should count other resources in their base unit", func() {
+			Expect(resources.ScaledValue(v1.ResourceMemory, resource.MustParse("1Ki"))).To(BeEquivalentTo(1024))
+			Expect(resources.ScaledValue(v1.ResourcePods, resource.MustParse("110"))).To(BeEquivalentTo(110))
+		})
+	})
 })
