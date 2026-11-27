@@ -197,6 +197,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+	// Start before candidates are built, since ShouldDisrupt records reasons too.
+	if observer, ok := disruption.(passObserver); ok {
+		observer.startPass()
+		defer observer.endPass()
+	}
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),

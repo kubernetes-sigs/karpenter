@@ -421,20 +421,24 @@ func (r Results) ExistingNodeToPodMapping() map[string][]*corev1.Pod {
 	})
 }
 
+// NonPendingPodErrors returns the scheduling errors of the pods that weren't already pending, such as the pods of a node
+// being disrupted.
+func (r Results) NonPendingPodErrors() map[*corev1.Pod]error {
+	return lo.OmitBy(r.PodErrors, func(p *corev1.Pod, _ error) bool {
+		return pod.IsProvisionable(p)
+	})
+}
+
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
 // We don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
 // schedule at all and don't want it to block consolidation.
 func (r Results) AllNonPendingPodsScheduled() bool {
-	return len(lo.OmitBy(r.PodErrors, func(p *corev1.Pod, err error) bool {
-		return pod.IsProvisionable(p)
-	})) == 0
+	return len(r.NonPendingPodErrors()) == 0
 }
 
 // NonPendingPodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation
 func (r Results) NonPendingPodSchedulingErrors() string {
-	errs := lo.OmitBy(r.PodErrors, func(p *corev1.Pod, err error) bool {
-		return pod.IsProvisionable(p)
-	})
+	errs := r.NonPendingPodErrors()
 	if len(errs) == 0 {
 		return "No Pod Scheduling Errors"
 	}
