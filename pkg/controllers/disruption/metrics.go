@@ -296,7 +296,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeClaimSubsystem,
 			Name:      "unhealthy_blocked",
-			Help:      "Number of unhealthy nodeclaims past their repair toleration that node repair is holding back, with no series rather than 0 for a nodepool and reason with none. Nodes that repair skips for other reasons, such as nodes nominated for pending pods, aren't counted, and a failed repair pass counts only the nodes it checked before it failed. There are no series at all with --legacy-node-repair or the " + options.NodeRepairFeatureGate.Name + " feature gate off, or while repair can't run, such as while cluster state isn't synced during a node launch or a leftover disruption taint or condition can't be removed. Labeled by nodepool and the reason repair holds the nodes back.",
+			Help:      "Number of unhealthy nodeclaims past their repair toleration that node repair is holding back, with no series rather than 0 for a nodepool and reason with none. Nodes that repair skips for other reasons, such as nodes nominated for pending pods, aren't counted, and a failed repair pass counts only the nodes it checked before it failed. There are no series at all with --legacy-node-repair or the " + options.NodeRepairFeatureGate.Name + " feature gate off. The gauge keeps the last pass's counts while repair can't run, such as while cluster state isn't synced during a node launch or a leftover disruption taint or condition can't be removed. Labeled by nodepool and the reason repair holds the nodes back.",
 		},
 		[]opmetrics.Label{metrics.NodePool, UnhealthyBlockedReason},
 		opmetrics.Alpha,
