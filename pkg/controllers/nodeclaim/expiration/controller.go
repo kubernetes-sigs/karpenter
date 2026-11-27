@@ -18,9 +18,12 @@ package expiration
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -40,6 +43,11 @@ import (
 )
 
 // Expiration is a nodeclaim controller that deletes expired nodeclaims based on expireAfter
+// DisruptionReasonExpired is the DisruptionReason condition reason for a NodeClaim that exceeded its
+// expireAfter. It is a condition reason, not a NodePool budget reason, so it is not part of the
+// v1.DisruptionReason enum; it follows the PascalCase of the voluntary reasons set on the same condition.
+const DisruptionReasonExpired = "Expired"
+
 type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
@@ -79,6 +87,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(c.clock.Now())}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
+	// Record why on the NodeClaim first, the way the disruption queue does for voluntary disruption, so
+	// the reason is on the object before termination starts and the pod drain metric can report it.
+	if err := c.markExpired(ctx, nodeClaim, expirationTime); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -116,4 +129,21 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+// markExpired sets the DisruptionReason condition on the NodeClaim to Expired. The NodeClaim is
+// re-read and patched with an optimistic lock, and the patch is retried on conflict, so a concurrent
+// status update by another controller is not overwritten.
+func (c *Controller) markExpired(ctx context.Context, nodeClaim *v1.NodeClaim, expirationTime time.Time) error {
+	message := fmt.Sprintf("NodeClaim expired: expireAfter is %s, created at %s, expired at %s",
+		nodeClaim.Spec.ExpireAfter.Duration, nodeClaim.CreationTimestamp.Format(time.RFC3339), expirationTime.Format(time.RFC3339))
+	return retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+		latest := &v1.NodeClaim{}
+		if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(nodeClaim), latest); err != nil {
+			return err
+		}
+		stored := latest.DeepCopy()
+		latest.StatusConditions(status.WithClock(c.clock)).SetTrueWithReason(v1.ConditionTypeDisruptionReason, DisruptionReasonExpired, message)
+		return c.kubeClient.Status().Patch(ctx, latest, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
+	})
 }
