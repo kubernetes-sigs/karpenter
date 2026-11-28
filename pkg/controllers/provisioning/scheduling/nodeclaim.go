@@ -60,6 +60,10 @@ type NodeClaim struct {
 	//   this expansion.
 	reservedOfferings    cloudprovider.Offerings
 	reservedOfferingMode ReservedOfferingMode
+	// relaxMinValues records whether the NodeClaim was created under a BestEffort MinValuesPolicy.
+	// CanAdd is called with relaxMinValues=false for pods added to an in-flight NodeClaim, so reservation decisions
+	// read the policy from here instead.
+	relaxMinValues bool
 	// creditReservationCapacity models slots a disruption candidate will free on termination: a reservation with a
 	// positive credit here is classified as reservable even if its offering's static ReservationCapacity is 0.
 	creditReservationCapacity map[string]int // reservationID -> credit count
@@ -94,6 +98,7 @@ func NewNodeClaim(
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
 	creditReservationCapacity map[string]int,
+	relaxMinValues bool,
 ) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", nodeID.Add(1))
 	template := *nodeClaimTemplate
@@ -122,6 +127,7 @@ func NewNodeClaim(
 		reservationManager:        reservationManager,
 		reservedOfferingMode:      reservedOfferingMode,
 		creditReservationCapacity: creditReservationCapacity,
+		relaxMinValues:            relaxMinValues,
 	}
 }
 
@@ -249,7 +255,12 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 			return nil, nil, nil, nil, fmt.Errorf("no instance type satisfies both scheduling and dynamic resource requirements")
 		}
 	}
-	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
+	// filterUnreserved repeats the resource-aware instance type filter above under other requirements.
+	filterUnreserved := func(reqs scheduling.Requirements) ([]*cloudprovider.InstanceType, error) {
+		its, _, err := filterInstanceTypesByRequirements(remaining, reqs, pod, podData.Requests, n.daemonOverheadGroups, requests, false)
+		return its, err
+	}
+	ofs, remaining, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements, filterUnreserved)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -314,13 +325,16 @@ func (n *NodeClaim) releaseReservedOfferings(current, updated cloudprovider.Offe
 // reserveOfferings handles the reservation of `karpenter.sh/capacity-type: reserved` offerings, returning the set of
 // reserved offerings. If the ReservedOfferingMode is set to strict, this function may also return an error if it failed
 // to reserve compatible offerings when some were available.
+// It also returns the instance types that remain, which shrink only when it excludes reserved capacity from
+// nodeClaimRequirements to satisfy minValues.
 func (n *NodeClaim) offeringsToReserve(
 	ctx context.Context,
 	instanceTypes []*cloudprovider.InstanceType,
 	nodeClaimRequirements scheduling.Requirements,
-) (cloudprovider.Offerings, error) {
+	filterInstanceTypes func(scheduling.Requirements) ([]*cloudprovider.InstanceType, error),
+) (cloudprovider.Offerings, []*cloudprovider.InstanceType, error) {
 	if !opts.FromContext(ctx).FeatureGates.ReservedCapacity {
-		return nil, nil
+		return nil, instanceTypes, nil
 	}
 
 	// We distinguish three kinds of compatible offering because, once availability (health) and reservation capacity are
@@ -376,7 +390,7 @@ func (n *NodeClaim) offeringsToReserve(
 	// NodeClaim in this loop pessimistically holds it). Defer and retry next loop rather than falling back — this is
 	// what limits provisioning to one NodeClaim per loop when a pod is compatible with multiple reserved offerings.
 	if strict && reservedWithCapacity && len(reservedOfferings) == 0 {
-		return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+		return nil, nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
 	}
 
 	// The only compatible option is a full reservation. Fail with a PLAIN error rather than creating a NodeClaim that
@@ -386,15 +400,35 @@ func (n *NodeClaim) offeringsToReserve(
 	// PreferencePolicy=Respect, which hides an on-demand/spot fallback). This reproduces the pre-decouple behavior, where a
 	// full reservation was Available=false and simply wasn't offered here.
 	if onlyFullReservations {
-		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
+		return nil, nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
+	}
+
+	// FinalizeScheduling pins a NodeClaim that holds reservations to them, which drops every instance type without an
+	// offering in them.
+	// Under a strict MinValuesPolicy, don't reserve if the instance types left after that pin can't satisfy minValues.
+	// The NodeClaim then holds no reservation slot, so it also excludes reserved capacity to avoid overlaunching into one.
+	// If the instance types left without reserved capacity can't satisfy minValues either, fail with a plain error so
+	// the pod falls through to other NodePools, as for a full reservation above.
+	// The instance types left without reserved capacity must still fit the pod, so filterInstanceTypes checks them
+	// against each offering's allocatable as well as minValues.
+	if len(reservedOfferings) != 0 && !n.relaxMinValues && !reservedOfferingsSatisfyMinValues(instanceTypes, nodeClaimRequirements, reservedOfferings) {
+		unreservedRequirements := scheduling.NewRequirements(nodeClaimRequirements.Values()...)
+		unreservedRequirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpNotIn, v1.CapacityTypeReserved))
+		unreserved, err := filterInstanceTypes(unreservedRequirements)
+		if err != nil || len(unreserved) == 0 {
+			return nil, nil, fmt.Errorf("minValues can't be satisfied with or without the compatible reserved offerings; falling through to other NodePools")
+		}
+		nodeClaimRequirements.Add(unreservedRequirements.Get(v1.CapacityTypeLabelKey))
+		instanceTypes = unreserved
+		reservedOfferings = nil
 	}
 
 	// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
 	// we should fail to add the pod to this nodeclaim.
 	if strict && len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
-		return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
+		return nil, nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
 	}
-	return reservedOfferings, nil
+	return reservedOfferings, instanceTypes, nil
 }
 
 // Add min daemon resource requests (min across instance types)
@@ -435,19 +469,42 @@ func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 	// If there are any reserved offerings tracked, inject those requirements onto the NodeClaim. This ensures that if
 	// there are multiple reserved offerings for an instance type, we don't attempt to overlaunch into a single offering.
 	if len(n.reservedOfferings) != 0 {
-		// Tightening constraint to reserved ensures that we get automatic drift handling when the Node / NodeClaim's capacity
-		// type label is dynamically updated by the cloudprovider.
-		n.Requirements[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved)
-		n.Requirements.Add(scheduling.NewRequirement(
-			cloudprovider.ReservationIDLabel,
-			corev1.NodeSelectorOpIn,
-			lo.Map(n.reservedOfferings, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })...,
-		))
+		pinToReservedOfferings(n.Requirements, n.reservedOfferings)
 	}
 	// Add min Daemon resource requests
 	// Daemon resource requests are excluded during bin packing to avoid double-counting
 	// Adding during bin-packing would add it every time a pod is added
 	n.addDaemonRequests()
+}
+
+// pinToReservedOfferings narrows requirements to capacity-type reserved and the reservation IDs of offerings.
+func pinToReservedOfferings(requirements scheduling.Requirements, offerings cloudprovider.Offerings) {
+	// Tightening constraint to reserved ensures that we get automatic drift handling when the Node / NodeClaim's capacity
+	// type label is dynamically updated by the cloudprovider.
+	requirements[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved)
+	requirements.Add(scheduling.NewRequirement(
+		cloudprovider.ReservationIDLabel,
+		corev1.NodeSelectorOpIn,
+		lo.Map(offerings, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })...,
+	))
+}
+
+// reservedOfferingsSatisfyMinValues reports whether the instance types that can still launch after pinning to offerings
+// satisfy the minValues in requirements.
+// An instance type can launch after the pin when it owns one of offerings.
+// This follows offeringsToReserve, which also counts a full reservation with a credited slot as reservable.
+func reservedOfferingsSatisfyMinValues(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, offerings cloudprovider.Offerings) bool {
+	if !requirements.HasMinValues() {
+		return true
+	}
+	pinned := scheduling.NewRequirements(requirements.Values()...)
+	pinToReservedOfferings(pinned, offerings)
+	reserved := sets.New(offerings...)
+	launchable := lo.Filter(instanceTypes, func(it *cloudprovider.InstanceType, _ int) bool {
+		return slices.ContainsFunc(it.Offerings, reserved.Has)
+	})
+	_, _, err := cloudprovider.InstanceTypes(launchable).SatisfiesMinValues(pinned)
+	return err == nil
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
