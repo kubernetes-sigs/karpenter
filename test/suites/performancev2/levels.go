@@ -21,7 +21,7 @@ import "sigs.k8s.io/karpenter/test/suites/performancev2/perf"
 // scenarioLevels are one scenario's levels for both core providers, kept in levels_<scenario>.go.
 type scenarioLevels struct{ KWOK, KWOKCI perf.Levels }
 
-var migrated = []scenarioLevels{}
+var migrated = []scenarioLevels{replacementLevels}
 
 func withMigrated(base perf.Levels, pick func(scenarioLevels) perf.Levels) perf.Levels {
 	for _, l := range migrated {

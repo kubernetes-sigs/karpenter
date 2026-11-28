@@ -17,6 +17,7 @@ limitations under the License.
 package perf
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 const (
@@ -108,32 +111,6 @@ func (p *Phase) AwaitConsolidation(fromPods, toPods int, timeout time.Duration) 
 	return p.end(rep, last)
 }
 
-// AwaitDrift ends the phase once every node from its start is replaced, nothing is disrupting, and the scenario has
-// the given healthy pods.
-func (p *Phase) AwaitDrift(pods int, timeout time.Duration) *Result {
-	GinkgoHelper()
-	if p.skip {
-		return nil
-	}
-	timeout = p.r.timeout(timeout)
-	rounds, inRound := 0, false
-	Eventually(func(g Gomega) {
-		nodes := p.r.nodes()
-		disrupting := p.r.disrupting()
-		switch {
-		case disrupting > 0 && !inRound:
-			rounds, inRound = rounds+1, true
-		case disrupting == 0:
-			inRound = false
-		}
-		remaining := sets.New(nodeNames(nodes)...).Intersection(sets.New(p.initialNodes...))
-		g.Expect(remaining.UnsortedList()).To(BeEmpty(), "nodes from before drift")
-		g.Expect(disrupting).To(BeZero(), "nodes being disrupted")
-		g.Expect(p.r.healthyPods()).To(Equal(pods), "healthy %s pods", p.r.Scenario.Name)
-	}).WithTimeout(timeout).WithPolling(settlePoll).Should(Succeed())
-	return p.end(&Result{Kind: "drift", Pods: pods, Rounds: rounds}, time.Now())
-}
-
 func nodeNames(nodes []corev1.Node) []string {
 	out := make([]string, 0, len(nodes))
 	for i := range nodes {
@@ -178,6 +155,55 @@ func (p *Phase) timeOut(err error) {
 	if err != nil && p.timedOut == "" {
 		p.timedOut = err.Error()
 	}
+}
+
+// AwaitReplacement measures a replacement: it watches nodes and the scenario's pods, calls trigger (for example a
+// NodePool template Patch that drifts every node), and ends the phase once every node that existed at its start is
+// gone except keep, none of the run's nodes is being disrupted, and the scenario has the given healthy pods. It
+// fails if a keep node is disrupted. Besides wall time it reports per-node replacement latency and unavailable
+// pod-seconds from watch events (see replacementTracker).
+func (p *Phase) AwaitReplacement(pods int, timeout time.Duration, trigger func(), keep ...string) *Result {
+	GinkgoHelper()
+	if p.skip {
+		return nil
+	}
+	kept := sets.New(keep...)
+	replaced := sets.New(p.initialNodes...).Difference(kept).UnsortedList()
+	Expect(replaced).ToNot(BeEmpty(), "replacement phase %s started with no nodes to replace", p.id)
+	timeout = p.r.timeout(timeout)
+	ctx, cancel := context.WithCancel(p.r.ctx)
+	defer cancel()
+	t := newReplacementTracker(replaced, pods)
+	p.r.watchReplacement(ctx, t)
+	trigger()
+	deadline, rounds, inRound := time.Now().Add(timeout), 0, false
+	for {
+		nodes := p.r.nodes()
+		disrupting, healthy := p.r.disrupting(), p.r.healthyPods()
+		switch {
+		case disrupting > 0 && !inRound:
+			rounds, inRound = rounds+1, true
+		case disrupting == 0:
+			inRound = false
+		}
+		for i := range nodes {
+			Expect(kept.Has(nodes[i].Name) && (nodes[i].DeletionTimestamp != nil || hasTaint(&nodes[i], v1.DisruptedTaintKey))).To(BeFalse(),
+				"node %s must survive the replacement but is being disrupted", nodes[i].Name)
+		}
+		if t.remaining() == 0 && disrupting == 0 && healthy == pods {
+			break
+		}
+		if time.Now().After(deadline) {
+			p.timedOut = fmt.Sprintf("replacement didn't finish within %s: %d of %d nodes left, %d disrupting, %d of %d pods healthy", timeout, t.remaining(), len(replaced), disrupting, healthy, pods)
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	gone := sets.New(nodeNames(p.r.nodes())...)
+	Expect(kept.Difference(gone).UnsortedList()).To(BeEmpty(), "nodes that had to survive the replacement")
+	rep := &Result{Kind: "replacement", Pods: pods, Rounds: rounds}
+	t.stop(time.Now(), rep)
+	return p.end(rep, time.Now())
 }
 
 // Restart deletes the controller pods and measures how long the new leader takes to report

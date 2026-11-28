@@ -52,6 +52,11 @@ type Result struct {
 	StartupSeconds   float64       `json:"startup_seconds,omitempty"`
 	StartupCPUSecond float64       `json:"startup_cpu_seconds,omitempty"`
 	PodReady         Quantiles     `json:"pod_ready_seconds"`
+	// Replacement phases only: per replaced node, seconds from its first disrupted event to its delete event, and the
+	// scenario's missing healthy pods integrated over the phase (pod-seconds) and at their worst.
+	Replacement           Quantiles `json:"replacement_seconds,omitzero"`
+	UnavailablePodSeconds float64   `json:"unavailable_pod_seconds,omitempty"`
+	PeakUnavailablePods   int       `json:"peak_unavailable_pods,omitempty"`
 	// TimedOut says which wait ran out of time. The phase's other fields cover the time until then.
 	TimedOut string `json:"timed_out,omitempty"`
 

@@ -81,6 +81,7 @@ Scenarios are grouped by the customer question they answer (`Scenario.Question`)
 | pods | How fast do N pending pods become Ready, and how many nodes are left once demand drops? | `pods` |
 | nodepools | What does each NodePool I add cost in scheduling latency, controller memory and startup time? | `nodepools` (one usable of N) |
 | topology | How fast do pods with hard spread and anti-affinity constraints become Ready? | `topology` |
+| replacement | How long does rolling N nodes take, and how much capacity do I lose meanwhile? | `replacement` (drift every node), `replacementDoNotDisrupt` (protected pods survive consolidation and drift) |
 
 ## Writing a scenario
 
@@ -111,7 +112,7 @@ How it works:
 
 What a scenario can use:
 - **Workload:** `r.Deployment` (names are lowercased, `Provider.Shapes` keys keep the scenario's own case), `r.Create` and `r.CreateParallel` for many objects, `r.Scale`, and `r.Patch` for any other change, such as drifting a NodePool template.
-- **Waiting:** `r.Replicas()` is the pod count every deployment the run created adds up to, so pass it to the Await methods rather than summing by hand. `AwaitScaleOut` and `AwaitConsolidation` end a phase. `AwaitDrift` ends one once every node from its start has been replaced. `r.AwaitHealthyPods` waits inside a phase, for workloads that change several times.
+- **Waiting:** `r.Replicas()` is the pod count every deployment the run created adds up to, so pass it to the Await methods rather than summing by hand. `AwaitScaleOut` and `AwaitConsolidation` end a phase. `AwaitReplacement` runs a trigger (a drifting Patch, say) and ends once every node from the phase start has been replaced, reporting per-node replacement latency and unavailable pod-seconds. `r.AwaitHealthyPods` waits inside a phase, for workloads that change several times.
 - **Checking outcomes:** `r.Nodes()`, `r.Pods()`, and on the returned `Result`, `Histograms`, `Histogram`, `Counter` and `Gauge`. An Await method returns nil for a skipped phase, so check that before asserting on the result.
 - **Provider specifics:** read the provider's instance type dimensions from `r.Provider.Catalog`, never the provider's own label keys or zones, so the scenario runs unchanged in other provider plugins. A scenario that can't run without a Catalog dimension says so in `Requires`, and providers without it skip the scenario with that reason (listed by `cmd/inventory`).
 - **Placement:** `ownPool` in `perf/scenarios/helpers.go` pins pods to the run's NodePool, so topology constraints don't count a real cluster's own nodes as domains.
