@@ -25,6 +25,8 @@ import (
 	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -40,6 +42,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), v1.LabelOptions()...)
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 })
 

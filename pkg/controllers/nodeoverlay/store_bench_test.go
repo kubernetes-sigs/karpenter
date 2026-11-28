@@ -26,12 +26,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
 // BenchmarkStoreApply benchmarks the memory usage of applying overlays to instance types.
 // This benchmark helps validate that the selective copy-on-write strategy significantly
 // reduces memory allocations compared to deep copying.
 func BenchmarkStoreApply(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	// Create a realistic set of instance types similar to AWS offerings
 	instanceTypes := make([]*cloudprovider.InstanceType, 0, 200)
 	families := []string{"m5", "m6i", "m7i", "c5", "c6i", "c7i", "r5", "r6i", "r7i"}
@@ -88,6 +90,7 @@ func BenchmarkStoreApply(b *testing.B) {
 
 // BenchmarkStoreApplyNoOverlay benchmarks applying with no overlays (everything shared)
 func BenchmarkStoreApplyNoOverlay(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	instanceTypes := make([]*cloudprovider.InstanceType, 0, 200)
 	for range 200 {
 		instanceTypes = append(instanceTypes, fake.NewInstanceType("m5.large"))
@@ -108,6 +111,7 @@ func BenchmarkStoreApplyNoOverlay(b *testing.B) {
 
 // BenchmarkStoreApplyPriceOnly benchmarks applying with only price overlays
 func BenchmarkStoreApplyPriceOnly(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	instanceTypes := make([]*cloudprovider.InstanceType, 0, 200)
 	for range 200 {
 		instanceTypes = append(instanceTypes, fake.NewInstanceType("m5.large"))
@@ -142,6 +146,7 @@ func BenchmarkStoreApplyPriceOnly(b *testing.B) {
 
 // BenchmarkStoreApplyCapacityOnly benchmarks applying with only capacity overlays
 func BenchmarkStoreApplyCapacityOnly(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	instanceTypes := make([]*cloudprovider.InstanceType, 0, 200)
 	for range 200 {
 		instanceTypes = append(instanceTypes, fake.NewInstanceType("m5.large"))
@@ -173,6 +178,7 @@ func BenchmarkStoreApplyCapacityOnly(b *testing.B) {
 
 // BenchmarkStoreApplyBothOverlays benchmarks applying with both price and capacity overlays
 func BenchmarkStoreApplyBothOverlays(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	instanceTypes := make([]*cloudprovider.InstanceType, 0, 200)
 	for range 200 {
 		instanceTypes = append(instanceTypes, fake.NewInstanceType("m5.large"))
@@ -211,6 +217,7 @@ func BenchmarkStoreApplyBothOverlays(b *testing.B) {
 
 // BenchmarkStoreApplyAllScenario benchmarks the full ApplyAll method with multiple node pools
 func BenchmarkStoreApplyAllScenario(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	// Simulate 5 node pools with 200 instance types each
 	instanceTypes := make([]*cloudprovider.InstanceType, 0, 200)
 	families := []string{"m5", "m6i", "c5", "c6i", "r5", "r6i"}
@@ -297,6 +304,7 @@ func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType,
 
 // BenchmarkNodeOverlayControllerScenario benchmarks a realistic controller scenario
 func BenchmarkNodeOverlayControllerScenario(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	// Simulate the scenario from GitHub issue #2655:
 	// - 200 instance types (m/r/c families, generations 6-7, large to 32xlarge)
 	// - 5 node pools

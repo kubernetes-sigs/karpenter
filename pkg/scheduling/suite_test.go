@@ -21,9 +21,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
 func TestScheduling(t *testing.T) {
 	RegisterFailHandler(Fail)
+	// Registered before RunSpecs, since container bodies build requirements while the spec tree is constructed.
+	labelstest.Register(t, v1.LabelOptions()...)
 	RunSpecs(t, "Scheduling")
 }

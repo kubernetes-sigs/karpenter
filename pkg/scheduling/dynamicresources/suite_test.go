@@ -24,6 +24,8 @@ import (
 	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -42,6 +44,7 @@ func TestDynamicResources(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), fake.LabelOptions()...)
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	if env.Version.Minor() < 34 {
 		Skip("DRA is only available in K8s versions >= 1.34.x")

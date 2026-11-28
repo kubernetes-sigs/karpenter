@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 
@@ -82,6 +83,7 @@ func removeNodeClaimImmutabilityValidation(crds ...*apiextensionsv1.CustomResour
 }
 
 var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), fake.LabelOptions()...)
 	recorder = test.NewEventRecorder()
 	env = test.NewEnvironment(test.WithCRDs(removeNodeClaimImmutabilityValidation(apis.CRDs...)...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())

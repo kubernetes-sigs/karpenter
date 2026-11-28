@@ -34,6 +34,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -44,6 +45,17 @@ func init() {
 	v1.WellKnownLabels = v1.WellKnownLabels.Insert(v1alpha1.LabelReservationID)
 	cloudprovider.ReservationIDLabel = v1alpha1.LabelReservationID
 	cloudprovider.ReservedCapacityLabels.Insert(v1alpha1.LabelReservationID)
+}
+
+// LabelOptions returns core's label options plus the fake cloud provider's: its reservation ID label, bound to
+// cloudprovider.ReservationIDLabel, and its instance type labels.
+func LabelOptions() []labels.Option {
+	return append(v1.LabelOptions(),
+		labels.Option{Key: v1alpha1.LabelReservationID, Binds: []*string{&cloudprovider.ReservationIDLabel}},
+		labels.Option{Key: LabelInstanceSize},
+		labels.Option{Key: ExoticInstanceLabelKey},
+		labels.Option{Key: IntegerInstanceLabelKey},
+	)
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)

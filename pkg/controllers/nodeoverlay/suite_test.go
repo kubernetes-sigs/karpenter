@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -61,6 +62,8 @@ var (
 func TestNodeOverlay(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
+	// Registered before RunSpecs, since table entries build instance types while the spec tree is constructed.
+	labelstest.Register(t, fake.LabelOptions()...)
 	RunSpecs(t, "NodeOverlay Status")
 }
 

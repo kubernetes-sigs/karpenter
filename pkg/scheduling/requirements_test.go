@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
 var _ = Describe("Requirements", func() {
@@ -712,6 +713,7 @@ var _ = Describe("Requirements", func() {
 // Go benchmark functions
 // go test -tags=test_performance -run=RequirementsProfile
 func TestRequirementsProfile(t *testing.T) { //nolint:karpenterlint // profiling harness run with -run=RequirementsProfile, not a spec
+	labelstest.Register(t, v1.LabelOptions()...)
 	cpuf, err := os.Create("requirements.cpuprofile")
 	if err != nil {
 		t.Fatalf("error creating CPU profile: %s", err)

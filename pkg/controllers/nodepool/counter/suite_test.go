@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -60,6 +61,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), fake.LabelOptions()...)
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)

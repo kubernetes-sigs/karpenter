@@ -30,10 +30,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 func BenchmarkNewTopology(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	for _, np := range []int{1, 5, 20, 50} {
 		b.Run(fmt.Sprintf("vector=nodepools/np=%d", np), func(b *testing.B) {
 			ctx := benchCtx()
@@ -65,6 +67,7 @@ func BenchmarkNewTopology(b *testing.B) {
 }
 
 func BenchmarkForEachDomain(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	cases := []struct {
 		domains     int
 		taintGroups int

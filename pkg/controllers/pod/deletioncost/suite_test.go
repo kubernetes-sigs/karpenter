@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -86,6 +87,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), fake.LabelOptions()...)
 	env = test.NewEnvironment(test.WithCRDs(coreapis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	// Every spec here exercises the enabled path; the gate-disabled spec builds its own ctx.
 	opts := test.Options(test.OptionsFields{
