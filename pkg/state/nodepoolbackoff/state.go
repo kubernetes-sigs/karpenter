@@ -84,7 +84,7 @@ func WithDelays(base, max time.Duration) Option {
 func NewState(clk clock.Clock, opts ...Option) *State {
 	s := &State{
 		clock: clk,
-		rand:  rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // jitter does not need a cryptographic source
+		rand:  rand.New(rand.NewSource(clk.Now().UnixNano())), //nolint:gosec // jitter does not need a cryptographic source
 		base:  driftBackoffBaseDelay,
 		max:   driftBackoffMaxDelay,
 		state: map[string]*backoffEntry{},
