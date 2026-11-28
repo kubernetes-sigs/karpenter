@@ -26,9 +26,11 @@ import (
 
 // All lists every scenario, grouped: each customer question first, then its variants (Scenario.Group).
 var All = []perf.Scenario{
-	Pods,
-	NodePools,
-	Topology,
+	Pods, PodsWide, PodsBalanced, PodsBalancedChurn, PodsBalancedHeterogeneous,
+	NodePools, NodePoolsDiverse, NodePoolsTargeted,
+	Topology, TopologyHostname,
+	Replacement,
+	ReplacementDoNotDisrupt,
 }
 
 func zoneSpread() test.DeploymentOptionModifier {
