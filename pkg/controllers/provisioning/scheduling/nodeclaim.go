@@ -249,7 +249,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 			return nil, nil, nil, nil, fmt.Errorf("no instance type satisfies both scheduling and dynamic resource requirements")
 		}
 	}
-	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
+	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements, requests)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -318,6 +318,7 @@ func (n *NodeClaim) offeringsToReserve(
 	ctx context.Context,
 	instanceTypes []*cloudprovider.InstanceType,
 	nodeClaimRequirements scheduling.Requirements,
+	requests corev1.ResourceList,
 ) (cloudprovider.Offerings, error) {
 	if !opts.FromContext(ctx).FeatureGates.ReservedCapacity {
 		return nil, nil
@@ -332,8 +333,19 @@ func (n *NodeClaim) offeringsToReserve(
 	reservedFull := false          // compatible reserved offering that is full right now (Available, cap==0)
 	hasUnreservedFallback := false // compatible on-demand/spot offering to fall back to
 	var reservedOfferings cloudprovider.Offerings
+	var daemonOverhead map[*cloudprovider.InstanceType]corev1.ResourceList
 	for _, it := range instanceTypes {
-		for _, o := range it.Offerings {
+		offerings := it.Offerings
+		// Offerings with a capacity or overhead override have their own allocatable, and fits keeps the instance type when any one group fits.
+		// Only offerings from a group that fits the requests are options here, the same check fits applies.
+		// An instance type with a single group already passed that check in fits, so it keeps all of its offerings.
+		if groups := it.AllocatableOfferingsList(); len(groups) > 1 {
+			if daemonOverhead == nil {
+				daemonOverhead = n.daemonOverheadByInstanceType()
+			}
+			offerings = fittingOfferings(groups, resources.Merge(requests, daemonOverhead[it]))
+		}
+		for _, o := range offerings {
 			if !o.Available {
 				continue
 			}
@@ -395,6 +407,28 @@ func (n *NodeClaim) offeringsToReserve(
 		return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
 	}
 	return reservedOfferings, nil
+}
+
+// daemonOverheadByInstanceType maps each instance type to the daemon overhead of its group.
+func (n *NodeClaim) daemonOverheadByInstanceType() map[*cloudprovider.InstanceType]corev1.ResourceList {
+	overhead := map[*cloudprovider.InstanceType]corev1.ResourceList{}
+	for _, g := range n.daemonOverheadGroups {
+		for _, it := range g.InstanceTypes {
+			overhead[it] = g.DaemonOverhead
+		}
+	}
+	return overhead
+}
+
+// fittingOfferings returns the offerings of the allocatable groups that fit the requests.
+func fittingOfferings(groups []cloudprovider.AllocatableOfferings, requests corev1.ResourceList) cloudprovider.Offerings {
+	var offerings cloudprovider.Offerings
+	for _, group := range groups {
+		if resources.Fits(requests, group.Allocatable) {
+			offerings = append(offerings, group.Offerings...)
+		}
+	}
+	return offerings
 }
 
 // Add min daemon resource requests (min across instance types)
