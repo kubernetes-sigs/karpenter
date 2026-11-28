@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -177,12 +178,13 @@ func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Co
 }
 
 type TestConsolidationValidator struct {
-	blocked       bool
-	churn         bool
-	nominated     bool
-	cluster       *state.Cluster
-	nodePool      *v1.NodePool
-	consolidation *disruption.ConsolidationValidator
+	blocked        bool
+	churn          bool
+	nominated      bool
+	beforeValidate func()
+	cluster        *state.Cluster
+	nodePool       *v1.NodePool
+	consolidation  *disruption.ConsolidationValidator
 }
 
 type TestConsolidationValidatorOption func(*TestConsolidationValidator)
@@ -202,6 +204,14 @@ func WithUnderutilizedBlockingBudget() TestConsolidationValidatorOption {
 func WithUnderutilizedNodeNomination() TestConsolidationValidatorOption {
 	return func(v *TestConsolidationValidator) {
 		v.nominated = true
+	}
+}
+
+// WithClusterChangeBeforeValidation runs f after the command is computed and before it is validated, simulating a
+// cluster change during the validation delay.
+func WithClusterChangeBeforeValidation(f func()) TestConsolidationValidatorOption {
+	return func(v *TestConsolidationValidator) {
+		v.beforeValidate = f
 	}
 }
 
@@ -242,6 +252,9 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 	if t.nominated {
 		nominated(nodes, nodeClaims)
 	}
+	if t.beforeValidate != nil {
+		t.beforeValidate()
+	}
 	return t.consolidation.Validate(ctx, cmd, 0)
 }
 
@@ -271,7 +284,9 @@ func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 			}}})
 	ExpectApplied(ctx, env.Client, pods[0])
 	ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
+	// do-not-disrupt annotation is added to the node to simulate pod churn
+	nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+	ExpectApplied(ctx, env.Client, nodes[0])
 	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
 }
 
