@@ -43,7 +43,7 @@ const (
 var gatedByKind = map[string][]Metric{
 	"scale-out":     {PodReady.P95, PodReady.P99, PodReady.Max, CPUUtil, MemoryUtil, Nodes, HeapMB, CPUCores},
 	"consolidation": {TotalTimeSeconds, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores},
-	"drift":         {TotalTimeSeconds, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores},
+	"replacement":   {TotalTimeSeconds, Replacement.P50, Replacement.P95, Replacement.Max, UnavailablePodSeconds, PeakUnavailablePods, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores},
 	"startup":       {StartupSeconds, HeapMB},
 }
 
@@ -118,7 +118,7 @@ func SuggestLevels(c *Calibration, scenarios ...string) map[string][]Suggestion 
 			switch {
 			case m.ExperimentalOnly:
 				s.Why = m.Name + " is Experimental only"
-			case m.Name == TotalTimeSeconds.Name && kind != "scale-out":
+			case m.Name == TotalTimeSeconds.Name && kind == "consolidation":
 				s.Why = "wall time of a " + kind + " phase"
 			case e.N < StableMinRuns || e.CV > StableMaxCV || e.FPR(m, b) > StableMaxFPR:
 				s.Why = fmt.Sprintf("evidence: n=%d, CV %.0f%%, FPR %.2f%%", e.N, e.CV*100, e.FPR(m, b)*100)
