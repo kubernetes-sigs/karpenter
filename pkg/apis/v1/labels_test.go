@@ -59,46 +59,63 @@ var _ = Describe("LabelOptions", func() {
 		labelstest.Register(GinkgoTB(), v1.LabelOptions()...)
 	})
 
-	It("should register the legacy well-known labels", func() {
-		Expect(labels.WellKnown()).To(Equal(v1.WellKnownLabels))
+	It("should register core's well-known labels", func() {
+		Expect(labels.WellKnown()).To(Equal(sets.New(
+			v1.NodePoolLabelKey,
+			corev1.LabelTopologyZone,
+			corev1.LabelTopologyRegion,
+			corev1.LabelInstanceTypeStable,
+			corev1.LabelArchStable,
+			corev1.LabelOSStable,
+			v1.CapacityTypeLabelKey,
+			corev1.LabelWindowsBuild,
+		)))
 	})
-	It("should register the legacy restricted domains", func() {
-		Expect(labels.Domains()).To(Equal(sets.List(v1.RestrictedLabelDomains)))
+	It("should restrict the karpenter.sh domain", func() {
+		Expect(labels.Domains()).To(Equal([]string{"karpenter.sh"}))
 	})
-	It("should deny exactly the legacy restricted labels on every resource", func() {
+	It("should deny only kubernetes.io/hostname on every resource", func() {
 		deniedEverywhere := sets.New(labels.Denied(labels.All()[0])...)
 		for _, r := range labels.All()[1:] {
 			deniedEverywhere = deniedEverywhere.Intersection(sets.New(labels.Denied(r)...))
 		}
-		Expect(deniedEverywhere).To(Equal(v1.RestrictedLabels))
+		Expect(deniedEverywhere).To(Equal(sets.New(corev1.LabelHostname)))
 	})
-	It("should register the legacy normalized labels as aliases", func() {
-		Expect(labels.Aliases()).To(Equal(v1.NormalizedLabels))
+	It("should alias the beta and legacy labels to their stable keys", func() {
+		Expect(labels.Aliases()).To(Equal(map[string]string{
+			corev1.LabelFailureDomainBetaZone:   corev1.LabelTopologyZone,
+			"beta.kubernetes.io/arch":           corev1.LabelArchStable,
+			"beta.kubernetes.io/os":             corev1.LabelOSStable,
+			corev1.LabelInstanceType:            corev1.LabelInstanceTypeStable,
+			corev1.LabelFailureDomainBetaRegion: corev1.LabelTopologyRegion,
+		}))
 	})
-	It("should register the legacy known values, and no others", func() {
+	It("should register known values only for the capacity type", func() {
 		keys := labels.WellKnown().Clone()
 		for _, r := range labels.All() {
 			keys.Insert(labels.Denied(r)...)
 		}
-		keys.Insert(lo.Keys(v1.WellKnownValuesForRequirements)...)
 		for key := range keys {
 			values, ok := labels.KnownValues(key)
-			legacy, legacyOK := v1.WellKnownValuesForRequirements[key]
-			Expect(ok).To(Equal(legacyOK), key)
-			Expect(values).To(Equal(legacy), key)
+			if key == v1.CapacityTypeLabelKey {
+				Expect(ok).To(BeTrue(), key)
+				Expect(values).To(Equal(sets.New(v1.CapacityTypeOnDemand, v1.CapacityTypeSpot, v1.CapacityTypeReserved)), key)
+				continue
+			}
+			Expect(ok).To(BeFalse(), key)
 		}
 	})
-	It("should restrict labels like the legacy checks", func() {
-		probes := sets.New("karpenter.sh/unregistered", "sub.karpenter.sh/unregistered", "not-karpenter.sh/unregistered", "karpenter.sh", "example.com/unregistered", corev1.LabelHostname)
-		probes.Insert(v1.WellKnownLabels.UnsortedList()...)
-		probes.Insert(lo.Keys(v1.NormalizedLabels)...)
+	It("should restrict exactly the karpenter.sh domain's unregistered keys and kubernetes.io/hostname", func() {
+		restricted := sets.New("karpenter.sh/unregistered", "sub.karpenter.sh/unregistered", corev1.LabelHostname)
+		probes := restricted.Union(sets.New("not-karpenter.sh/unregistered", "karpenter.sh", "example.com/unregistered"))
+		probes.Insert(labels.WellKnown().UnsortedList()...)
+		probes.Insert(lo.Keys(labels.Aliases())...)
 		for key := range probes {
-			legacy := v1.IsRestrictedLabel(key) != nil
 			for _, r := range []labels.Resource{labels.NodeClaim, labels.NodeOverlay, labels.Pod} {
-				Expect(labels.Validate(key, r) != nil).To(Equal(legacy), "%s on %s", key, r)
+				Expect(labels.Validate(key, r) != nil).To(Equal(restricted.Has(key)), "%s on %s", key, r)
 			}
 			// NodePool validation also rejects the nodepool label.
-			Expect(labels.Validate(key, labels.NodePool) != nil).To(Equal(legacy || key == v1.NodePoolLabelKey), "%s on NodePool", key)
+			Expect(labels.Validate(key, labels.NodePool) != nil).To(Equal(restricted.Has(key) || key == v1.NodePoolLabelKey), "%s on NodePool", key)
 		}
 	})
 	It("should return a fresh list on every call", func() {
