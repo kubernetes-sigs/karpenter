@@ -126,20 +126,47 @@ var (
 		OnBreach: "A second wave launched for pods still pending: see late_pods.",
 		Value:    func(r *Result) float64 { return float64(r.Timeline.PostRegNodeClaims) }}
 
+	UnavailablePodSeconds = Metric{Name: "unavailable_pod_seconds", Kind: KindOutcome, Unit: "pod-s", Upper: true,
+		Measures: "Replacement phases: the scenario's missing healthy pods (wanted minus healthy) integrated between watch events over the phase, the capacity customers lose while nodes are replaced.",
+		OnBreach: "Pods are down longer while their nodes are replaced: replacements launched later relative to the drain, evictions running ahead of replacement capacity, or pods rescheduled onto nodes that weren't ready.",
+		Value:    func(r *Result) float64 { return r.UnavailablePodSeconds }}
+	PeakUnavailablePods = Metric{Name: "peak_unavailable_pods", Kind: KindOutcome, Unit: "pods", Upper: true,
+		Measures: "Replacement phases: the most healthy pods missing at once.",
+		OnBreach: "More pods down at the same time: wider disruption batches, a budget not respected, or replacements not launched before draining.",
+		Value:    func(r *Result) float64 { return float64(r.PeakUnavailablePods) }}
+
 	// PodReady is the per-pod view of latency: each quantile is its own metric, so a provider can gate p95
 	// and only warn on p99 and max, which are noisier but are what the slowest customer sees.
 	PodReady = podReadyMetrics()
+	// Replacement is per replaced node, seconds from its first disrupted watch event to its delete event.
+	Replacement = replacementMetrics()
 
 	// TODO: gate on scheduling latency, the mean of karpenter_scheduler_scheduling_duration_seconds over a
 	// phase (it's still in the report as latency_stats). Cut for now because in 13 single runs a negative
 	// control (revert #2013) moved it +42%, as much as real regressions did, so it would flake. It needs
 	// repeated runs or base-vs-head on the same cluster before it can gate.
 	Metrics = []Metric{TotalTimeSeconds, PodReady.P50, PodReady.P95, PodReady.P99, PodReady.Max, StartupSeconds, CPUUtil, MemoryUtil, Nodes, PodsDisrupted, HeapMB, CPUCores,
-		NodeClaimsProvisioned, SingleNodeReplaces, ConsolidationTimedOut, NodeClaimRounds, LatePods, OffRound1Pods, PreRegDupNodeClaims, PostRegNodeClaims}
+		NodeClaimsProvisioned, SingleNodeReplaces, ConsolidationTimedOut, NodeClaimRounds, LatePods, OffRound1Pods, PreRegDupNodeClaims, PostRegNodeClaims,
+		Replacement.P50, Replacement.P95, Replacement.Max, UnavailablePodSeconds, PeakUnavailablePods}
 )
 
 type QuantileMetrics struct {
 	P50, P95, P99, Max Metric
+}
+
+func replacementMetrics() QuantileMetrics {
+	q := func(name, label string, v func(Quantiles) float64) Metric {
+		return Metric{Name: "replacement_seconds_" + name, Kind: KindDuration, Unit: "s", Upper: true,
+			Measures: label + " of seconds from a node's first disrupted watch event (karpenter.sh/disrupted taint or deletion) to its delete event, over the nodes a replacement phase replaced.",
+			OnBreach: "Nodes take longer to replace once picked: slower replacement launch or registration, slower drain (eviction retries, PDB waits), or nodes stuck terminating.",
+			Value:    func(r *Result) float64 { return v(r.Replacement) }}
+	}
+	return QuantileMetrics{
+		P50: q("p50", "Median", func(x Quantiles) float64 { return x.P50 }),
+		P95: q("p95", "P95", func(x Quantiles) float64 { return x.P95 }),
+		P99: q("p99", "P99", func(x Quantiles) float64 { return x.P99 }),
+		Max: q("max", "Max", func(x Quantiles) float64 { return x.Max }),
+	}
 }
 
 func podReadyMetrics() QuantileMetrics {
