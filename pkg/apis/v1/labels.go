@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
@@ -273,6 +274,23 @@ var (
 	// provider uses "0" — this mapping bridges that gap.
 	NormalizedLabelValues = map[string]map[string]string{}
 )
+
+// LabelOptions returns core's label policy as a fresh list. Providers append their own options, and may edit
+// these, before passing the list to labels.Register.
+func LabelOptions() []labels.Option {
+	return []labels.Option{
+		{Domain: apis.Group},
+		{Key: NodePoolLabelKey, DenyOn: []labels.Resource{labels.NodePool}},
+		{Key: CapacityTypeLabelKey, KnownValues: []string{CapacityTypeOnDemand, CapacityTypeSpot, CapacityTypeReserved}},
+		{Key: v1.LabelTopologyZone, Aliases: []string{v1.LabelFailureDomainBetaZone}},
+		{Key: v1.LabelTopologyRegion, Aliases: []string{v1.LabelFailureDomainBetaRegion}},
+		{Key: v1.LabelInstanceTypeStable, Aliases: []string{v1.LabelInstanceType}},
+		{Key: v1.LabelArchStable, Aliases: []string{"beta.kubernetes.io/arch"}},
+		{Key: v1.LabelOSStable, Aliases: []string{"beta.kubernetes.io/os"}},
+		{Key: v1.LabelWindowsBuild},
+		{Key: v1.LabelHostname, DenyOn: labels.All()},
+	}
+}
 
 // IsRestrictedLabel returns an error if the label is restricted.
 func IsRestrictedLabel(key string) error {

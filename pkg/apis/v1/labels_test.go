@@ -22,8 +22,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
 var _ = Describe("WellKnownAnnotations", func() {
@@ -47,5 +51,75 @@ var _ = Describe("WellKnownAnnotations", func() {
 	})
 	It("should not document an annotation twice", func() {
 		Expect(lo.FindDuplicatesBy(annotations, func(a wellknown.Annotation) string { return a.Name })).To(BeEmpty())
+	})
+})
+
+var _ = Describe("LabelOptions", func() {
+	BeforeEach(func() {
+		labelstest.Register(GinkgoTB(), v1.LabelOptions()...)
+	})
+
+	It("should register the legacy well-known labels", func() {
+		Expect(labels.WellKnown()).To(Equal(v1.WellKnownLabels))
+	})
+	It("should register the legacy restricted domains", func() {
+		Expect(labels.Domains()).To(Equal(sets.List(v1.RestrictedLabelDomains)))
+	})
+	It("should deny exactly the legacy restricted labels on every resource", func() {
+		deniedEverywhere := sets.New(labels.Denied(labels.All()[0])...)
+		for _, r := range labels.All()[1:] {
+			deniedEverywhere = deniedEverywhere.Intersection(sets.New(labels.Denied(r)...))
+		}
+		Expect(deniedEverywhere).To(Equal(v1.RestrictedLabels))
+	})
+	It("should register the legacy normalized labels as aliases", func() {
+		Expect(labels.Aliases()).To(Equal(v1.NormalizedLabels))
+	})
+	It("should register the legacy known values, and no others", func() {
+		keys := labels.WellKnown().Clone()
+		for _, r := range labels.All() {
+			keys.Insert(labels.Denied(r)...)
+		}
+		keys.Insert(lo.Keys(v1.WellKnownValuesForRequirements)...)
+		for key := range keys {
+			values, ok := labels.KnownValues(key)
+			legacy, legacyOK := v1.WellKnownValuesForRequirements[key]
+			Expect(ok).To(Equal(legacyOK), key)
+			Expect(values).To(Equal(legacy), key)
+		}
+	})
+	It("should restrict labels like the legacy checks", func() {
+		probes := sets.New("karpenter.sh/unregistered", "sub.karpenter.sh/unregistered", "not-karpenter.sh/unregistered", "karpenter.sh", "example.com/unregistered", corev1.LabelHostname)
+		probes.Insert(v1.WellKnownLabels.UnsortedList()...)
+		probes.Insert(lo.Keys(v1.NormalizedLabels)...)
+		for key := range probes {
+			legacy := v1.IsRestrictedLabel(key) != nil
+			for _, r := range []labels.Resource{labels.NodeClaim, labels.NodeOverlay, labels.Pod} {
+				Expect(labels.Validate(key, r) != nil).To(Equal(legacy), "%s on %s", key, r)
+			}
+			// NodePool validation also rejects the nodepool label.
+			Expect(labels.Validate(key, labels.NodePool) != nil).To(Equal(legacy || key == v1.NodePoolLabelKey), "%s on NodePool", key)
+		}
+	})
+	It("should return a fresh list on every call", func() {
+		first := v1.LabelOptions()
+		for i := range first {
+			first[i].Key = "edited"
+			for j := range first[i].Aliases {
+				first[i].Aliases[j] = "edited"
+			}
+			for j := range first[i].DenyOn {
+				first[i].DenyOn[j] = "edited"
+			}
+			for j := range first[i].KnownValues {
+				first[i].KnownValues[j] = "edited"
+			}
+		}
+		Expect(v1.LabelOptions()).ToNot(ContainElement(HaveField("Key", "edited")))
+		for _, o := range v1.LabelOptions() {
+			Expect(o.Aliases).ToNot(ContainElement("edited"))
+			Expect(o.DenyOn).ToNot(ContainElement(labels.Resource("edited")))
+			Expect(o.KnownValues).ToNot(ContainElement("edited"))
+		}
 	})
 })
