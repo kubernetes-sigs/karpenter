@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // These specs pin down offeringsToReserve's handling of a reserved offering whose ReservationCapacity is 0 once
@@ -454,6 +455,79 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 			Expect(results.NewNodeClaims).To(HaveLen(1))
 			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-has-cap"))
 			Expect(results.ReservedOfferingErrors()).To(HaveLen(1))
+		})
+	})
+
+	// https://github.com/kubernetes-sigs/karpenter/issues/3699: a reserved offering with a CapacityOverride has its own
+	// allocatable, so it must only be reserved when that allocatable fits the pod.
+	Context("strict (provisioning): a reserved offering with a capacity override", func() {
+		overrideType := func(id, cpu string) *cloudprovider.InstanceType {
+			it := fake.NewInstanceType("type-t", fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			}))
+			it.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			reserved := reservedOffering(id, true, 1)
+			reserved.CapacityOverride = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu)}
+			it.Offerings = append(it.Offerings, reserved)
+			return it
+		}
+		mixedNodePool := func() *v1.NodePool {
+			return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"type-t"}},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved, v1.CapacityTypeOnDemand}},
+				},
+			}}}})
+		}
+		fourCPUPod := func() *corev1.Pod {
+			return test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")},
+			}})
+		}
+		// fittingLaunchable counts the launchable offerings compatible with the NodeClaim from every allocatable group that
+		// fits its requests.
+		fittingLaunchable := func(nc *scheduling.NodeClaim) int {
+			count := 0
+			for _, it := range nc.InstanceTypeOptions {
+				for _, group := range it.AllocatableOfferingsList() {
+					if !resources.Fits(nc.Spec.Resources.Requests, group.Allocatable) {
+						continue
+					}
+					count += len(lo.Filter(group.Offerings, func(o *cloudprovider.Offering, _ int) bool {
+						return o.Launchable() && nc.Requirements.IsCompatible(o.Requirements, pscheduling.AllowUndefinedWellKnownLabels)
+					}))
+				}
+			}
+			return count
+		}
+
+		It("doesn't reserve an offering whose own allocatable can't hold the pod", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{overrideType("r-small", "2")}
+			ExpectApplied(ctx, env.Client, mixedNodePool())
+
+			pod := fourCPUPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			nc := results.NewNodeClaims[0]
+			Expect(nc.Requirements.Get(v1alpha1.LabelReservationID).Values()).To(BeEmpty())
+			Expect(nc.Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
+			Expect(fittingLaunchable(nc)).To(BeNumerically(">", 0))
+		})
+		It("reserves an offering whose own allocatable holds the pod (regression guard)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{overrideType("r-big", "6")}
+			ExpectApplied(ctx, env.Client, mixedNodePool())
+
+			pod := fourCPUPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			nc := results.NewNodeClaims[0]
+			Expect(nc.Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-big"))
+			Expect(fittingLaunchable(nc)).To(BeNumerically(">", 0))
 		})
 	})
 })
