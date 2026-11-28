@@ -66,9 +66,11 @@ type GateResult struct {
 	Metric string  `json:"metric"`
 	Value  float64 `json:"value"`
 	Bound  float64 `json:"bound"`
-	Upper  bool    `json:"upper"`
-	Tier   Tier    `json:"tier"`
-	Passed bool    `json:"passed"`
+	// Default is the bound registered in gates, before KARPENTER_PERF_THRESHOLDS overrides.
+	Default float64 `json:"default"`
+	Upper   bool    `json:"upper"`
+	Tier    Tier    `json:"tier"`
+	Passed  bool    `json:"passed"`
 }
 
 var gates = map[string][]Gate{
@@ -194,7 +196,7 @@ func evaluate(id string, r *PerformanceReport) ([]GateResult, error) {
 		}
 		v := g.Metric.Value(r)
 		results = append(results, GateResult{
-			Metric: g.Metric.Name, Value: v, Bound: bound, Upper: g.Metric.Upper, Tier: g.Tier,
+			Metric: g.Metric.Name, Value: v, Bound: bound, Default: g.Bound, Upper: g.Metric.Upper, Tier: g.Tier,
 			Passed: (g.Metric.Upper && v < bound) || (!g.Metric.Upper && v > bound),
 		})
 	}
@@ -213,6 +215,7 @@ func ExpectGates(r *PerformanceReport, id string) {
 	GinkgoHelper()
 	results, err := evaluate(id, r)
 	Expect(err).ToNot(HaveOccurred())
+	Expect(recordGates(id, results)).To(Succeed(), "writing performance gate results to OUTPUT_DIR")
 	var failed []string
 	for _, g := range results {
 		switch {
@@ -225,6 +228,13 @@ func ExpectGates(r *PerformanceReport, id string) {
 		default:
 			failed = append(failed, g.String())
 		}
+	}
+	if softThresholds() {
+		// Deferred to expectNoBreaches so the spec's later phases still run.
+		for _, f := range failed {
+			GinkgoWriter.Printf("gate FAIL %s: %s (deferred by PERF_SOFT_THRESHOLDS)\n", id, f)
+		}
+		return
 	}
 	Expect(failed).To(BeEmpty(), "%s breached stable performance gates", id)
 }
