@@ -17,6 +17,7 @@ limitations under the License.
 package v1_test
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/awslabs/operatorpkg/object"
@@ -143,10 +144,14 @@ var _ = Describe("Validation", func() {
 		It("should fail for restricted labels", func() {
 			for _, label := range labels.Denied(labels.NodeClaim) {
 				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
-					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+				Expect(env.Client.Create(ctx, nodeClaim)).To(MatchError(ContainSubstring(fmt.Sprintf("label %q is restricted on NodeClaim", label))))
 			}
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{Key: "example.com/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 		})
 		It("should allow kubernetes domains", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()

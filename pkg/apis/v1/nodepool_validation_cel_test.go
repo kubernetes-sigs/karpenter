@@ -522,11 +522,17 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail for restricted labels", func() {
 			for _, label := range labels.Denied(labels.NodePool) {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
-					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+				message := fmt.Sprintf("label %q is restricted on NodePool", label)
+				Expect(env.Client.Create(ctx, nodePool)).To(MatchError(ContainSubstring(message)))
+				Expect(nodePool.RuntimeValidate(ctx)).To(MatchError(ContainSubstring(message)))
 			}
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{Key: "example.com/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should allow kubernetes domains", func() {
 			oldNodePool := nodePool.DeepCopy()

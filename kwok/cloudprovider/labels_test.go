@@ -24,7 +24,9 @@ import (
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
@@ -103,6 +105,24 @@ var _ = Describe("LabelOptions", func() {
 			podRequirements := scheduling.NewPodRequirements(pod)
 			Expect(pscheduling.NewNodeClaimTemplate(nodePoolFor("a")).Requirements.Compatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels)).To(Succeed())
 			Expect(pscheduling.NewNodeClaimTemplate(nodePoolFor("b")).Requirements.Compatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels)).ToNot(Succeed())
+		})
+		It("should be rejected on NodePools by kwok's generated CRDs", func() {
+			nodePoolCRD := object.Unmarshal[apiextensionsv1.CustomResourceDefinition](lo.Must(os.ReadFile(filepath.Join("..", "charts", "crds", "karpenter.sh_nodepools.yaml"))))
+			env := test.NewEnvironment(test.WithCRDs(nodePoolCRD))
+			DeferCleanup(func() { Expect(env.Stop()).To(Succeed()) })
+			ctx := context.Background()
+
+			withLabel := test.NodePool()
+			withLabel.Spec.Template.Labels = map[string]string{v1alpha1.NodeClassLabelKey: "default"}
+			Expect(env.Client.Create(ctx, withLabel)).To(MatchError(ContainSubstring(`label "karpenter.kwok.sh/kwoknodeclass" is restricted on NodePool`)))
+			withRequirement := test.NodePool()
+			withRequirement.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{{Key: v1alpha1.NodeClassLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"default"}}}
+			Expect(env.Client.Create(ctx, withRequirement)).To(MatchError(ContainSubstring(`label "karpenter.kwok.sh/kwoknodeclass" is restricted on NodePool`)))
+			// Another kwok well-known key is admitted.
+			control := test.NodePool()
+			control.Spec.Template.Labels = map[string]string{v1alpha1.InstanceSizeLabelKey: "large"}
+			control.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{{Key: v1alpha1.InstanceSizeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"large"}}}
+			Expect(env.Client.Create(ctx, control)).To(Succeed())
 		})
 		It("should reject NodePools that use it", func() {
 			nodePool := test.NodePool()

@@ -31,6 +31,7 @@ package crdgen
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -309,3 +310,20 @@ func value(node *yaml.Node) string {
 }
 
 func str(s string) *yaml.Node { return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s} }
+
+// Main is the entry point of a repository's crdgen binary. It rewrites the label rules of the CRDs in the --base
+// directory from the union of policy, the binary's own label options, and the options of every provider whose
+// NodePools can share these CRDs, and writes them to the --out directory, which may be --base.
+func Main(policy []labels.Option, coInstalled ...[]labels.Option) {
+	base := flag.String("base", "", "directory of the input CRDs")
+	out := flag.String("out", "", "directory to write the CRDs to")
+	flag.Parse()
+	if *base == "" || *out == "" {
+		fmt.Fprintln(os.Stderr, "crdgen: --base and --out are required")
+		os.Exit(2)
+	}
+	if err := generate(*base, *out, policy, coInstalled...); err != nil {
+		fmt.Fprintf(os.Stderr, "crdgen: %v\n", err)
+		os.Exit(1)
+	}
+}
