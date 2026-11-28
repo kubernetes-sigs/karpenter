@@ -23,15 +23,20 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/kwok/options"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -66,14 +71,48 @@ type InstanceTypeOptions struct {
 //go:embed instance_types.json
 var defaultRawInstanceTypes []byte
 
-// ConstructInstanceTypes create many instance types based on the embedded instance type data
-func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
-	var instanceTypes []*cloudprovider.InstanceType
+// LabelOptions returns the kwok binary's label options: core's, with CapacityTypes as the known capacity types, then
+// kwok's own, then a key for each offering requirement key in the instance types file that isn't already registered.
+// The file is the one at instanceTypesFilePath, or the embedded one if it's empty, as in ConstructInstanceTypes. If the
+// file can't be read, no offering keys are added, and ConstructInstanceTypes reports the error. Offering keys that
+// aren't qualified names aren't registered either; ConstructInstanceTypes logs them.
+func LabelOptions(instanceTypesFilePath string) []labels.Option {
+	opts := v1.LabelOptions()
+	for i := range opts {
+		if opts[i].Key == v1.CapacityTypeLabelKey {
+			opts[i].KnownValues = CapacityTypes.CapacityTypes()
+		}
+	}
+	opts = append(opts, v1alpha1.LabelOptions()...)
+	instanceTypeOptions, err := readInstanceTypeOptions(instanceTypesFilePath)
+	if err != nil {
+		return opts
+	}
+	registered := sets.New[string]()
+	for _, o := range opts {
+		registered.Insert(o.Key)
+		registered.Insert(o.Aliases...)
+	}
+	for _, it := range instanceTypeOptions {
+		for _, offering := range it.Offerings {
+			for _, requirement := range offering.Requirements {
+				if !registered.Has(requirement.Key) && len(validation.IsQualifiedName(requirement.Key)) == 0 {
+					registered.Insert(requirement.Key)
+					opts = append(opts, labels.Option{Key: requirement.Key})
+				}
+			}
+		}
+	}
+	return opts
+}
+
+// readInstanceTypeOptions reads the instance types file at path, or the embedded one if path is empty.
+func readInstanceTypeOptions(path string) ([]InstanceTypeOptions, error) {
 	var instanceTypeOptions []InstanceTypeOptions
 
 	rawInstanceTypes := defaultRawInstanceTypes
-	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" {
-		customRawInstanceTypes, err := os.ReadFile(customInstanceTypes)
+	if path != "" {
+		customRawInstanceTypes, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("could not read custom instance types file: %w", err)
 		}
@@ -83,8 +122,25 @@ func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType,
 	if err := json.Unmarshal(rawInstanceTypes, &instanceTypeOptions); err != nil {
 		return nil, fmt.Errorf("could not parse JSON data: %w", err)
 	}
+	return instanceTypeOptions, nil
+}
+
+// ConstructInstanceTypes create many instance types based on the embedded instance type data
+func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
+	var instanceTypes []*cloudprovider.InstanceType
+	instanceTypeOptions, err := readInstanceTypeOptions(options.FromContext(ctx).InstanceTypesFilePath)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, opts := range instanceTypeOptions {
+		for _, offering := range opts.Offerings {
+			for _, requirement := range offering.Requirements {
+				if errs := validation.IsQualifiedName(requirement.Key); len(errs) != 0 {
+					log.FromContext(ctx).Info("offering requirement key isn't a qualified name, so it isn't registered as a well-known label", "instance-type", opts.Name, "key", requirement.Key, "reason", strings.Join(errs, "; "))
+				}
+			}
+		}
 		opts = setDefaultOptions(opts)
 		instanceTypes = append(instanceTypes, newInstanceType(opts))
 	}

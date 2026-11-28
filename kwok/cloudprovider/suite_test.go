@@ -38,12 +38,20 @@ import (
 	"sigs.k8s.io/karpenter/kwok/options"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 func TestKWOKCloudProvider(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "KWOK CloudProvider")
 }
+
+var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), kwok.LabelOptions("")...)
+	Expect(cloudprovider.SetCapacityTypeClassResolver(kwok.CapacityTypes)).To(Succeed())
+	DeferCleanup(test.ResetCapacityTypeClasses)
+})
 
 var _ = Describe("Delete", func() {
 	var ctx context.Context
