@@ -36,6 +36,8 @@ import (
 	cloudprovideroverlay "sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -569,7 +571,7 @@ var _ = Describe("Drift", func() {
 		const labelCapacityReservationType = "karpenter.test.sh/capacity-reservation-type"
 		BeforeEach(func() {
 			cloudprovider.ReservedCapacityLabels.Insert(labelCapacityReservationType)
-			v1.WellKnownLabels.Insert(labelCapacityReservationType)
+			labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: labelCapacityReservationType})...)
 			for _, o := range it.Offerings {
 				for label := range cloudprovider.ReservedCapacityLabels {
 					o.Requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpDoesNotExist))
@@ -594,7 +596,6 @@ var _ = Describe("Drift", func() {
 		})
 		AfterEach(func() {
 			cloudprovider.ReservedCapacityLabels.Delete(labelCapacityReservationType)
-			v1.WellKnownLabels.Delete(labelCapacityReservationType)
 		})
 		DescribeTable(
 			"InstanceTypeNotFound",
@@ -622,8 +623,7 @@ var _ = Describe("Drift", func() {
 	Context("Driver-mode labels", func() {
 		var modeIT *cloudprovider.InstanceType
 		BeforeEach(func() {
-			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: fake.DriverModeGPULabelKey}, labels.Option{Key: fake.DriverModeNICLabelKey})...)
 			modeIT = fake.DriverModeInstanceType("mode-it", 1, nil)
 			cp.InstanceTypes = []*cloudprovider.InstanceType{modeIT}
 			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{

@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -170,7 +170,7 @@ func nodeLabelNamesWithResourceType() []opmetrics.Label {
 
 func nodeLabelNames() []opmetrics.Label {
 	return append(
-		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
+		// The well-known labels include the nodepool label, so we don't need to add it as its own item here.
 		// If we do, prometheus will panic since there would be duplicate labels.
 		// The well-known labels are self-describing, so they are wrapped without help text.
 		lo.Map(sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(), func(l string, _ int) opmetrics.Label {
@@ -309,16 +309,16 @@ func getNodeLabels(n *state.StateNode) prometheus.Labels {
 }
 
 func getWellKnownLabels() map[string]string {
-	labels := make(map[string]string)
-	for wellKnownLabel := range v1.WellKnownLabels {
+	wellKnownLabels := make(map[string]string)
+	for wellKnownLabel := range labels.WellKnown() {
 		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
 			label := parts[1]
 			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)
 			label = strings.ReplaceAll(strings.ToLower(label), "-", "_")
-			labels[wellKnownLabel] = label
+			wellKnownLabels[wellKnownLabel] = label
 		}
 	}
-	return labels
+	return wellKnownLabels
 }
 
 func resourceNameToString(resourceName corev1.ResourceName) string {

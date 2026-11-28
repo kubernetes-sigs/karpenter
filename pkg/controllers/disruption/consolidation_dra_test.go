@@ -29,6 +29,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -312,8 +314,7 @@ var _ = Describe("Consolidation/DRA", func() {
 		}
 
 		BeforeEach(func() {
-			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: fake.DriverModeGPULabelKey}, labels.Option{Key: fake.DriverModeNICLabelKey})...)
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.DriverModeInstanceType("mode-it", 1, nil)}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", test.GPUDriver))
 		})

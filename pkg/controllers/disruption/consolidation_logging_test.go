@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -570,6 +571,13 @@ var _ = Describe("ConsolidationCandidate event", func() {
 var _ = Describe("launchCapacityType", func() {
 	const onDemandAlt = "on-demand-alt"
 	BeforeEach(func() {
+		opts := fake.LabelOptions()
+		for i := range opts {
+			if opts[i].Key == v1.CapacityTypeLabelKey {
+				opts[i].KnownValues = append(opts[i].KnownValues, onDemandAlt)
+			}
+		}
+		labelstest.Register(GinkgoTB(), opts...)
 		Expect(cloudprovider.SetCapacityTypeClassResolver(cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{
 			onDemandAlt: cloudprovider.CapacityTypeClassOnDemand,
 		}))).To(Succeed())

@@ -27,7 +27,10 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 )
@@ -132,8 +135,7 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		}
 
 		BeforeEach(func() {
-			v1.WellKnownLabels.Insert(modeKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(modeKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: modeKey})...)
 			it = &cloudprovider.InstanceType{
 				Name: "it-1",
 				Offerings: cloudprovider.Offerings{

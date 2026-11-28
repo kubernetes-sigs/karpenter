@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
@@ -705,6 +706,17 @@ var _ = Describe("Requirements", func() {
 			)
 
 			Expect(reqs.String()).To(Equal("doesNotExist DoesNotExist, exists Exists, greaterThan1 Exists >=2, greaterThan9 Exists >=10, in1 In [1], in19 In [1 9], in9 In [9], inA In [A], inAB In [A B], inB In [B], lessThan1 Exists <=0, lessThan9 Exists <=8, notIn12 NotIn [1 2], notInA NotIn [A]"))
+		})
+		It("should skip restricted keys, and only those", func() {
+			labelstest.Register(GinkgoTB(), labelstest.With(v1.LabelOptions(),
+				labels.Option{Key: "example.com/denied-on-nodeclaim", DenyOn: []labels.Resource{labels.NodeClaim}},
+				labels.Option{Key: "example.com/restricted", DenyOn: labels.All()},
+			)...)
+			reqs := NewRequirements(
+				NewRequirement("example.com/denied-on-nodeclaim", corev1.NodeSelectorOpIn, "a"),
+				NewRequirement("example.com/restricted", corev1.NodeSelectorOpIn, "a"),
+			)
+			Expect(reqs.String()).To(Equal("example.com/denied-on-nodeclaim In [a]"))
 		})
 	})
 })

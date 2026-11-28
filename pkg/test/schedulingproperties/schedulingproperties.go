@@ -60,6 +60,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	karplabels "sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -88,9 +89,6 @@ type Config struct {
 	// Launch returns the NodeClaim launched for a scheduled NodeClaim whose instance type requirement names a single
 	// instance type, e.g. CloudProvider.Create. Its labels, taints, and allocatable are judged as the node.
 	Launch func(context.Context, *v1.NodeClaim) (*v1.NodeClaim, error)
-	// RestrictedLabelDomains are added to v1.RestrictedLabelDomains while checking, as real providers do for their
-	// own domains.
-	RestrictedLabelDomains []string
 	// KnownDeviations are label keys the generator doesn't constrain while a deviation is open. Each entry needs a
 	// comment above it linking the open issue, so the entry is removed when the issue is fixed.
 	KnownDeviations sets.Set[string]
@@ -103,7 +101,7 @@ type Config struct {
 // operator options.
 func ExpectSatisfiablePodsArePlaced(ctx context.Context, t TB, cfg Config) {
 	t.Helper()
-	defer setup(&cfg)()
+	setup(&cfg)
 	check(t, cfg, func(rt *caseT) {
 		s := drawScenario(rt, cfg, true)
 		results, prov := solve(ctx, rt, cfg, s)
@@ -132,7 +130,7 @@ func ExpectSatisfiablePodsArePlaced(ctx context.Context, t TB, cfg Config) {
 // keeps the NodePool's minValues unless the BestEffort policy relaxed them. ctx must carry operator options.
 func ExpectPlacementsFitNodes(ctx context.Context, t TB, cfg Config) {
 	t.Helper()
-	defer setup(&cfg)()
+	setup(&cfg)
 	check(t, cfg, func(rt *caseT) {
 		s := drawScenario(rt, cfg, false)
 		results, _ := solve(ctx, rt, cfg, s)
@@ -145,7 +143,7 @@ func ExpectPlacementsFitNodes(ctx context.Context, t TB, cfg Config) {
 // their NodeClaims, or which pods fail. ctx must carry operator options.
 func ExpectEquivalentPodsScheduleAlike(ctx context.Context, t TB, cfg Config) {
 	t.Helper()
-	defer setup(&cfg)()
+	setup(&cfg)
 	check(t, cfg, func(rt *caseT) {
 		s := drawScenario(rt, cfg, false)
 		// Karpenter breaks ties between topology domains in map order, so pods with pod affinity, anti-affinity, or
@@ -166,13 +164,9 @@ func ExpectEquivalentPodsScheduleAlike(ctx context.Context, t TB, cfg Config) {
 	})
 }
 
-// setup filters out instance types that can't launch and adds cfg's restricted label domains, returning a func that
-// removes them. Checks therefore can't run in parallel with tests that read v1.RestrictedLabelDomains.
-func setup(cfg *Config) func() {
+// setup filters out instance types that can't launch.
+func setup(cfg *Config) {
 	cfg.InstanceTypes = lo.Filter(cfg.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) bool { return len(it.Offerings.Available()) > 0 })
-	added := lo.Filter(cfg.RestrictedLabelDomains, func(d string, _ int) bool { return !v1.RestrictedLabelDomains.Has(d) })
-	v1.RestrictedLabelDomains.Insert(added...)
-	return func() { v1.RestrictedLabelDomains.Delete(added...) }
 }
 
 // scenario is one generated case: a NodePool, its instance types, and the pods to schedule.
@@ -1063,7 +1057,8 @@ func excludedValue(t *caseT, value string, others []string, miss bool) string {
 // when any required term has only unknown values for a key with well known values, even if another term is valid.
 // See #2230.
 func otherValue(key, value string) string {
-	if known := sets.List(v1.WellKnownValuesForRequirements[key].Clone().Delete(value)); len(known) > 0 {
+	knownValues, _ := karplabels.KnownValues(key)
+	if known := sets.List(knownValues.Clone().Delete(value)); len(known) > 0 {
 		return known[0]
 	}
 	return unmatchedValue

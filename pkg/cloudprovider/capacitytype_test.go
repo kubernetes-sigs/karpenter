@@ -27,6 +27,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -45,14 +47,34 @@ func offering(capacityType string, price float64) *cloudprovider.Offering {
 	}
 }
 
+// optionsWithAlt returns core's label options with on-demand-alt as a known capacity type, as a provider that
+// registers it must.
+func optionsWithAlt() []labels.Option {
+	opts := v1.LabelOptions()
+	for i := range opts {
+		if opts[i].Key == v1.CapacityTypeLabelKey {
+			opts[i].KnownValues = append(opts[i].KnownValues, onDemandAlt)
+		}
+	}
+	return opts
+}
+
 var _ = Describe("CapacityTypeClasses", func() {
 	withAlt := cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{onDemandAlt: cloudprovider.CapacityTypeClassOnDemand})
+	useAlt := func() {
+		labelstest.Register(GinkgoTB(), optionsWithAlt()...)
+		Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+	}
 
+	// Other specs in the package build and cache the default state; start each spec from the unset state.
+	BeforeEach(func() {
+		test.ResetCapacityTypeClasses()
+	})
 	AfterEach(func() {
 		test.ResetCapacityTypeClasses()
 	})
 
-	It("should resolve the built-in capacity types by default", func() {
+	It("should resolve the built-in capacity types when no resolver was set", func() {
 		for _, ct := range []string{v1.CapacityTypeReserved, v1.CapacityTypeSpot, v1.CapacityTypeOnDemand} {
 			class, ok := cloudprovider.CapacityTypeClassOf(ct)
 			Expect(ok).To(BeTrue())
@@ -60,36 +82,49 @@ var _ = Describe("CapacityTypeClasses", func() {
 		}
 		_, ok := cloudprovider.CapacityTypeClassOf(onDemandAlt)
 		Expect(ok).To(BeFalse())
-		Expect(v1.WellKnownValuesForRequirements[v1.CapacityTypeLabelKey].UnsortedList()).To(ConsistOf(v1.CapacityTypeReserved, v1.CapacityTypeSpot, v1.CapacityTypeOnDemand))
+	})
+	It("should fail on first use when an extra capacity type is a known value but no resolver was set", func() {
+		labelstest.Register(GinkgoTB(), optionsWithAlt()...)
+		Expect(func() { cloudprovider.CapacityTypeClassOf(v1.CapacityTypeSpot) }).To(PanicWith(ContainSubstring("must be the registered karpenter.sh/capacity-type known values")))
 	})
 	It("should register an additional on-demand class capacity type", func() {
-		Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+		useAlt()
 		class, ok := cloudprovider.CapacityTypeClassOf(onDemandAlt)
 		Expect(ok).To(BeTrue())
 		Expect(class).To(Equal(cloudprovider.CapacityTypeClassOnDemand))
 		Expect(cloudprovider.CapacityTypesOf(cloudprovider.CapacityTypeClassOnDemand)).To(Equal([]string{v1.CapacityTypeOnDemand, onDemandAlt}))
 		Expect(cloudprovider.CapacityTypesOf(cloudprovider.CapacityTypeClassSpot)).To(Equal([]string{v1.CapacityTypeSpot}))
-		Expect(v1.WellKnownValuesForRequirements[v1.CapacityTypeLabelKey].Has(onDemandAlt)).To(BeTrue())
 	})
 	It("should restore the built-in capacity types on reset", func() {
-		Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+		useAlt()
+		// The built-in capacity types are checked against the registered known values on first use after the reset.
+		labelstest.Register(GinkgoTB(), v1.LabelOptions()...)
 		test.ResetCapacityTypeClasses()
 		_, ok := cloudprovider.CapacityTypeClassOf(onDemandAlt)
 		Expect(ok).To(BeFalse())
-		Expect(v1.WellKnownValuesForRequirements[v1.CapacityTypeLabelKey].Has(onDemandAlt)).To(BeFalse())
 	})
 	DescribeTable("should reject invalid resolvers",
-		func(classes cloudprovider.CapacityTypeClasses) {
-			Expect(cloudprovider.SetCapacityTypeClassResolver(classes)).ToNot(Succeed())
+		func(classes cloudprovider.CapacityTypeClasses, message string) {
+			Expect(cloudprovider.SetCapacityTypeClassResolver(classes)).To(MatchError(ContainSubstring(message)))
 			_, ok := cloudprovider.CapacityTypeClassOf(onDemandAlt)
 			Expect(ok).To(BeFalse())
 		},
-		Entry("an additional capacity type outside the on-demand class", cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{onDemandAlt: cloudprovider.CapacityTypeClassSpot})),
-		Entry("a built-in capacity type in another class", cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{v1.CapacityTypeSpot: cloudprovider.CapacityTypeClassOnDemand, onDemandAlt: cloudprovider.CapacityTypeClassOnDemand})),
-		Entry("a missing built-in capacity type", cloudprovider.CapacityTypeClasses{v1.CapacityTypeOnDemand: cloudprovider.CapacityTypeClassOnDemand, onDemandAlt: cloudprovider.CapacityTypeClassOnDemand}),
+		Entry("an additional capacity type outside the on-demand class", cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{onDemandAlt: cloudprovider.CapacityTypeClassSpot}), `capacity type "on-demand-alt" must resolve to class "on-demand", got "spot"`),
+		Entry("a built-in capacity type in another class", cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{v1.CapacityTypeSpot: cloudprovider.CapacityTypeClassOnDemand, onDemandAlt: cloudprovider.CapacityTypeClassOnDemand}), `capacity type "spot" must resolve to class "spot"`),
+		// Both built-in capacity types are missing; which one is reported depends on map order.
+		Entry("a missing built-in capacity type", cloudprovider.CapacityTypeClasses{v1.CapacityTypeOnDemand: cloudprovider.CapacityTypeClassOnDemand, onDemandAlt: cloudprovider.CapacityTypeClassOnDemand}, `must resolve to class`),
 	)
+	It("should reject a resolver with a capacity type that isn't a registered known value", func() {
+		Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(MatchError(ContainSubstring("must be the registered karpenter.sh/capacity-type known values")))
+		_, ok := cloudprovider.CapacityTypeClassOf(onDemandAlt)
+		Expect(ok).To(BeFalse())
+	})
+	It("should reject a resolver without a registered known value", func() {
+		labelstest.Register(GinkgoTB(), optionsWithAlt()...)
+		Expect(cloudprovider.SetCapacityTypeClassResolver(cloudprovider.DefaultCapacityTypeClasses)).To(MatchError(ContainSubstring("must be the registered karpenter.sh/capacity-type known values")))
+	})
 	It("should report whether a requirement allows a class", func() {
-		Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+		useAlt()
 		alt := scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, onDemandAlt)
 		Expect(cloudprovider.HasCapacityTypeClass(alt, cloudprovider.CapacityTypeClassOnDemand)).To(BeTrue())
 		Expect(cloudprovider.HasCapacityTypeClass(alt, cloudprovider.CapacityTypeClassSpot)).To(BeFalse())
@@ -99,18 +134,18 @@ var _ = Describe("CapacityTypeClasses", func() {
 	})
 	Context("WorstLaunchPrice", func() {
 		It("should price a requirement that only allows an additional capacity type by its offerings", func() {
-			Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+			useAlt()
 			ofs := cloudprovider.Offerings{offering(v1.CapacityTypeOnDemand, 1.0), offering(onDemandAlt, 0.8)}
 			reqs := scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, onDemandAlt))
 			Expect(ofs.WorstLaunchPrice(reqs)).To(Equal(0.8))
 		})
 		It("should price the on-demand class by its most expensive capacity type", func() {
-			Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+			useAlt()
 			ofs := cloudprovider.Offerings{offering(v1.CapacityTypeOnDemand, 1.0), offering(onDemandAlt, 0.8)}
 			Expect(ofs.WorstLaunchPrice(scheduling.NewRequirements())).To(Equal(1.0))
 		})
 		It("should keep spot ahead of the on-demand class", func() {
-			Expect(cloudprovider.SetCapacityTypeClassResolver(withAlt)).To(Succeed())
+			useAlt()
 			ofs := cloudprovider.Offerings{offering(v1.CapacityTypeSpot, 0.3), offering(onDemandAlt, 0.8)}
 			Expect(ofs.WorstLaunchPrice(scheduling.NewRequirements())).To(Equal(0.3))
 		})

@@ -22,9 +22,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
-// ResetCapacityTypeClasses restores the built-in capacity types, undoing cloudprovider.SetCapacityTypeClassResolver.
+// ResetCapacityTypeClasses undoes cloudprovider.SetCapacityTypeClassResolver, so the built-in capacity types apply
+// again. It doesn't read the label registry; the built-in capacity types are checked against it on first use.
 func ResetCapacityTypeClasses() {
-	lo.Must0(cloudprovider.SetCapacityTypeClassResolver(cloudprovider.DefaultCapacityTypeClasses))
+	lo.Must0(cloudprovider.SetCapacityTypeClassResolver(nil))
 }
 
 // ResetNodeClaimPriceProvider restores the default NodeClaim pricing, undoing cloudprovider.SetNodeClaimPriceProvider.

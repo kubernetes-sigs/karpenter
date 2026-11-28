@@ -24,6 +24,7 @@ import (
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
@@ -102,6 +103,15 @@ var _ = Describe("LabelOptions", func() {
 			podRequirements := scheduling.NewPodRequirements(pod)
 			Expect(pscheduling.NewNodeClaimTemplate(nodePoolFor("a")).Requirements.Compatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels)).To(Succeed())
 			Expect(pscheduling.NewNodeClaimTemplate(nodePoolFor("b")).Requirements.Compatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels)).ToNot(Succeed())
+		})
+		It("should reject NodePools that use it", func() {
+			nodePool := test.NodePool()
+			nodePool.Spec.Template.Labels = map[string]string{v1alpha1.NodeClassLabelKey: "default"}
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{{Key: v1alpha1.NodeClassLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"default"}}}
+			Expect(nodePool.RuntimeValidate(context.Background())).To(MatchError(And(
+				ContainSubstring(`invalid key name "karpenter.kwok.sh/kwoknodeclass" in labels`),
+				ContainSubstring(`label "karpenter.kwok.sh/kwoknodeclass" is restricted on NodePool in requirements`),
+			)))
 		})
 	})
 })

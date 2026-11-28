@@ -42,8 +42,6 @@ import (
 )
 
 func init() {
-	v1.WellKnownLabels = v1.WellKnownLabels.Insert(v1alpha1.LabelReservationID)
-	cloudprovider.ReservationIDLabel = v1alpha1.LabelReservationID
 	cloudprovider.ReservedCapacityLabels.Insert(v1alpha1.LabelReservationID)
 }
 

@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
@@ -132,7 +133,7 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should fail for restricted domains", func() {
-			for label := range RestrictedLabelDomains {
+			for _, label := range labels.Domains() {
 				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -140,7 +141,7 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should fail for restricted labels", func() {
-			for label := range RestrictedLabels {
+			for _, label := range labels.Denied(labels.NodeClaim) {
 				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -171,7 +172,7 @@ var _ = Describe("Validation", func() {
 		})
 		It("should allow well known label exceptions", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()
-			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
+			for label := range labels.WellKnown().Difference(sets.New(labels.Denied(labels.NodeClaim)...)) {
 				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}

@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	"sigs.k8s.io/karpenter/kwok/apis"
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/labels"
 )
 
@@ -53,14 +52,4 @@ func LabelOptions() []labels.Option {
 		{Key: InstanceCPULabelKey},
 		{Key: InstanceMemoryLabelKey},
 	}
-}
-
-func init() {
-	v1.RestrictedLabelDomains = v1.RestrictedLabelDomains.Insert(apis.Group)
-	v1.WellKnownLabels = v1.WellKnownLabels.Insert(
-		InstanceSizeLabelKey,
-		InstanceFamilyLabelKey,
-		InstanceCPULabelKey,
-		InstanceMemoryLabelKey,
-	)
 }

@@ -55,6 +55,7 @@ import (
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -677,7 +678,7 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 					Key:      requirement.Key,
 					Operator: requirement.Operator,
 					Values:   requirement.Values,
-				}))
+				}, labels.Pod))
 		}
 	}
 	return errs

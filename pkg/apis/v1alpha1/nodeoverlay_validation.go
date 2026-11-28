@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 )
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
@@ -31,12 +32,11 @@ func (in *NodeOverlay) RuntimeValidate(ctx context.Context) error {
 	return multierr.Combine(in.Spec.validateRequirements(ctx), in.Spec.validateCapacity())
 }
 
-// This function is used by the NodeOverlay validation webhook to verify the nodeoverlay requirements.
-// When this function is called, the nodeoverlay's requirements do not include the requirements from labels.
-// NodeOverlay requirements only support well known labels.
+// validateRequirements is used by NodeOverlay runtime validation to verify the NodeOverlay's requirements against
+// labels.NodeOverlay.
 func (in *NodeOverlaySpec) validateRequirements(ctx context.Context) (errs error) {
 	for _, requirement := range in.Requirements {
-		if err := v1.ValidateRequirement(ctx, v1.NodeSelectorRequirementWithMinValues{Key: requirement.Key, Operator: requirement.Operator, Values: requirement.Values}); err != nil {
+		if err := v1.ValidateRequirement(ctx, v1.NodeSelectorRequirementWithMinValues{Key: requirement.Key, Operator: requirement.Operator, Values: requirement.Values}, labels.NodeOverlay); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in requirements, restricted", err))
 		}
 		if requirement.Operator == corev1.NodeSelectorOpNotIn && len(requirement.Values) == 0 {

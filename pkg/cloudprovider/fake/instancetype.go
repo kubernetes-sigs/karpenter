@@ -53,14 +53,6 @@ const (
 	ResourceDevicePluginNIC corev1.ResourceName = "example.com/nic"
 )
 
-func init() {
-	v1.WellKnownLabels.Insert(
-		LabelInstanceSize,
-		ExoticInstanceLabelKey,
-		IntegerInstanceLabelKey,
-	)
-}
-
 type InstanceTypeOptions = option.Function[InstanceTypeConfig]
 
 type InstanceTypeConfig struct {
