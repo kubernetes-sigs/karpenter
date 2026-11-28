@@ -1,0 +1,71 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nodepools.karpenter.sh
+spec:
+  group: karpenter.sh
+  names:
+    kind: NodePool
+    listKind: NodePoolList
+    plural: nodepools
+    singular: nodepool
+  scope: Cluster
+  versions:
+    - name: v1
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                template:
+                  type: object
+                  properties:
+                    metadata:
+                      type: object
+                      properties:
+                        labels:
+                          type: object
+                          additionalProperties:
+                            type: string
+                            maxLength: 63
+                          maxProperties: 100
+                          x-kubernetes-validations:
+                            - message: label domain "eks.example.com" is restricted
+                              rule: self.all(x, !x.contains("/") || x in ["eks.example.com/nodeclass", "eks.example.com/zone-id"] || !(x.find("^([^/]+)") == "eks.example.com" || x.find("^([^/]+)").endsWith(".eks.example.com")))
+                            - message: label domain "oss.example.com" is restricted
+                              rule: self.all(x, !x.contains("/") || x in ["oss.example.com/nodeclass", "oss.example.com/zone-id"] || !(x.find("^([^/]+)") == "oss.example.com" || x.find("^([^/]+)").endsWith(".oss.example.com")))
+                            - message: label "eks.example.com/nodeclass" is restricted on NodePool
+                              rule: self.all(x, x != "eks.example.com/nodeclass")
+                            - message: label "oss.example.com/nodeclass" is restricted on NodePool
+                              rule: self.all(x, x != "oss.example.com/nodeclass")
+                    spec:
+                      type: object
+                      properties:
+                        requirements:
+                          type: array
+                          maxItems: 100
+                          items:
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                                maxLength: 316
+                                x-kubernetes-validations:
+                                  - message: label domain "eks.example.com" is restricted
+                                    rule: '!self.contains("/") || self in ["eks.example.com/nodeclass", "eks.example.com/zone-id"] || !(self.find("^([^/]+)") == "eks.example.com" || self.find("^([^/]+)").endsWith(".eks.example.com"))'
+                                  - message: label domain "oss.example.com" is restricted
+                                    rule: '!self.contains("/") || self in ["oss.example.com/nodeclass", "oss.example.com/zone-id"] || !(self.find("^([^/]+)") == "oss.example.com" || self.find("^([^/]+)").endsWith(".oss.example.com"))'
+                                  - message: label "eks.example.com/nodeclass" is restricted on NodePool
+                                    rule: self != "eks.example.com/nodeclass"
+                                  - message: label "oss.example.com/nodeclass" is restricted on NodePool
+                                    rule: self != "oss.example.com/nodeclass"
+                              operator:
+                                type: string
+                            required:
+                              - key
+                              - operator
+      served: true
+      storage: true

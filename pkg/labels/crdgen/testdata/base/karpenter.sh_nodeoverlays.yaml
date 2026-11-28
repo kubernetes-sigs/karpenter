@@ -1,0 +1,38 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nodeoverlays.karpenter.sh
+spec:
+  group: karpenter.sh
+  names:
+    kind: NodeOverlay
+    listKind: NodeOverlayList
+    plural: nodeoverlays
+    singular: nodeoverlay
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                requirements:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        maxLength: 316
+                      operator:
+                        type: string
+                    required:
+                      - key
+                      - operator
+      served: true
+      storage: true
