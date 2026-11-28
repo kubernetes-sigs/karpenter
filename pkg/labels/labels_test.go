@@ -168,6 +168,7 @@ var _ = Describe("Reads before Register", func() {
 		},
 		Entry("Validate", func() { _ = labels.Validate("example.com/key", labels.Pod) }),
 		Entry("IsWellKnown", func() { labels.IsWellKnown("example.com/key") }),
+		Entry("IsRestricted", func() { labels.IsRestricted("example.com/key") }),
 		Entry("WellKnown", func() { labels.WellKnown() }),
 		Entry("KnownValues", func() { labels.KnownValues("example.com/key") }),
 		Entry("Normalize", func() { labels.Normalize("example.com/key") }),
@@ -245,6 +246,8 @@ var _ = Describe("Semantics", func() {
 	Context("well-known and restricted keys", func() {
 		It("should treat a key denied on every resource as restricted, not well-known", func() {
 			Expect(labels.IsWellKnown(restrictedKey)).To(BeFalse())
+			Expect(labels.IsRestricted(restrictedKey)).To(BeTrue())
+			Expect(labels.IsRestricted("example.com/unregistered")).To(BeFalse())
 			Expect(labels.WellKnown().Has(restrictedKey)).To(BeFalse())
 			for _, r := range labels.All() {
 				Expect(labels.Validate(restrictedKey, r)).To(HaveOccurred(), string(r))
@@ -253,6 +256,7 @@ var _ = Describe("Semantics", func() {
 		})
 		It("should treat a key denied on some resources as well-known", func() {
 			Expect(labels.IsWellKnown(deniedOnPool)).To(BeTrue())
+			Expect(labels.IsRestricted(deniedOnPool)).To(BeFalse())
 		})
 		It("should report every other registered key, and no alias, as well-known", func() {
 			Expect(labels.WellKnown()).To(Equal(sets.New(registered, deniedOnPool, canonical)))

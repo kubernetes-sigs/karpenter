@@ -83,6 +83,12 @@ var _ = Describe("labelstest", func() {
 		Expect(bound).To(Equal("example.com/outer"))
 		Expect(labels.IsWellKnown("example.com/outer")).To(BeTrue())
 	})
+	It("should append extra options to a copy of base", func() {
+		base := make([]labels.Option, 1, 2)
+		base[0] = labels.Option{Key: "example.com/base"}
+		Expect(labelstest.With(base, labels.Option{Key: "example.com/extra"})).To(Equal([]labels.Option{{Key: "example.com/base"}, {Key: "example.com/extra"}}))
+		Expect(base[:cap(base)]).To(Equal([]labels.Option{{Key: "example.com/base"}, {}}))
+	})
 	It("should reset the registry and restore binds", func() {
 		Expect(labels.Register(labels.Option{Key: "example.com/key", Binds: []*string{&bound}})).To(Succeed())
 		labelstest.Reset()

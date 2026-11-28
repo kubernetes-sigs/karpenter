@@ -66,6 +66,7 @@ type Registry struct {
 	aliases   map[string]string // alias -> registered key
 	domains   []domain          // sorted by name
 	wellKnown sets.Set[string]
+	restrict  sets.Set[string] // registered keys denied on every resource
 }
 
 type key struct {
@@ -90,7 +91,7 @@ type builder struct {
 // New validates opts and builds a registry from them. It writes no binds.
 func New(opts []Option) (*Registry, error) {
 	b := builder{
-		registry: &Registry{keys: map[string]*key{}, aliases: map[string]string{}, wellKnown: sets.New[string]()},
+		registry: &Registry{keys: map[string]*key{}, aliases: map[string]string{}, wellKnown: sets.New[string](), restrict: sets.New[string]()},
 		names:    map[string]string{},
 		domains:  sets.New[string](),
 		binds:    sets.New[*string](),
@@ -183,7 +184,9 @@ func (b *builder) addKey(o Option) error {
 	for _, alias := range o.Aliases {
 		b.registry.aliases[alias] = o.Key
 	}
-	if !k.denyOn.IsSuperset(all) {
+	if k.denyOn.IsSuperset(all) {
+		b.registry.restrict.Insert(o.Key)
+	} else {
 		b.registry.wellKnown.Insert(o.Key)
 	}
 	return nil
@@ -260,6 +263,9 @@ func (r *Registry) Validate(k string, res Resource) error {
 
 // WellKnown implements labels.WellKnown.
 func (r *Registry) WellKnown() sets.Set[string] { return r.wellKnown }
+
+// IsRestricted implements labels.IsRestricted.
+func (r *Registry) IsRestricted(k string) bool { return r.restrict.Has(k) }
 
 // KnownValues implements labels.KnownValues.
 func (r *Registry) KnownValues(k string) (sets.Set[string], bool) {

@@ -136,6 +136,12 @@ func WellKnown() sets.Set[string] {
 	return current().WellKnown()
 }
 
+// IsRestricted returns whether key is registered and denied on every resource. Restricted keys aren't well-known;
+// Requirements.String and NodeClaim label stamping skip them.
+func IsRestricted(key string) bool {
+	return current().IsRestricted(key)
+}
+
 // KnownValues returns the closed value set registered for key, if any. The set is shared and sealed; callers must
 // not mutate it.
 func KnownValues(key string) (sets.Set[string], bool) {

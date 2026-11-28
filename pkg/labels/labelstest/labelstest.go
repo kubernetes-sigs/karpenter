@@ -18,6 +18,7 @@ limitations under the License.
 package labelstest
 
 import (
+	"slices"
 	"testing"
 
 	"sigs.k8s.io/karpenter/pkg/labels"
@@ -38,6 +39,12 @@ func Register(t testing.TB, opts ...labels.Option) {
 	if err := labels.Register(opts...); err != nil {
 		t.Fatalf("registering labels: %v", err)
 	}
+}
+
+// With returns base followed by extra, for tests that register their own keys on top of a provider's options. base
+// isn't modified.
+func With(base []labels.Option, extra ...labels.Option) []labels.Option {
+	return append(slices.Clone(base), extra...)
 }
 
 // Reset clears the registry and restores every bound var to the value it held before it was bound, for suites
