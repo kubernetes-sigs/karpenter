@@ -115,7 +115,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 test: ## Run tests
-	go test ./pkg/... ./kwok/... \
+	go test ./pkg/... ./kwok/... ./hack/tools/labelsbind/... \
 		-race \
 		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
@@ -193,6 +193,7 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
 	go tool -modfile=go.tools.mod nwa config -c add
 	go vet ./...
+	go run ./hack/tools/labelsbind/cmd/labelsbind ./...
 	go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
 	cd kwok/charts && go tool -modfile=../../go.tools.mod helm-docs
 	@git diff --quiet ||\

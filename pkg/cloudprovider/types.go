@@ -52,6 +52,7 @@ var (
 	// ReservationIDLabel is a label injected into a reserved offering's requirements which is used to uniquely identify a
 	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
 	// requirement is used to inform the scheduler that a reservation for one should affect the other.
+	// +labels:bound
 	ReservationIDLabel string
 
 	// ReservedCapacityLabels is the set of additional labels that are associated with reserved offerings. Each reserved
