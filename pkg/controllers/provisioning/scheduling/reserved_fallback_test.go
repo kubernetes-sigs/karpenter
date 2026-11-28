@@ -456,4 +456,175 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 			Expect(results.ReservedOfferingErrors()).To(HaveLen(1))
 		})
 	})
+
+	// https://github.com/kubernetes-sigs/karpenter/issues/3698: FinalizeScheduling pins a NodeClaim that holds a
+	// reservation to capacity-type=reserved and its reservation IDs.
+	// Instance types without an offering in those reservations can't launch after the pin, so they must not count
+	// toward minValues.
+	Context("minValues and the final reservation pin", func() {
+		onDemand := cloudprovider.Offering{
+			Available:  true,
+			Compatible: true,
+			Price:      1,
+			Requirements: pscheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone: "test-zone-1",
+			}),
+		}
+		minValuesNodePool := func(capacityTypes ...string) *v1.NodePool {
+			return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"type-a", "type-b"}, MinValues: new(2)},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: capacityTypes},
+				},
+			}}}})
+		}
+		// launchable returns the names of the NodeClaim's instance types that still have a launchable offering under its
+		// final requirements.
+		launchable := func(nc *scheduling.NodeClaim) []string {
+			return lo.FilterMap(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) (string, bool) {
+				return it.Name, it.Offerings.Launchable().HasCompatible(nc.Requirements)
+			})
+		}
+
+		It("drops reserved capacity when the pin can't meet minValues", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-a", true, 1), onDemand)),
+				fake.NewInstanceType("type-b", fake.WithOfferings(onDemand)),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+			results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			nc := results.NewNodeClaims[0]
+			Expect(nc.Requirements.Get(v1alpha1.LabelReservationID).Values()).To(BeEmpty())
+			// The NodeClaim holds no reservation slot, so it must not be able to launch into the reservation either.
+			Expect(nc.Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved)).To(BeFalse())
+			Expect(launchable(nc)).To(ConsistOf("type-a", "type-b"))
+		})
+		It("fails when neither the pin nor on-demand meets minValues", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-a", true, 1))),
+				fake.NewInstanceType("type-b", fake.WithOfferings(onDemand)),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+			results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+
+			// Pinned, only type-a can launch.
+			// Unpinned without reserved capacity, only type-b can launch.
+			Expect(results.NewNodeClaims).To(HaveLen(0))
+			Expect(results.PodErrors).To(HaveKey(pod))
+			Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
+		})
+		It("counts a credited full reservation toward minValues", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-full", true, 0))),
+				fake.NewInstanceType("type-b", fake.WithOfferings(*reservedOffering("r-b", true, 1))),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity("r-full", 1))
+			results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-full", "r-b"))
+		})
+		It("keeps the pin when the reservations cover minValues (regression guard)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-a", true, 1), onDemand)),
+				fake.NewInstanceType("type-b", fake.WithOfferings(*reservedOffering("r-b", true, 1), onDemand)),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+			results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			nc := results.NewNodeClaims[0]
+			Expect(nc.Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-a", "r-b"))
+			Expect(launchable(nc)).To(ConsistOf("type-a", "type-b"))
+		})
+		It("keeps the pin under a BestEffort MinValuesPolicy", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-a", true, 1))),
+				fake.NewInstanceType("type-b", fake.WithOfferings(onDemand)),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback, scheduling.MinValuesPolicy(options.MinValuesPolicyBestEffort))
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-a"))
+		})
+		It("adds later pods to the pinned NodeClaim under BestEffort", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-a", true, 1))),
+				fake.NewInstanceType("type-b", fake.WithOfferings(onDemand)),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			// Both pods fit on one node, so the second pod joins the in-flight NodeClaim.
+			pods := []*corev1.Pod{smallPod(), smallPod()}
+			results := solveWith(pods, scheduling.DisableReservedCapacityFallback, scheduling.MinValuesPolicy(options.MinValuesPolicyBestEffort))
+
+			Expect(results.PodErrors).To(BeEmpty())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Pods).To(HaveLen(2))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-a"))
+		})
+		It("ignores an instance type that fits only through its reservation", func() {
+			slots := corev1.ResourceName("test.com/slots")
+			withSlots := func(o cloudprovider.Offering) cloudprovider.Offering {
+				o.CapacityOverride = corev1.ResourceList{slots: resource.MustParse("4")}
+				return o
+			}
+			// type-a has slots only through its reservation, and type-b has slots on-demand.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(withSlots(*reservedOffering("r-a", true, 1)), onDemand)),
+				fake.NewInstanceType("type-b", fake.WithOfferings(withSlots(onDemand))),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{slots: resource.MustParse("1")},
+				Limits:   corev1.ResourceList{slots: resource.MustParse("1")},
+			}})
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+			results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+
+			// Pinned, only type-a can launch.
+			// Without reserved capacity, only type-b fits the pod.
+			Expect(results.NewNodeClaims).To(HaveLen(0))
+			Expect(results.PodErrors).To(HaveKey(pod))
+		})
+		It("fails instead of pinning when there is no unreserved fallback", func() {
+			// type-b only offers a full reservation, so the reserved-only NodePool has nothing to fall back to.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("type-a", fake.WithOfferings(*reservedOffering("r-a", true, 1))),
+				fake.NewInstanceType("type-b", fake.WithOfferings(*reservedOffering("r-b", true, 0))),
+			}
+			ExpectApplied(ctx, env.Client, minValuesNodePool(v1.CapacityTypeReserved))
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+			results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+
+			Expect(results.NewNodeClaims).To(HaveLen(0))
+			Expect(results.PodErrors).To(HaveKey(pod))
+			Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
+		})
+	})
 })
