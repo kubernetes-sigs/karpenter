@@ -20,13 +20,14 @@ limitations under the License.
 // before Register runs keeps the stale key. Bound vars carry a "// +labels:bound" marker in their doc comment,
 // exported as an analysis fact so that other packages see it. The analyzer reports:
 //
-//   - reads of a marked var in package-level var initializers and init() bodies, which run before main;
+//   - reads of, and writes to, a marked var in package-level var initializers and init() bodies, which run before
+//     main;
 //   - entries written to a labels.Option's Binds that aren't &X of a marked var, in a Binds field of an Option
 //     literal, in a slice literal assigned to opt.Binds, and in the appended values of append(opt.Binds, ...).
 //
 // Limitations: function literals are checked only when they are called where they are declared, and calls to named
 // functions that read a marked var aren't followed. Binds values that aren't slice literals (a variable, or
-// append(opt.Binds, other...)) aren't checked. Assigning to a marked var in init() isn't a read and isn't reported.
+// append(opt.Binds, other...)) aren't checked.
 // Ginkgo container bodies (Describe, Context, DescribeTable and Entry arguments) run while the spec tree is built,
 // before a BeforeEach registers labels, so a read of a marked var there sees the key before Register too; the
 // analyzer can't tell those closures apart from ones that run later and doesn't report them.
@@ -136,8 +137,8 @@ func referencedVar(pass *analysis.Pass, e ast.Expr) *types.Var {
 	return nil
 }
 
-// checkReads reports reads of marked vars in code that runs before main. Taking a marked var's address and
-// assigning to it aren't reads.
+// checkReads reports reads of and writes to marked vars in code that runs before main. Taking a marked var's address
+// isn't reported.
 func checkReads(pass *analysis.Pass, root ast.Node, where string) {
 	invoked := map[*ast.FuncLit]bool{}
 	var visit func(ast.Node) bool
@@ -158,7 +159,9 @@ func checkReads(pass *analysis.Pass, root ast.Node, where string) {
 				return true
 			}
 			for _, lhs := range n.Lhs {
-				if !isBound(pass, referencedVar(pass, lhs)) {
+				if v := referencedVar(pass, lhs); isBound(pass, v) {
+					pass.Reportf(lhs.Pos(), "%s is bound by labels.Register; writing it in %s bypasses labels.Register", v.Name(), where)
+				} else {
 					ast.Inspect(lhs, visit)
 				}
 			}

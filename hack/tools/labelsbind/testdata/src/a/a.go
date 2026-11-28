@@ -37,10 +37,10 @@ var (
 var reserved = map[string]bool{}
 
 func init() {
-	reserved[Marked] = true // want `Marked is bound by labels.Register; reading it in init\(\) sees the key before Register runs`
-	Other = "a.example.com/overwritten"
-	Other += "-suffix"         // want `Other is bound by labels.Register; reading it in init\(\)`
-	go func() { _ = Marked }() // want `Marked is bound by labels.Register; reading it in init\(\)`
+	reserved[Marked] = true             // want `Marked is bound by labels.Register; reading it in init\(\) sees the key before Register runs`
+	Other = "a.example.com/overwritten" // want `Other is bound by labels.Register; writing it in init\(\) bypasses labels.Register`
+	Other += "-suffix"                  // want `Other is bound by labels.Register; reading it in init\(\)`
+	go func() { _ = Marked }()          // want `Marked is bound by labels.Register; reading it in init\(\)`
 	register(func() string { return Marked })
 	reserved[Unmarked] = true
 }
