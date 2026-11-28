@@ -30,6 +30,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -193,6 +194,7 @@ func benchmarkInstanceTypes(n int) (cloudprovider.InstanceTypes, scheduling.Requ
 }
 
 func BenchmarkOrderByPrice(b *testing.B) {
+	labelstest.Register(b, v1.LabelOptions()...)
 	for _, n := range []int{60, 400, 800} {
 		b.Run(fmt.Sprintf("instanceTypes=%d", n), func(b *testing.B) {
 			its, reqs := benchmarkInstanceTypes(n)

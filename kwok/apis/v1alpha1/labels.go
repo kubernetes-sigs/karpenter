@@ -18,10 +18,13 @@ package v1alpha1
 
 import (
 	"sigs.k8s.io/karpenter/kwok/apis"
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 )
 
 const (
+	// NodeClassLabelKey is the label Karpenter sets to a node's KWOKNodeClass.
+	NodeClassLabelKey = apis.Group + "/kwoknodeclass"
+
 	// Labels that can be selected on and are propagated to the node
 	InstanceSizeLabelKey   = apis.Group + "/instance-size"
 	InstanceFamilyLabelKey = apis.Group + "/instance-family"
@@ -38,12 +41,15 @@ const (
 	LaunchPriceAnnotationKey = apis.Group + "/launch-price"
 )
 
-func init() {
-	v1.RestrictedLabelDomains = v1.RestrictedLabelDomains.Insert(apis.Group)
-	v1.WellKnownLabels = v1.WellKnownLabels.Insert(
-		InstanceSizeLabelKey,
-		InstanceFamilyLabelKey,
-		InstanceCPULabelKey,
-		InstanceMemoryLabelKey,
-	)
+// LabelOptions returns kwok's own label options: its restricted domain, its NodeClass label and its instance type
+// labels. The kwok binary registers them after core's; other kwok-based providers can reuse them.
+func LabelOptions() []labels.Option {
+	return []labels.Option{
+		{Domain: apis.Group},
+		{Key: NodeClassLabelKey, DenyOn: []labels.Resource{labels.NodePool}},
+		{Key: InstanceSizeLabelKey},
+		{Key: InstanceFamilyLabelKey},
+		{Key: InstanceCPULabelKey},
+		{Key: InstanceMemoryLabelKey},
+	}
 }

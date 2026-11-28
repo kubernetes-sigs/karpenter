@@ -27,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"sigs.k8s.io/karpenter/pkg/labels"
 )
 
 var (
@@ -102,27 +104,25 @@ func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}
 	return errs
 }
 
-// This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
-// When this function is called, the nodepool's requirements do not include the requirements from labels.
-// NodeClaim requirements only support well known labels.
+// validateRequirements is used by NodePool runtime validation to verify the NodePool template's requirements, which
+// don't include the requirements from the template's labels.
 func (in *NodeClaimTemplateSpec) validateRequirements(ctx context.Context) (errs error) {
 	for _, requirement := range in.Requirements {
-		if err := ValidateRequirement(ctx, requirement); err != nil {
+		if err := ValidateRequirement(ctx, requirement, labels.NodePool); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in requirements, restricted", err))
 		}
 	}
 	return errs
 }
 
-func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error {
+// ValidateRequirement validates a requirement on resource r, after normalizing its key.
+func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues, r labels.Resource) error {
 	var errs error
-	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
-		requirement.Key = normalized
-	}
+	requirement.Key, _ = labels.Normalize(requirement.Key)
 	if !SupportedNodeSelectorOps.Has(string(requirement.Operator)) {
 		errs = multierr.Append(errs, fmt.Errorf("key %s has an unsupported operator %s not in %s", requirement.Key, requirement.Operator, SupportedNodeSelectorOps.UnsortedList()))
 	}
-	if e := IsRestrictedLabel(requirement.Key); e != nil {
+	if e := labels.Validate(requirement.Key, r); e != nil {
 		errs = multierr.Append(errs, e)
 	}
 	// Validate that at least one value is valid for well-known labels with known values
@@ -166,13 +166,8 @@ func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequiremen
 // It logs if invalid values are found but valid values can be used.
 func validateWellKnownValues(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error {
 	// If the key doesn't have well-known values or the operator is not In, nothing to validate
-	if !WellKnownLabels.Has(requirement.Key) || requirement.Operator != v1.NodeSelectorOpIn {
-		return nil
-	}
-
-	// If the key doesn't have well-known values defined, nothing to validate
-	knownValues, exists := WellKnownValuesForRequirements[requirement.Key]
-	if !exists {
+	knownValues, exists := labels.KnownValues(requirement.Key)
+	if !exists || requirement.Operator != v1.NodeSelectorOpIn {
 		return nil
 	}
 

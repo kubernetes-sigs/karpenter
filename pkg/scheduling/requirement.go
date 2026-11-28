@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 )
 
 //go:generate go tool -modfile=../../go.tools.mod controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
@@ -53,17 +54,7 @@ func NewRequirementWithFlexibility(
 	minValues *int,
 	values ...string,
 ) *Requirement {
-	if normalized, ok := v1.NormalizedLabels[key]; ok {
-		key = normalized
-	}
-	// Apply value normalization if registered for this (already-normalized) key.
-	if valueMap, ok := v1.NormalizedLabelValues[key]; ok && len(valueMap) > 0 {
-		for i, val := range values {
-			if mapped, exists := valueMap[val]; exists {
-				values[i] = mapped
-			}
-		}
-	}
+	key, values = labels.Normalize(key, values...)
 
 	// This is a super-common case, so optimize for it an inline everything.
 	if operator == corev1.NodeSelectorOpIn {

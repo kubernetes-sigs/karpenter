@@ -30,6 +30,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 )
 
@@ -94,6 +95,7 @@ func heapInUse() float64 {
 // BenchmarkClusterCostRetained reports the heap the cost tracker keeps after tracking every NodeClaim and one pricing
 // refresh per NodePool.
 func BenchmarkClusterCostRetained(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	for _, tc := range []struct{ nodeClaims, instanceTypes int }{{1, 1}, {40, 4}, {40, 40}} {
 		b.Run(fmt.Sprintf("nodepools=25/nodeclaims=%d/instancetypes=%d", tc.nodeClaims, tc.instanceTypes), func(b *testing.B) {
 			ctx := context.Background()
@@ -118,6 +120,7 @@ func BenchmarkClusterCostRetained(b *testing.B) {
 
 // BenchmarkClusterCostUpdateOfferings measures a pricing refresh of every NodePool.
 func BenchmarkClusterCostUpdateOfferings(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	ctx := context.Background()
 	bm := newCostBenchmark(25, 40, 40)
 	provider := fake.NewCloudProvider()

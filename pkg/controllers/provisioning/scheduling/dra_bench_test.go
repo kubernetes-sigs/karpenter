@@ -32,6 +32,9 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 )
@@ -49,8 +52,7 @@ const (
 // per-instance-type set availability is computed inside the measured Allocate, as in the first Allocate of a
 // scheduling loop.
 func BenchmarkDRAAllocate(b *testing.B) {
-	v1.WellKnownLabels.Insert(benchGPUModeKey, benchNICModeKey)
-	b.Cleanup(func() { v1.WellKnownLabels.Delete(benchGPUModeKey, benchNICModeKey) })
+	labelstest.Register(b, labelstest.With(fake.LabelOptions(), labels.Option{Key: benchGPUModeKey}, labels.Option{Key: benchNICModeKey})...)
 	for _, cold := range []bool{false, true} {
 		for _, scoped := range []bool{false, true} {
 			for _, n := range []int{100, 200, 400, 800} {

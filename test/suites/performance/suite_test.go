@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
@@ -38,7 +39,7 @@ var env *common.Environment
 func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
-		env = common.NewEnvironment(t)
+		env = common.NewEnvironment(t, kwok.LabelOptions(""))
 		env.CleanupBeforeSuite()
 	})
 	AfterSuite(func() {

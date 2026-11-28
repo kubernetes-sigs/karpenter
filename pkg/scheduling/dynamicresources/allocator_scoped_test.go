@@ -30,8 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -117,8 +119,7 @@ var _ = Describe("Requirement-scoped template sets", func() {
 	var alloc *dynamicresources.Allocator
 
 	BeforeEach(func() {
-		v1.WellKnownLabels.Insert(gpuModeKey, nicModeKey)
-		DeferCleanup(func() { v1.WellKnownLabels.Delete(gpuModeKey, nicModeKey) })
+		labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: gpuModeKey}, labels.Option{Key: nicModeKey})...)
 		ExpectApplied(ctx, env.Client,
 			&resourcev1.DeviceClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "gpu"},

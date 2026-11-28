@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	drav1alpha1 "sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
+	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/debug"
@@ -41,7 +42,7 @@ var env *common.Environment
 func TestDRA(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
-		env = common.NewEnvironment(t)
+		env = common.NewEnvironment(t, kwok.LabelOptions(""))
 		// Register DRAConfig CRD scheme
 		utilruntime.Must(drav1alpha1.AddToScheme(env.Client.Scheme()))
 		// Register ResourceSlice scheme (for cleanup)

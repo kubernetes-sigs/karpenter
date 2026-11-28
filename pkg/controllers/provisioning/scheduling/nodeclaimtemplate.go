@@ -29,6 +29,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -94,16 +95,16 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 // resolveCustomLabelsFromRequirements resolves the concrete values for user-defined labels from a NodeClaimTemplate's
 // requirements.
 func (i *NodeClaimTemplate) resolveCustomLabelsFromRequirements() map[string]string {
-	labels := map[string]string{}
+	custom := map[string]string{}
 	for key, requirement := range i.Requirements {
-		if v1.WellKnownLabels.Has(key) || v1.RestrictedLabels.Has(key) || schedulingSimulationKeys.Has(key) {
+		if labels.IsWellKnown(key) || labels.IsRestricted(key) || schedulingSimulationKeys.Has(key) {
 			continue
 		}
 		if value := requirement.Any(); value != "" {
-			labels[key] = value
+			custom[key] = value
 		}
 	}
-	return labels
+	return custom
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {

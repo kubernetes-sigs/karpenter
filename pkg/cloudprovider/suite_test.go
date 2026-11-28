@@ -25,13 +25,19 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
 func TestCloudProvider(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "CloudProvider Suite")
 }
+
+var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), karpv1.LabelOptions()...)
+})
 
 var _ = Describe("CloudProvider", func() {
 	It("should support unwrapping for NodeClaimNotFound", func() {

@@ -46,6 +46,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -93,6 +95,7 @@ func TestScheduling(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	labelstest.Register(GinkgoTB(), fake.LabelOptions()...)
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
@@ -427,9 +430,22 @@ var _ = Context("Scheduling", func() {
 			})
 		})
 		Context("Constraints Validation", func() {
+			It("should validate pod node selectors against the keys denied on pods", func() {
+				// Both keys are well-known, so they may be undefined on the instance types; only the pod deny differs.
+				labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(),
+					labels.Option{Key: "example.com/denied-on-pod", DenyOn: []labels.Resource{labels.Pod}},
+					labels.Option{Key: "example.com/denied-on-nodepool", DenyOn: []labels.Resource{labels.NodePool}},
+				)...)
+				ExpectApplied(ctx, env.Client, nodePool)
+				denied := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{"example.com/denied-on-pod": "test"}})
+				allowed := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{"example.com/denied-on-nodepool": "test"}})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, denied, allowed)
+				ExpectNotScheduled(ctx, env.Client, denied)
+				ExpectScheduled(ctx, env.Client, allowed)
+			})
 			It("should not schedule pods that have node selectors with restricted labels", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for label := range v1.RestrictedLabels {
+				for _, label := range labels.Denied(labels.Pod) {
 					pod := test.UnschedulablePod(
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -445,7 +461,7 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should not schedule pods that have node selectors with restricted domains", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1.RestrictedLabelDomains {
+				for _, domain := range labels.Domains() {
 					pod := test.UnschedulablePod(
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -885,7 +901,7 @@ var _ = Context("Scheduling", func() {
 		Context("Constraints Validation", func() {
 			It("should not schedule pods that have node selectors with restricted labels", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for label := range v1.RestrictedLabels {
+				for _, label := range labels.Denied(labels.Pod) {
 					pod := test.UnschedulablePod(
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -896,7 +912,7 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should not schedule pods that have node selectors with restricted domains", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1.RestrictedLabelDomains {
+				for _, domain := range labels.Domains() {
 					pod := test.UnschedulablePod(
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},

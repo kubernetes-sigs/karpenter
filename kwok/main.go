@@ -17,23 +17,30 @@ limitations under the License.
 package main
 
 import (
+	"os"
+
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
+	kwokoptions "sigs.k8s.io/karpenter/kwok/options"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
 func main() {
+	// The instance types file is read before Register, for its offering keys, and again below; both use this path.
+	kwokOptions := kwokoptions.FromArgs(os.Args[1:])
+	lo.Must0(labels.Register(kwok.LabelOptions(kwokOptions.InstanceTypesFilePath)...))
 	lo.Must0(cloudprovider.SetCapacityTypeClassResolver(kwok.CapacityTypes))
 	cloudprovider.SetNodeClaimPriceProvider(kwok.NodeClaimPriceProvider{})
 	ctx, op := operator.NewOperator()
-	instanceTypes, err := kwok.ConstructInstanceTypes(ctx)
+	instanceTypes, err := kwok.ConstructInstanceTypes(kwokoptions.ToContext(ctx, kwokOptions))
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}

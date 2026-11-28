@@ -130,8 +130,8 @@ spec:
                         pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(\/))?([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
                         x-kubernetes-validations:
                           - message: label domain "karpenter.sh" is restricted
-                            rule: self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
-                          - message: label "kubernetes.io/hostname" is restricted
+                            rule: '!self.contains("/") || self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !(self.find("^([^/]+)") == "karpenter.sh" || self.find("^([^/]+)").endsWith(".karpenter.sh"))'
+                          - message: label "kubernetes.io/hostname" is restricted on NodeClaim
                             rule: self != "kubernetes.io/hostname"
                       minValues:
                         description: |-

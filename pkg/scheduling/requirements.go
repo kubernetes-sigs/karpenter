@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 )
 
 // Requirements are an efficient set representation under the hood. Since its underlying
@@ -171,7 +172,7 @@ type CompatibilityOptions struct {
 }
 
 var AllowUndefinedWellKnownLabels = func(options *CompatibilityOptions) {
-	options.AllowUndefined = v1.WellKnownLabels
+	options.AllowUndefined = labels.WellKnown()
 }
 
 func (r Requirements) IsCompatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) bool {
@@ -289,7 +290,7 @@ func (r Requirements) String() string {
 
 	for _, requirement := range r {
 		// Skip restricted labels
-		if v1.RestrictedLabels.Has(requirement.Key) {
+		if labels.IsRestricted(requirement.Key) {
 			continue
 		}
 

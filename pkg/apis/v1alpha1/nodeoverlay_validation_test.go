@@ -30,6 +30,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	. "sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -138,8 +140,18 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 			}
 		})
+		It("should fail at runtime for a key denied on NodeOverlays, and only for it", func() {
+			labelstest.Register(GinkgoTB(), labelstest.With(v1.LabelOptions(),
+				labels.Option{Key: "example.com/denied-on-nodeoverlay", DenyOn: []labels.Resource{labels.NodeOverlay}},
+				labels.Option{Key: "example.com/denied-on-nodepool", DenyOn: []labels.Resource{labels.NodePool}},
+			)...)
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "example.com/denied-on-nodeoverlay", Operator: corev1.NodeSelectorOpExists}}
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(MatchError(ContainSubstring(`label "example.com/denied-on-nodeoverlay" is restricted on NodeOverlay`)))
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "example.com/denied-on-nodepool", Operator: corev1.NodeSelectorOpExists}}
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
+		})
 		It("should fail for restricted domains", func() {
-			for label := range v1.RestrictedLabelDomains {
+			for _, label := range labels.Domains() {
 				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: label + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -174,7 +186,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should allow well known label exceptions", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
 			// Capacity Type is runtime validated
-			for label := range v1.WellKnownLabels.Difference(sets.New(v1.NodePoolLabelKey, v1.CapacityTypeLabelKey)) {
+			for label := range labels.WellKnown().Difference(sets.New(labels.Denied(labels.NodeOverlay)...)).Delete(v1.CapacityTypeLabelKey) {
 				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}

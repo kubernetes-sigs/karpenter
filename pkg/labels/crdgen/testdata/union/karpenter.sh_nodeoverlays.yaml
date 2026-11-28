@@ -1,0 +1,45 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nodeoverlays.karpenter.sh
+spec:
+  group: karpenter.sh
+  names:
+    kind: NodeOverlay
+    listKind: NodeOverlayList
+    plural: nodeoverlays
+    singular: nodeoverlay
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                requirements:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        maxLength: 316
+                        x-kubernetes-validations:
+                          - message: label domain "eks.example.com" is restricted
+                            rule: '!self.contains("/") || self in ["eks.example.com/nodeclass", "eks.example.com/zone-id"] || !(self.find("^([^/]+)") == "eks.example.com" || self.find("^([^/]+)").endsWith(".eks.example.com"))'
+                          - message: label domain "oss.example.com" is restricted
+                            rule: '!self.contains("/") || self in ["oss.example.com/nodeclass", "oss.example.com/zone-id"] || !(self.find("^([^/]+)") == "oss.example.com" || self.find("^([^/]+)").endsWith(".oss.example.com"))'
+                          - message: label "example.com/denied-by-both" is restricted on NodeOverlay
+                            rule: self != "example.com/denied-by-both"
+                      operator:
+                        type: string
+                    required:
+                      - key
+                      - operator
+      served: true
+      storage: true

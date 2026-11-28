@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -50,6 +51,25 @@ func (o *Options) Parse(fs *options.FlagSet, args ...string) error {
 		return fmt.Errorf("parsing flags, %w", err)
 	}
 	return nil
+}
+
+// FromArgs returns the options set by args and the environment, ignoring every flag that isn't one of these options,
+// so that the kwok binary can read them before the operator parses its flags.
+func FromArgs(args []string) *Options {
+	o := &Options{}
+	fs := &options.FlagSet{FlagSet: flag.NewFlagSet("kwok", flag.ContinueOnError)}
+	fs.SetOutput(io.Discard)
+	o.AddFlags(fs)
+	for len(args) > 0 {
+		// Parse stops at an unknown flag, which it usually consumes, or before a non-flag argument, such as an unknown
+		// flag's value. Skip the argument it stopped at if it didn't consume one, and resume after it.
+		before := len(args)
+		_ = fs.Parse(args)
+		if args = fs.Args(); len(args) == before {
+			args = args[1:]
+		}
+	}
+	return o
 }
 
 func (o *Options) ToContext(ctx context.Context) context.Context {

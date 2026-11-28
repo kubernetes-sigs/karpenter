@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -112,6 +113,7 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile
 func TestSchedulingProfile(t *testing.T) { //nolint:karpenterlint // profiling harness run with -run=SchedulingProfile, not a spec
+	labelstest.Register(t, fake.LabelOptions()...)
 	tw := tabwriter.NewWriter(os.Stdout, 8, 8, 2, ' ', 0)
 
 	cpuf, err := os.Create("schedule.cpuprofile")
@@ -160,6 +162,7 @@ func TestSchedulingProfile(t *testing.T) { //nolint:karpenterlint // profiling h
 }
 
 func benchmarkScheduler(b *testing.B, pods []*corev1.Pod, opts ...scheduling.Options) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
 	scheduler, err := setupScheduler(ctx, pods, append(opts, scheduling.NumConcurrentReconciles(5))...)
 	if err != nil {

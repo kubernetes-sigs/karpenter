@@ -46,6 +46,7 @@ import (
 
 	kwokcloudprovider "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:staticcheck
@@ -87,7 +88,13 @@ type Environment struct {
 	knownFlakes        []knownFlake
 }
 
-func NewEnvironment(t *testing.T) *Environment {
+// NewEnvironment registers labelOptions, the label options of the Karpenter controller under test, and connects to the
+// cluster. Expectations that simulate scheduling read the label registry, so it is registered once per test process.
+// It sets up only the label registry, not a capacity type resolver.
+func NewEnvironment(t *testing.T, labelOptions []labels.Option) *Environment {
+	if err := labels.Register(labelOptions...); err != nil {
+		t.Fatalf("registering label options: %v", err)
+	}
 	ctx := TestContextWithLogger(t)
 	ctx, cancel := context.WithCancel(ctx)
 	config := NewConfig()

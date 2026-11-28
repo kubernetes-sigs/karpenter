@@ -115,7 +115,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 test: ## Run tests
-	go test ./pkg/... ./kwok/... \
+	go test ./pkg/... ./kwok/... ./hack/tools/labelsbind/... \
 		-race \
 		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
@@ -185,14 +185,17 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	hack/validation/requirements.sh
 	hack/validation/labels.sh
 	hack/validation/status.sh
-	cp -r pkg/apis/crds kwok/charts
-	hack/kwok/requirements.sh
 	hack/dependabot.sh
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
+	@# crdgen builds against pkg/scheduling, so it runs after the deepcopy fix above.
+	go run ./hack/crdgen --base pkg/apis/crds --out pkg/apis/crds
+	cp -r pkg/apis/crds kwok/charts
+	go run ./kwok/tools/crdgen --base kwok/charts/crds --out kwok/charts/crds
 	go tool -modfile=go.tools.mod nwa config -c add
 	go vet ./...
+	go run ./hack/tools/labelsbind/cmd/labelsbind ./...
 	go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
 	cd kwok/charts && go tool -modfile=../../go.tools.mod helm-docs
 	@git diff --quiet ||\

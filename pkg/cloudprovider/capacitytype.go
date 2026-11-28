@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -84,18 +85,25 @@ type capacityTypeClassState struct {
 
 var capacityTypeClasses atomic.Pointer[capacityTypeClassState]
 
-// init registers the built-in capacity types, so a provider that never sets a resolver has exactly those.
-func init() {
-	lo.Must0(SetCapacityTypeClassResolver(DefaultCapacityTypeClasses))
+// SetCapacityTypeClassResolver registers the capacity types a cloud provider supports and their classes. It must be
+// called at startup, after labels.Register and before controllers run. The built-in capacity types must keep their own
+// class, every additional capacity type must resolve to the on-demand class, and the resolver's capacity types must be
+// the karpenter.sh/capacity-type known values registered with labels.Register. A nil resolver, like never setting
+// one, selects DefaultCapacityTypeClasses, which is checked against the known values when first used.
+func SetCapacityTypeClassResolver(resolver CapacityTypeClassResolver) error {
+	if resolver == nil {
+		capacityTypeClasses.Store(nil)
+		return nil
+	}
+	state, err := newCapacityTypeClassState(resolver)
+	if err != nil {
+		return err
+	}
+	capacityTypeClasses.Store(state)
+	return nil
 }
 
-// SetCapacityTypeClassResolver registers the capacity types a cloud provider supports and their classes. It must be
-// called at startup, before controllers run. The built-in capacity types must keep their own class, and every
-// additional capacity type must resolve to the on-demand class.
-//
-// It also replaces the valid karpenter.sh/capacity-type requirement values in v1.WellKnownValuesForRequirements with
-// the resolver's capacity types, so NodePools and pods may require them.
-func SetCapacityTypeClassResolver(resolver CapacityTypeClassResolver) error {
+func newCapacityTypeClassState(resolver CapacityTypeClassResolver) (*capacityTypeClassState, error) {
 	state := &capacityTypeClassState{
 		resolver:     resolver,
 		byClass:      map[CapacityTypeClass][]string{},
@@ -103,40 +111,53 @@ func SetCapacityTypeClassResolver(resolver CapacityTypeClassResolver) error {
 	}
 	for capacityType, class := range DefaultCapacityTypeClasses {
 		if got, ok := resolver.Class(capacityType); !ok || got != class {
-			return fmt.Errorf("capacity type %q must resolve to class %q", capacityType, class)
+			return nil, fmt.Errorf("capacity type %q must resolve to class %q", capacityType, class)
 		}
 	}
 	for _, capacityType := range resolver.CapacityTypes() {
 		class, ok := resolver.Class(capacityType)
 		if !ok {
-			return fmt.Errorf("capacity type %q has no class", capacityType)
+			return nil, fmt.Errorf("capacity type %q has no class", capacityType)
 		}
 		if _, builtIn := DefaultCapacityTypeClasses[capacityType]; !builtIn && class != CapacityTypeClassOnDemand {
-			return fmt.Errorf("capacity type %q must resolve to class %q, got %q", capacityType, CapacityTypeClassOnDemand, class)
+			return nil, fmt.Errorf("capacity type %q must resolve to class %q, got %q", capacityType, CapacityTypeClassOnDemand, class)
 		}
 		state.byClass[class] = append(state.byClass[class], capacityType)
+	}
+	if known, _ := labels.KnownValues(v1.CapacityTypeLabelKey); !known.Equal(sets.New(resolver.CapacityTypes()...)) {
+		return nil, fmt.Errorf("capacity types %v must be the registered %s known values %v", resolver.CapacityTypes(), v1.CapacityTypeLabelKey, sets.List(known))
 	}
 	for class, capacityTypes := range state.byClass {
 		state.requirements[class] = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
 	}
-	v1.WellKnownValuesForRequirements[v1.CapacityTypeLabelKey] = sets.New(resolver.CapacityTypes()...)
-	capacityTypeClasses.Store(state)
-	return nil
+	return state, nil
+}
+
+// currentCapacityTypeClasses returns the registered resolver's state, or DefaultCapacityTypeClasses' if none is set.
+// The default state is built on first use rather than at init, since it reads the label registry, and panics if the
+// registered known values aren't the built-in capacity types. The default is checked against the registry once, on
+// first use, and not again if the registry changes.
+func currentCapacityTypeClasses() *capacityTypeClassState {
+	if state := capacityTypeClasses.Load(); state != nil {
+		return state
+	}
+	capacityTypeClasses.CompareAndSwap(nil, lo.Must(newCapacityTypeClassState(DefaultCapacityTypeClasses)))
+	return capacityTypeClasses.Load()
 }
 
 // CapacityTypeClassOf returns the class of a capacity type, and false if the capacity type isn't registered.
 func CapacityTypeClassOf(capacityType string) (CapacityTypeClass, bool) {
-	return capacityTypeClasses.Load().resolver.Class(capacityType)
+	return currentCapacityTypeClasses().resolver.Class(capacityType)
 }
 
 // CapacityTypesOf returns the registered capacity types of a class.
 func CapacityTypesOf(class CapacityTypeClass) []string {
-	return capacityTypeClasses.Load().byClass[class]
+	return currentCapacityTypeClasses().byClass[class]
 }
 
 // CapacityTypeClassRequirements returns a capacity type requirement allowing every registered capacity type of a class.
 func CapacityTypeClassRequirements(class CapacityTypeClass) scheduling.Requirements {
-	if reqs, ok := capacityTypeClasses.Load().requirements[class]; ok {
+	if reqs, ok := currentCapacityTypeClasses().requirements[class]; ok {
 		return reqs
 	}
 	return scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpDoesNotExist))

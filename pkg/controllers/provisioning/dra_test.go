@@ -32,6 +32,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -1355,8 +1357,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 		}
 
 		BeforeEach(func() {
-			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey, fake.DriverModeNICLabelKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: fake.DriverModeGPULabelKey}, labels.Option{Key: fake.DriverModeNICLabelKey})...)
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.DriverModeInstanceType("mode-it", 2, nil)}
 			ExpectApplied(ctx, env.Client, test.DeviceClassWithSelector("gpu", gpuDriver), test.DeviceClassWithSelector("nic", nicDriver))
 		})
@@ -1674,8 +1675,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 		}
 
 		BeforeEach(func() {
-			v1.WellKnownLabels.Insert(fake.DriverModeGPULabelKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(fake.DriverModeGPULabelKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Key: fake.DriverModeGPULabelKey})...)
 			ExpectApplied(ctx, env.Client, test.DeviceClassWithSelector("gpu", gpuDriver))
 		})
 

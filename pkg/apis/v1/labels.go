@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
@@ -205,24 +206,6 @@ const (
 )
 
 var (
-	// RestrictedLabelDomains are reserved by karpenter.
-	RestrictedLabelDomains = sets.New(
-		apis.Group,
-	)
-
-	// WellKnownLabels are labels that Karpenter is aware of and can be used to
-	// further narrow down the range of the corresponding values by either nodepool or pods.
-	WellKnownLabels = sets.New(
-		NodePoolLabelKey,
-		v1.LabelTopologyZone,
-		v1.LabelTopologyRegion,
-		v1.LabelInstanceTypeStable,
-		v1.LabelArchStable,
-		v1.LabelOSStable,
-		CapacityTypeLabelKey,
-		v1.LabelWindowsBuild,
-	)
-
 	// WellKnownResources are resources that are expected from the instance types
 	// provided by cloud providers.
 	WellKnownResources = sets.New[v1.ResourceName](
@@ -231,78 +214,23 @@ var (
 		v1.ResourceEphemeralStorage,
 		v1.ResourcePods,
 	)
-
-	// WellKnownValuesForRequirements are for requirements where a known set of values
-	// is expected to be used for that requirement. For example, in the AWS provider,
-	// only on-demand, spot, and reserved make sense as values for the capacity type requirement
-	WellKnownValuesForRequirements = map[string]sets.Set[string]{
-		CapacityTypeLabelKey: sets.New(
-			CapacityTypeOnDemand,
-			CapacityTypeSpot,
-			CapacityTypeReserved,
-		),
-	}
-
-	// WellKnownLabelsForOfferings are for requirements where a known labels that will be used in the
-	// offerings passed back by the provider
-	WellKnownLabelsForOfferings = sets.New(
-		v1.LabelTopologyZone,
-		CapacityTypeLabelKey,
-	)
-
-	// RestrictedLabels are labels that should not be used
-	// because they may interfere with the internal provisioning logic.
-	RestrictedLabels = sets.New(
-		v1.LabelHostname,
-	)
-
-	// NormalizedLabels translate aliased concepts into the controller's
-	// WellKnownLabels. Pod requirements are translated for compatibility.
-	NormalizedLabels = map[string]string{
-		v1.LabelFailureDomainBetaZone:   v1.LabelTopologyZone,
-		"beta.kubernetes.io/arch":       v1.LabelArchStable,
-		"beta.kubernetes.io/os":         v1.LabelOSStable,
-		v1.LabelInstanceType:            v1.LabelInstanceTypeStable,
-		v1.LabelFailureDomainBetaRegion: v1.LabelTopologyRegion,
-	}
-
-	// NormalizedLabelValues translates label values when a label key is normalized
-	// via NormalizedLabels. The map key is the normalized (target) label key, and
-	// the value is a map from original values to their normalized equivalents.
-	// For example, a CSI driver may use "" for non-zonal topology while the cloud
-	// provider uses "0" — this mapping bridges that gap.
-	NormalizedLabelValues = map[string]map[string]string{}
 )
 
-// IsRestrictedLabel returns an error if the label is restricted.
-func IsRestrictedLabel(key string) error {
-	if WellKnownLabels.Has(key) {
-		return nil
+// LabelOptions returns core's label policy as a fresh list. Providers append their own options, and may edit
+// these, before passing the list to labels.Register.
+func LabelOptions() []labels.Option {
+	return []labels.Option{
+		{Domain: apis.Group},
+		{Key: NodePoolLabelKey, DenyOn: []labels.Resource{labels.NodePool}},
+		{Key: CapacityTypeLabelKey, KnownValues: []string{CapacityTypeOnDemand, CapacityTypeSpot, CapacityTypeReserved}},
+		{Key: v1.LabelTopologyZone, Aliases: []string{v1.LabelFailureDomainBetaZone}},
+		{Key: v1.LabelTopologyRegion, Aliases: []string{v1.LabelFailureDomainBetaRegion}},
+		{Key: v1.LabelInstanceTypeStable, Aliases: []string{v1.LabelInstanceType}},
+		{Key: v1.LabelArchStable, Aliases: []string{"beta.kubernetes.io/arch"}},
+		{Key: v1.LabelOSStable, Aliases: []string{"beta.kubernetes.io/os"}},
+		{Key: v1.LabelWindowsBuild},
+		{Key: v1.LabelHostname, DenyOn: labels.All()},
 	}
-	labelDomain := GetLabelDomain(key)
-	for restrictedLabelDomain := range RestrictedLabelDomains {
-		if labelDomain == restrictedLabelDomain || strings.HasSuffix(labelDomain, "."+restrictedLabelDomain) {
-			return fmt.Errorf("using label %s is not allowed as it might interfere with the internal provisioning logic; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
-		}
-	}
-
-	if RestrictedLabels.Has(key) {
-		return fmt.Errorf("using label %s is not allowed as it might interfere with the internal provisioning logic; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
-	}
-	return nil
-}
-
-// HasKnownValues returns an error if the requirement has well known values and is only presented with unknown values.
-//
-// Deprecated: unused by Karpenter and will be removed in v1.18.
-func HasKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
-	if !WellKnownLabels.Has(requirement.Key) {
-		return nil
-	}
-	if !WellKnownValuesForRequirements[requirement.Key].HasAny(requirement.Values...) {
-		return fmt.Errorf("invalid values: %v for key: %s, expected one of: %v", requirement.Values, requirement.Key, WellKnownValuesForRequirements[requirement.Key].UnsortedList())
-	}
-	return nil
 }
 
 func GetLabelDomain(key string) string {

@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/labels"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -510,7 +511,7 @@ var _ = Describe("CEL/Validation", func() {
 			}
 		})
 		It("should fail for restricted domains", func() {
-			for label := range RestrictedLabelDomains {
+			for _, label := range labels.Domains() {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -519,13 +520,19 @@ var _ = Describe("CEL/Validation", func() {
 			}
 		})
 		It("should fail for restricted labels", func() {
-			for label := range RestrictedLabels {
+			for _, label := range labels.Denied(labels.NodePool) {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
-					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+				message := fmt.Sprintf("label %q is restricted on NodePool", label)
+				Expect(env.Client.Create(ctx, nodePool)).To(MatchError(ContainSubstring(message)))
+				Expect(nodePool.RuntimeValidate(ctx)).To(MatchError(ContainSubstring(message)))
 			}
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{Key: "example.com/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should allow kubernetes domains", func() {
 			oldNodePool := nodePool.DeepCopy()
@@ -554,7 +561,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should allow well known label exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
 			// Capacity Type is runtime validated
-			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey, CapacityTypeLabelKey)) {
+			for label := range labels.WellKnown().Difference(sets.New(labels.Denied(labels.NodePool)...)).Delete(CapacityTypeLabelKey) {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -677,7 +684,7 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 		It("should fail for restricted label domains", func() {
-			for label := range RestrictedLabelDomains {
+			for _, label := range labels.Domains() {
 				nodePool.Spec.Template.Labels = map[string]string{label + "/unknown": randomdata.SillyName()}
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())

@@ -28,6 +28,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -240,8 +242,7 @@ var _ = Describe("DynamicResources", func() {
 	Describe("AvailableDynamicResources", func() {
 		BeforeEach(func() {
 			// Set keys must be well-known (see the DynamicResources conventions).
-			v1.WellKnownLabels.Insert(gpuModeKey, nicModeKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(gpuModeKey, nicModeKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(v1.LabelOptions(), labels.Option{Key: gpuModeKey}, labels.Option{Key: nicModeKey})...)
 		})
 		It("should include sets with an available compatible offering", func() {
 			it := modeInstanceType()
@@ -301,8 +302,7 @@ var _ = Describe("DynamicResources", func() {
 		}
 
 		BeforeEach(func() {
-			v1.WellKnownLabels.Insert(gpuModeKey, nicModeKey)
-			DeferCleanup(func() { v1.WellKnownLabels.Delete(gpuModeKey, nicModeKey) })
+			labelstest.Register(GinkgoTB(), labelstest.With(v1.LabelOptions(), labels.Option{Key: gpuModeKey}, labels.Option{Key: nicModeKey})...)
 		})
 
 		It("should namespace each set's template pools by the set's index", func() {

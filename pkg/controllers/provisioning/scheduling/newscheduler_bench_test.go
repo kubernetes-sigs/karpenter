@@ -21,9 +21,13 @@ package scheduling_test
 import (
 	"fmt"
 	"testing"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 )
 
 func BenchmarkNewScheduler(b *testing.B) {
+	labelstest.Register(b, fake.LabelOptions()...)
 	run := func(b *testing.B, s Scenario) {
 		f := buildScenario(b, s)
 		b.ReportAllocs()

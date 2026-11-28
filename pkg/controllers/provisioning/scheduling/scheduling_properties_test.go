@@ -23,6 +23,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/labels"
+	"sigs.k8s.io/karpenter/pkg/labels/labelstest"
 	"sigs.k8s.io/karpenter/pkg/test/schedulingproperties"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
@@ -33,12 +35,12 @@ var _ = Describe("Scheduling Properties", func() {
 		launcher := fake.NewCloudProvider()
 		launcher.InstanceTypes = fake.InstanceTypesAssorted()
 		nodeClass := object.GVK(&v1alpha1.TestNodeClass{}).GroupKind()
+		// Real providers restrict their own label domain, which also covers the NodeClass label that core stamps.
+		labelstest.Register(GinkgoTB(), labelstest.With(fake.LabelOptions(), labels.Option{Domain: nodeClass.Group})...)
 		cfg = schedulingproperties.Config{
 			CloudProvider: launcher,
 			InstanceTypes: launcher.InstanceTypes,
 			Launch:        launcher.Create,
-			// Real providers restrict their own label domain, which also covers the NodeClass label that core stamps.
-			RestrictedLabelDomains: []string{nodeClass.Group},
 			// Karpenter rejects pods selecting the NodeClass label when the provider restricts its domain, even though it
 			// stamps that label on every node. See #3422.
 			KnownDeviations: sets.New(v1.NodeClassLabelKey(nodeClass)),
